@@ -325,6 +325,16 @@
             -webkit-backdrop-filter: blur(4px);
         }
 
+        /*put blur in leaf tiles */
+        .leaflet-tile-pane {
+            filter: blur(0px);
+            transition: filter 0.3s ease-out;
+        }
+
+        .loading-overlay:not(.hidden) ~ .leaflet-tile-pane {
+            filter: blur(4px);
+        }
+
         .loading-overlay.hidden {
             opacity: 0;
             pointer-events: none;

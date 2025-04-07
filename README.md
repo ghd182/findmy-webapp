@@ -6,8 +6,18 @@
 
 A self-hosted, multi-user web application designed as an alternative to Apple's Find My service, focusing on tracking Apple devices (like AirTags, iPhones, MacBooks using `pyfindmy`) with a modern, responsive Material 3 interface.
 
-![Screenshot Placeholder](docs/screenshot-placeholder.png)
-*(Add screenshots of the app here)*
+![Map Tab](app/static/img/screenshot_map.png)
+![Devices Tap](app/static/img/screenshot_devices.png)
+![Device Options](app/static/img/screenshot_device.png)
+![Device Sharing](app/static/img/screenshot_share.png)
+![Shared Device](app/static/img/screenshot_shared.png)
+![Geofences Tab](app/static/img/screenshot_geofences.png)
+![Geofence Options](app/static/img/screenshot_geofence.png)
+![Notifications Tab](app/static/img/screenshot_notifications.png)
+![Drawer](app/static/img/screenshot_drawer.png)
+![Settings](app/static/img/screenshot_settings.png)
+![Custom Accents Color](app/static/img/screenshot_settings_color.png)
+![Dark Mode](app/static/img/screenshot_settings_dark.png)
 
 ## Overview
 

@@ -55,17 +55,87 @@
   ],
   "screenshots": [
     {
-      "src": "/static/img/screenshot1.png",
-      "sizes": "506x553",
+      "src": "/static/img/screenshot_map.png",
+      "sizes": "1000x2221",
       "type": "image/png",
-      "form_factor": "wide",
+      "form_factor": "narrow",
       "label": "Main Map View"
     },
     {
-      "src": "/static/img/screenshot2.png",
-      "sizes": "327x697",
+      "src": "/static/img/screenshot_devices.png",
+      "sizes": "1000x2221",
       "type": "image/png",
       "form_factor": "narrow",
+      "label": "Devices List"
+    },
+    {
+      "src": "/static/img/screenshot_device.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Device Options"
+    },
+    {
+      "src": "/static/img/screenshot_share.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Devices Sharing Settings"
+    },
+    {
+      "src": "/static/img/screenshot_shared.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Shared Device"
+    },
+    {
+      "src": "/static/img/screenshot_geofences.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Geofences List"
+    },
+    {
+      "src": "/static/img/screenshot_geofence.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Geofence Settings"
+    },
+    {
+      "src": "/static/img/screenshot_notifications.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Notifications Panel"
+    },
+    {
+      "src": "/static/img/screenshot_settings.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Settings"
+    },
+    {
+      "src": "/static/img/screenshot_settings_color.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Custom Color"
+    },
+    {
+      "src": "/static/img/screenshot_settings_dark.png",
+      "sizes": "1000x2221",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Dark Mode"
+    },
+    {
+      "src": "/static/img/screenshot_map_tablet.png",
+      "sizes": "2222x1400",
+      "type": "image/png",
+      "form_factor": "wide",
       "label": "Device List"
     }
   ]
