@@ -6,18 +6,20 @@
 
 A self-hosted, multi-user web application designed as an alternative to Apple's Find My service, focusing on tracking Apple devices (like AirTags, iPhones, MacBooks using `pyfindmy`) with a modern, responsive Material 3 interface.
 
-![Map Tab](app/static/img/screenshot_map.png)
-![Devices Tap](app/static/img/screenshot_devices.png)
-![Device Options](app/static/img/screenshot_device.png)
-![Device Sharing](app/static/img/screenshot_share.png)
-![Shared Device](app/static/img/screenshot_shared.png)
-![Geofences Tab](app/static/img/screenshot_geofences.png)
-![Geofence Options](app/static/img/screenshot_geofence.png)
-![Notifications Tab](app/static/img/screenshot_notifications.png)
-![Drawer](app/static/img/screenshot_drawer.png)
-![Settings](app/static/img/screenshot_settings.png)
-![Custom Accents Color](app/static/img/screenshot_settings_color.png)
-![Dark Mode](app/static/img/screenshot_settings_dark.png)
+<div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
+    <img src="app/static/img/screenshot_map.png" alt="Map Tab" width="250"/>
+    <img src="app/static/img/screenshot_devices.png" alt="Devices Tab" width="250"/>
+    <img src="app/static/img/screenshot_device.png" alt="Device Options" width="250"/>
+    <img src="app/static/img/screenshot_share.png" alt="Device Sharing" width="250"/>
+    <img src="app/static/img/screenshot_shared.png" alt="Shared Device" width="250"/>
+    <img src="app/static/img/screenshot_geofences.png" alt="Geofences Tab" width="250"/>
+    <img src="app/static/img/screenshot_geofence.png" alt="Geofence Options" width="250"/>
+    <img src="app/static/img/screenshot_notifications.png" alt="Notifications Tab" width="250"/>
+    <img src="app/static/img/screenshot_drawer.png" alt="Drawer" width="250"/>
+    <img src="app/static/img/screenshot_settings.png" alt="Settings" width="250"/>
+    <img src="app/static/img/screenshot_settings_color.png" alt="Custom Accents Color" width="250"/>
+    <img src="app/static/img/screenshot_settings_dark.png" alt="Dark Mode" width="250"/>
+</div>
 
 ## Overview
 
