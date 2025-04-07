@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>500 Internal Server Error</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+     <style>
+        body { display: flex; justify-content: center; align-items: center; min-height: 100vh; text-align: center; }
+        .message-card { max-width: 450px; width: 90%; padding: 32px; }
+        .message-icon { font-size: 48px; color: var(--m3-sys-color-error); margin-bottom: 16px; }
+         html.dark-theme .message-icon { color: var(--m3-sys-color-error); } /* Keep consistent */
+    </style>
+</head>
+<body class="error-page"> {# Add class if you want specific body styles #}
+    <div class="card message-card">
+        <span class="material-icons message-icon">error</span>
+        <h1 class="card-title">500 - Internal Server Error</h1>
+        <p>Sorry, something went wrong on our end. Please try again later.</p>
+        <div class="button-row" style="justify-content: center;">
+            <a href="{{ url_for('main.index_route') }}" class="button">Go Home</a>
+        </div>
+    </div>
+     <script>
+        (function(){const theme=localStorage.getItem('theme')||'system';if(theme==='dark'||(theme==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark-theme');}})();
+    </script>
+</body>
+</html>

@@ -1,0 +1,987 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find My Location</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}"> {# Flask-WTF CSRF Token #}
+    <link rel="stylesheet" id="leaflet-css" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Load CSS FIRST -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Preload Fonts (Optional but recommended) -->
+    <!-- <link rel="preload" href="https://fonts.gstatic.com/s/materialicons/v142/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2"
+        as="font" type="font/woff2" crossorigin="anonymous">
+    <link rel="preload"
+        href="https://fonts.gstatic.com/s/materialsymboloutlined/v189/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oFsI.woff2"
+        as="font" type="font/woff2" crossorigin="anonymous"> -->
+    <!-- Load Icons CSS Async -->
+    <link rel="stylesheet" id="material-icons-css" href="https://fonts.googleapis.com/icon?family=Material+Icons"
+        media="print" onload="this.media='all'" />
+    <link rel="stylesheet" id="material-symbols-css"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+        media="print" onload="this.media='all'" />
+    <noscript>
+        <link rel="stylesheet" href="{{ url_for('static', filename='styles/material-icons/material-icons.css') }}">
+        <link rel="stylesheet"
+            href="{{ url_for('static', filename='styles/material-symbols/material-symbols-outlined.css') }}">
+    </noscript>
+    <style>
+        /* --- Inline critical styles or CSS Var definitions if needed for FOUC prevention --- */
+        /* Example: Ensure loading class hides content initially */
+        body.app-loading .app-bar,
+        body.app-loading #main-content,
+        body.app-loading .bottom-nav {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        /* --- Add any other absolutely critical above-the-fold styles --- */
+    </style>
+    <!-- Manifest and Icons (served via Public blueprint) -->
+    <link rel="manifest" href="{{ url_for('public.manifest') }}">
+    <meta name="theme-color" content="#FCFCFF" id="meta-theme-color"> {# Default light surface from BLUE theme #}
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+    <link rel="icon" href="{{ url_for('public.favicon') }}" sizes="any">
+    <link rel="icon" href="{{ url_for('static', filename='icons/favicon.svg') }}" type="image/svg+xml">
+
+
+    <script>
+        (function () {
+            const DEFAULT_THEME_MODE = 'system'; const DEFAULT_COLOR = '#4285F4'; // Default Blue
+            let themeMode, userColor;
+            try { themeMode = localStorage.getItem('theme') || DEFAULT_THEME_MODE; userColor = localStorage.getItem('userColor') || DEFAULT_COLOR; }
+            catch (e) { themeMode = DEFAULT_THEME_MODE; userColor = DEFAULT_COLOR; }
+            let isDark = (themeMode === 'dark') || (themeMode === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+            document.documentElement.classList.add(isDark ? 'dark-theme' : 'light-theme'); // Apply to HTML
+            const metaColor = isDark ? '#1A1C1E' : '#FCFCFF'; // Dark/Light Background
+            let metaTag = document.getElementById('meta-theme-color');
+            if (!metaTag) { metaTag = document.createElement('meta'); metaTag.name = 'theme-color'; metaTag.id = 'meta-theme-color'; document.head.appendChild(metaTag); }
+            metaTag.setAttribute('content', metaColor);
+            // Temporary primary color (will be refined by AppTheme later)
+            if (/^#[0-9a-fA-F]{6}$/.test(userColor)) { document.documentElement.style.setProperty('--m3-sys-color-primary', userColor); }
+            else { document.documentElement.style.setProperty('--m3-sys-color-primary', DEFAULT_COLOR); }
+            console.log('[Early Theme] Applied:', isDark ? 'dark' : 'light', 'mode. Prelim color:', userColor);
+        })();
+    </script>
+    <!-- === End Early Theme Script === -->
+
+    <!-- Backend Config Injection (Keep as before) -->
+    <script>
+        window.VAPID_PUBLIC_KEY = '{{ VAPID_PUBLIC_KEY }}' || null;
+        window.LOW_BATTERY_THRESHOLD = parseInt('{{ LOW_BATTERY_THRESHOLD }}') || 15;
+        window.APP_VERSION = "{{ APP_VERSION }}";
+        window.DEFAULT_NOTIFICATION_ICON_URL = "{{ DEFAULT_NOTIFICATION_ICON_URL or '/static/icons/favicon.svg' }}";
+        window.WELCOME_NOTIFICATION_ICON_URL = "{{ WELCOME_NOTIFICATION_ICON_URL or '/static/icons/favicon.svg' }}";
+        window.GEOFENCE_BADGE_URL = "{{ GEOFENCE_BADGE_URL or '/static/icons/badge-icon.png' }}";
+        window.BATTERY_BADGE_URL = "{{ BATTERY_BADGE_URL or '/static/icons/badge-icon.png' }}";
+        window.TEST_ICON_BADGE_URL = "{{ TEST_ICON_BADGE_URL or '/static/icons/favicon.svg' }}";
+        window.DEFAULT_BADGE_URL = "{{ DEFAULT_BADGE_URL or '/static/icons/badge-icon.png' }}";
+    </script>
+</head>
+
+<body class="app-loading"> <!-- Start with loading class -->
+    <!-- Drawer Overlay & Menu -->
+    <div class="drawer-overlay" id="drawer-overlay"></div>
+    <aside class="drawer" id="drawer">
+        <div class="drawer-header"> <span class="material-icons menu-icon" id="drawer-close-button" tabindex="0"
+                role="button" aria-label="Close navigation drawer">arrow_back</span>
+            <h2 class="drawer-title">Find My Location</h2>
+        </div>
+        <div class="drawer-content">
+            <div class="drawer-item" tabindex="0" data-page="index">
+                <span class="material-icons drawer-item-icon">map</span>
+                <span class="drawer-item-text">Map</span>
+            </div>
+            <div class="drawer-item" tabindex="0" data-page="shared">
+                <span class="material-icons drawer-item-icon">devices</span>
+                <span class="drawer-item-text">My Devices</span>
+            </div>
+            <div class="drawer-item" tabindex="0" data-page="geofences">
+                <span class="material-icons drawer-item-icon">radar</span>
+                <span class="drawer-item-text">Geofences</span>
+            </div>
+            <!-- Removed Places and History from Drawer -->
+            <div class="drawer-divider"></div>
+            <a href="#" data-page="settings" style="text-decoration: none; color: inherit;">
+                <div class="drawer-item" tabindex="0">
+                    <span class="material-icons drawer-item-icon">settings</span>
+                    <span class="drawer-item-text">Settings</span>
+                </div>
+            </a>
+            <a href="{{ url_for('main.manage_apple_creds_route') }}" data-target="manage_apple_creds"
+                style="text-decoration: none; color: inherit;">
+                <div class="drawer-item" tabindex="0">
+                    <span class="material-icons drawer-item-icon">security</span>
+                    <span class="drawer-item-text">Apple Credentials</span>
+                </div>
+            </a>
+            <div class="drawer-item" tabindex="0" data-dialog="help-dialog">
+                <span class="material-icons drawer-item-icon">help_outline</span>
+                <span class="drawer-item-text">Help & Feedback</span>
+            </div>
+            <!-- Removed Notification History from Drawer, moved to Bottom Nav -->
+            <div class="drawer-divider"></div>
+            <a href="{{ url_for('auth.logout_route') }}" style="text-decoration: none; color: inherit;">
+                <div class="drawer-item" tabindex="0">
+                    <span class="material-icons drawer-item-icon">logout</span>
+                    <span class="drawer-item-text">Logout</span>
+                </div>
+            </a>
+        </div>
+    </aside>
+
+    <!-- More Menu Dialog -->
+    <div class="dialog-overlay" id="more-menu-dialog-overlay"></div>
+    <!-- Needs position:absolute if inside relative parent -->
+    <div class="dialog" id="more-menu-dialog">
+        <div class="dialog-content">
+            <!-- Content added dynamically by JS -->
+        </div>
+    </div>
+
+    <!-- Help Dialog -->
+    <div class="dialog-overlay" id="help-dialog-overlay">
+        <div class="dialog" id="help-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Help & Feedback</h3>
+            </div>
+            <div class="dialog-content">
+                <p>Locate accessories via <code>data/{{ username }}</code>.</p>
+                <p><strong>Geofences:</strong> Create global boundaries, link to devices, set notifications.</p>
+                <p><strong>Battery Alerts:</strong> Below {{ config.LOW_BATTERY_THRESHOLD }}% once per discharge.</p>
+                <p><strong>Notifications:</strong> Grant permission. Test/manage in Settings.</p>
+                <p><strong>Important:</strong> Secure Apple ID creds. Use App-Specific Passwords.</p>
+                <p>Backend fetches periodically. Refresh on Devices page for immediate update.</p>
+                <p>Feedback: Project repo/developer.</p>
+            </div>
+            <div class="dialog-actions"> <button class="button" data-close-dialog="help-dialog">OK</button> </div>
+        </div>
+    </div>
+    <!-- Add Place Dialog -->
+    <div class="dialog-overlay" id="add-place-dialog-overlay">
+        <div class="dialog" id="add-place-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Add Place</h3>
+            </div>
+            <div class="dialog-content">
+                <div class="dialog-search-bar"> <span class="material-icons dialog-search-icon">search</span> <input
+                        type="text" class="dialog-search-input" id="place-picker-search-input"
+                        placeholder="Search address..." enterkeyhint="search" autocomplete="off"> </div>
+                <div id="place-picker-search-results" class="search-results-container dialog-search-results"
+                    role="listbox" aria-label="Place Search Results"></div>
+                <div id="place-picker-search-error" class="dialog-search-error"></div>
+                <div id="place-picker-map" style="position: relative;">
+                    <div class="map-dialog-controls">
+                        <div class="map-control-button" id="place-picker-my-location" title="Center on my location"
+                            tabindex="0" role="button" aria-label="Center map on my current location"><span
+                                class="material-icons">my_location</span></div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h4 class="settings-section-title">Place Information</h4>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Place Name</div>
+                            <div class="settings-item-description">Name (required)</div>
+                        </div> <input type="text" id="new-place-name" placeholder="e.g., Home, Work">
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Description</div>
+                            <div class="settings-item-description">Optional</div>
+                        </div> <textarea id="new-place-description" placeholder="e.g., My apartment"></textarea>
+                    </div>
+                    <h4 class="settings-section-title" style="margin-top: 16px;">Location (Search/tap/drag)</h4>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Latitude</div>
+                        </div> <input type="number" id="new-place-lat" placeholder="Latitude" readonly>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Longitude</div>
+                        </div> <input type="number" id="new-place-lng" placeholder="Longitude" readonly>
+                    </div>
+                </div>
+            </div>
+            <div class="dialog-actions"> <button class="text-button"
+                    data-close-dialog="add-place-dialog">Cancel</button> <button class="button"
+                    id="add-place-dialog-button">Save Place</button> </div>
+        </div>
+    </div>
+    <!-- Edit Device Dialog -->
+    <div class="dialog-overlay" id="edit-device-dialog-overlay">
+        <div class="dialog" id="edit-device-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title" id="edit-device-dialog-title">Edit Device</h3>
+            </div>
+            <div class="dialog-content"> <input type="hidden" id="edit-device-id">
+                <div class="settings-section">
+                    <h4 class="settings-section-title">Display Information</h4>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Device Name</div>
+                            <div class="settings-item-description">Custom name</div>
+                        </div> <input type="text" id="edit-device-name" placeholder="Custom Name">
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Label (Emoji)</div>
+                            <div class="settings-item-description">Map icon label</div>
+                        </div> <input type="text" id="edit-device-label" placeholder="Emoji" maxlength="2">
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Color</div>
+                            <div class="settings-item-description">Icon color</div>
+                        </div> <input type="color" id="edit-device-color" value="#000000">
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Show on Map</div>
+                            <div class="settings-item-description">Toggle visibility</div>
+                        </div> <label class="toggle-switch"> <input type="checkbox" id="edit-device-visibility"> <span
+                                class="toggle-slider"></span> </label>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h4 class="settings-section-title">Geofences</h4>
+                    <p style="font-size: var(--body-small-size); opacity: 0.7;">Manage links/notifications on main
+                        'Geofences' page.</p>
+                </div>
+            </div>
+            <div class="dialog-actions"> <button class="text-button"
+                    data-close-dialog="edit-device-dialog">Cancel</button> <button class="button"
+                    id="save-device-edit-button">Save Display Info</button> </div>
+        </div>
+    </div>
+    <!-- Remove Confirmation Dialog -->
+    <div class="dialog-overlay" id="remove-confirmation-dialog-overlay">
+        <div class="dialog" id="remove-confirmation-dialog">
+            <div class="dialog-header"> <span class="material-icons"
+                    style="color: var(--m3-sys-color-error); font-size: 28px; margin-right: 16px;">delete_outline</span>
+                <h3 class="dialog-title" id="remove-confirmation-dialog-title">Remove Item?</h3>
+            </div>
+            <div class="dialog-content" id="remove-confirmation-dialog-content"></div>
+            <div class="dialog-actions" id="remove-confirmation-dialog-actions"> <button class="text-button"
+                    data-close-dialog="remove-confirmation-dialog">Cancel</button> <button class="button"
+                    id="remove-confirm-button"
+                    style="background-color: var(--m3-sys-color-error); color: var(--m3-sys-color-on-error);">Remove</button>
+            </div>
+        </div>
+    </div>
+    <!-- Device Menu Dialog -->
+    <div class="dialog-overlay" id="device-menu-dialog-overlay">
+        <div class="dialog" id="device-menu-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title" id="device-menu-dialog-title">Device Options</h3>
+            </div>
+            <div class="dialog-content" id="device-menu-dialog-content"></div>
+            <div class="dialog-actions"> <button class="text-button"
+                    data-close-dialog="device-menu-dialog">Cancel</button> </div>
+        </div>
+    </div>
+    <!-- Add/Edit Geofence Dialog -->
+    <div class="dialog-overlay" id="geofence-dialog-overlay">
+        <div class="dialog" id="geofence-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title" id="geofence-dialog-title">Add Geofence</h3>
+            </div>
+            <div class="dialog-content"> <input type="hidden" id="geofence-edit-id">
+                <div class="dialog-search-bar"> <span class="material-icons dialog-search-icon">search</span> <input
+                        type="text" class="dialog-search-input" id="geofence-picker-search-input"
+                        placeholder="Search address for center..." enterkeyhint="search" autocomplete="off"> </div>
+                <div id="geofence-picker-search-results" class="search-results-container dialog-search-results"
+                    role="listbox" aria-label="Geofence Center Search Results"></div>
+                <div id="geofence-picker-search-error" class="dialog-search-error"></div>
+                <div id="geofence-picker-map" style="position: relative;">
+                    <div class="map-dialog-controls">
+                        <div class="map-control-button" id="geofence-picker-my-location"
+                            title="Center map on my location" tabindex="0" role="button"
+                            aria-label="Center map on my current location"><span
+                                class="material-icons">my_location</span></div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h4 class="settings-section-title">Geofence Definition</h4>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Geofence Name</div>
+                            <div class="settings-item-description">Unique name (required)</div>
+                        </div> <input type="text" id="geofence-name" placeholder="e.g., Home, Office">
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Center Location</div>
+                            <div class="settings-item-description">Search/tap/drag marker</div>
+                        </div>
+                        <div style="display: flex; gap: 8px; width: 100%; margin-top: 4px;"> <input type="number"
+                                id="geofence-lat" placeholder="Latitude" readonly style="flex: 1;"> <input type="number"
+                                id="geofence-lng" placeholder="Longitude" readonly style="flex: 1;"> </div>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">Radius (meters)</div>
+                            <div class="settings-item-description">Boundary size</div>
+                        </div> <input type="number" id="geofence-radius" placeholder="e.g., 100" min="10" step="10"
+                            value="100">
+                    </div>
+                    <h4 class="settings-section-title" style="margin-top: 16px;">Notifications</h4>
+                    <p style="font-size: var(--body-small-size); opacity: 0.7;">Enable entry/exit notifications when
+                        linking on main Geofences page.</p>
+                </div>
+            </div>
+            <div class="dialog-actions"> <button class="text-button" data-close-dialog="geofence-dialog">Cancel</button>
+                <button class="button" id="geofence-dialog-save-button">Save Geofence</button>
+            </div>
+        </div>
+    </div>
+    <!-- Generic Error Dialog -->
+    <div class="dialog-overlay" id="error-dialog-overlay">
+        <div class="dialog" id="error-dialog">
+            <div class="dialog-header"> <span class="material-icons"
+                    style="color: var(--m3-sys-color-error); font-size: 28px; margin-right: 16px;">error_outline</span>
+                <h3 class="dialog-title" id="error-dialog-title">Error</h3>
+            </div>
+            <div class="dialog-content" id="error-dialog-content"></div>
+            <div class="dialog-actions"> <button class="button" data-close-dialog="error-dialog">OK</button> </div>
+        </div>
+    </div>
+    <!-- Generic Confirmation Dialog -->
+    <div class="dialog-overlay" id="confirmation-dialog-overlay">
+        <div class="dialog" id="confirmation-dialog">
+            <div class="dialog-header"> <span class="material-icons"
+                    style="color: var(--m3-sys-color-primary); font-size: 28px; margin-right: 16px;">check_circle_outline</span>
+                <h3 class="dialog-title" id="confirmation-dialog-title">Confirmation</h3>
+            </div>
+            <div class="dialog-content" id="confirmation-dialog-content"></div>
+            <div class="dialog-actions" id="confirmation-dialog-actions"></div>
+        </div>
+    </div>
+
+    <!-- Edit Share Dialog -->
+    <div class="dialog-overlay" id="edit-share-dialog-overlay">
+        <div class="dialog" id="edit-share-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title" id="edit-share-dialog-title">Edit Share</h3>
+            </div>
+            <div class="dialog-content">
+                <input type="hidden" id="edit-share-id">
+                <p>Update the duration or note for the share link for <strong id="edit-share-device-name"></strong>.</p>
+                <p style="font-size: var(--body-small-size); opacity: 0.7;">Current expiry: <span
+                        id="edit-share-current-expiry">Loading...</span></p>
+
+                <div class="settings-section" style="margin-top: 16px;">
+                    <h4 class="settings-section-title">New Duration</h4>
+                    <div class="settings-item" style="flex-direction: column; align-items: stretch;">
+                        <select id="edit-share-duration-select" class="dialog-search-input"
+                            style="width: 100%; margin-bottom: 12px;">
+                            <option value="1h">1 Hour (from now)</option>
+                            <option value="6h">6 Hours (from now)</option>
+                            <option value="24h" selected>24 Hours (from now)</option>
+                            <option value="7d">7 Days (from now)</option>
+                            <option value="30d">30 Days (from now)</option>
+                            <option value="indefinite">Indefinite (Until Revoked)</option>
+                        </select>
+                        <p style="font-size: var(--body-small-size); opacity: 0.7;">Choosing a duration resets the timer
+                            from now.</p>
+                    </div>
+
+                    <h4 class="settings-section-title">Optional Note</h4>
+                    <div class="settings-item" style="flex-direction: column; align-items: stretch;">
+                        <input type="text" id="edit-share-note-input" placeholder="e.g., Tracking my bike trip"
+                            maxlength="100" class="dialog-search-input" style="width: 100%;">
+                        <p class="form-field-error" style="font-size: 11px; opacity: 0.7; margin-top: 4px;">Max 100
+                            characters. Visible on share page.</p>
+                    </div>
+                </div>
+                <p id="edit-share-error" class="form-field-error" style="display: none;"></p>
+            </div>
+            <div class="dialog-actions">
+                <button class="text-button" data-close-dialog="edit-share-dialog">Cancel</button>
+                <button class="button" id="save-share-edit-button">Save Changes</button>
+            </div>
+        </div>
+    </div>
+    <!-- Share Device Dialog -->
+    <div class="dialog-overlay" id="share-device-dialog-overlay">
+        <div class="dialog" id="share-device-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title" id="share-device-dialog-title">Share Device</h3>
+            </div>
+            <div class="dialog-content">
+                <input type="hidden" id="share-device-id">
+                <p>Create a temporary or indefinite link to share the live location of this device.</p>
+
+                <div class="settings-section">
+                    <h4 class="settings-section-title">Share Duration</h4>
+                    <div class="settings-item" style="flex-direction: column; align-items: stretch;">
+                        <select id="share-duration-select" class="dialog-search-input"
+                            style="width: 100%; margin-bottom: 12px;">
+                            <option value="1h">1 Hour</option>
+                            <option value="6h">6 Hours</option>
+                            <option value="24h" selected>24 Hours (1 Day)</option>
+                            <option value="7d">7 Days</option>
+                            <option value="30d">30 Days</option>
+                            <option value="indefinite">Indefinite (Until Revoked)</option>
+                        </select>
+                    </div>
+
+                    <h4 class="settings-section-title">Optional Note</h4>
+                    <div class="settings-item" style="flex-direction: column; align-items: stretch;">
+                        <input type="text" id="share-note-input" placeholder="e.g., Tracking my bike trip"
+                            maxlength="100" class="dialog-search-input" style="width: 100%;">
+                        <p class="form-field-error" style="font-size: 11px; opacity: 0.7; margin-top: 4px;">Max 100
+                            characters. Visible on share page.</p>
+                    </div>
+                </div>
+                <p id="share-create-error" class="form-field-error" style="display: none;"></p>
+            </div>
+            <div class="dialog-actions">
+                <button class="text-button" data-close-dialog="share-device-dialog">Cancel</button>
+                <button class="button" id="create-share-link-button">Create Share Link</button>
+            </div>
+        </div>
+    </div>
+    <!-- Show Share Link Dialog -->
+    <div class="dialog-overlay" id="share-link-dialog-overlay">
+        <div class="dialog" id="share-link-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Share Link Created</h3>
+            </div>
+            <div class="dialog-content">
+                <p>Share this unique link. Anyone with the link can view the device's live location until it expires or
+                    is revoked.</p>
+                <textarea id="share-link-textarea" readonly
+                    style="width:100%; min-height: 60px; margin-top: 16px; font-family: monospace; font-size: 14px; padding: 8px; box-sizing: border-box; border: 1px solid var(--m3-sys-color-outline-variant); border-radius: 8px; background-color: var(--m3-sys-color-surface-container); color: var(--m3-sys-color-on-surface); resize: none;"></textarea>
+                <p id="share-link-expiry-info"
+                    style="font-size: var(--body-small-size); opacity: 0.7; margin-top: 4px;"></p>
+            </div>
+            <div class="dialog-actions">
+                <button class="text-button" data-close-dialog="share-link-dialog">Close</button>
+                <button class="button" id="copy-share-link-button">
+                    <span class="material-icons"
+                        style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">content_copy</span> Copy
+                    Link
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- Share Location Dialog -->
+    <div class="dialog-overlay" id="share-location-dialog-overlay">
+        <div class="dialog" id="share-location-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Share Location</h3>
+            </div>
+            <div class="dialog-content" id="share-location-dialog-content">
+                <p>Copy text to share:</p> <textarea id="share-location-textarea" readonly
+                    style="width:100%; min-height: 80px; margin-top: 16px; font-family: monospace; font-size: 14px; padding: 8px; box-sizing: border-box; border: 1px solid var(--m3-sys-color-outline-variant); border-radius: 8px; background-color: var(--m3-sys-color-surface-container); color: var(--m3-sys-color-on-surface); resize: none;"></textarea>
+            </div>
+            <div class="dialog-actions"> <button class="text-button"
+                    data-close-dialog="share-location-dialog">Cancel</button> <button class="button"
+                    id="copy-share-button">Copy</button> </div>
+        </div>
+    </div>
+    <!-- Config Import Dialog -->
+    <div class="dialog-overlay" id="config-import-dialog-overlay">
+        <div class="dialog" id="config-import-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Import Configuration</h3>
+            </div>
+            <div class="dialog-content">
+                <p>Select a previously exported JSON configuration file. Importing will <strong>replace</strong>
+                    existing data for the selected parts.</p>
+                <!-- Use UNIQUE ID for the hidden input -->
+                <input type="file" id="dialog-import-config-file-input" accept=".json" class="hidden-file-input">
+                <!-- Use UNIQUE ID for the label -->
+                <label for="dialog-import-config-file-input" class="button" id="dialog-select-import-file-button-label"
+                    style="margin-top: 16px; display: inline-flex; align-items: center; cursor: pointer;">
+                    <span class="material-icons"
+                        style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">attach_file</span> Select
+                    File
+                </label>
+                <!-- Use UNIQUE ID for the file list display -->
+                <div id="dialog-selected-import-file-list" style="margin-top: 8px;"></div>
+                <!-- Use UNIQUE ID for the parts selection -->
+                <div id="dialog-import-parts-selection" style="display: none; margin-top: 16px;">
+                    <h4 class="settings-section-title">Select Parts to Import</h4>
+                    <!-- Checkboxes added dynamically -->
+                </div>
+                <!-- Use UNIQUE ID for the status message -->
+                <p id="dialog-import-status-message"
+                    style="font-size: var(--body-small-size); margin-top: 8px; min-height: 1.2em;"></p>
+            </div>
+            <div class="dialog-actions">
+                <button class="text-button" data-close-dialog="config-import-dialog">Cancel</button>
+                <!-- Use UNIQUE ID for the confirm button -->
+                <button class="button" id="dialog-confirm-import-button" style="display: none;" disabled>
+                    <span class="material-icons"
+                        style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Import Selected
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- App Bar -->
+    <header class="app-bar">
+        <span class="material-icons menu-icon" id="menu-button" tabindex="0" role="button"
+            aria-label="Open navigation drawer">menu</span>
+        <div class="search-bar"> <span class="material-icons search-icon">search</span> <input type="text"
+                class="search-input" placeholder="Search places, devices, actions..." id="location-search-input"
+                enterkeyhint="search" autocomplete="off"> </div>
+
+        <span id="more-button" tabindex="0" role="button" aria-haspopup="true" aria-label="More options"
+            style="display: flex; align-items: center; cursor: pointer;">
+            {% if username %}
+            <span
+                style="margin-left: 16px; font-size: var(--body-medium-size); opacity: 0.8; max-width: 150px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">{{
+                username }}</span>
+            {% endif %}
+            <span class="material-icons action-button">more_vert</span>
+        </span>
+        <div id="search-results-container" class="search-results-container" role="listbox" aria-label="Search Results">
+            <!-- Results added dynamically -->
+        </div>
+    </header> <!-- Main Content -->
+    <main class="content" id="main-content">
+        <!-- Map Screen (Default) -->
+        <div id="index-page">
+            <div class="map-container">
+                <div id="map"></div>
+                <div id="map-placeholder" class="map-placeholder visible"> <!-- Start visible -->
+                    <div class="spinner"></div>
+                    <p>Initializing map...</p>
+                </div>
+                <!-- Map Controls (Now App-Style) -->
+                <div class="map-controls">
+                    <button class="map-control-button" id="zoom-in" tabindex="0" aria-label="Zoom in"><span
+                            class="material-icons">add</span></button>
+                    <button class="map-control-button" id="zoom-out" tabindex="0" aria-label="Zoom out"><span
+                            class="material-icons">remove</span></button>
+                    <button class="map-control-button" id="show-all-button" tabindex="0"
+                        aria-label="Show all devices and places" aria-pressed="false">
+                        <span class="material-icons" id="show-all-icon">layers</span>
+                    </button>
+                    <button class="map-control-button" id="show-history-button" tabindex="0"
+                        aria-label="Show location history trail" aria-pressed="false">
+                        <span class="material-icons" id="show-history-icon">timeline</span>
+                    </button>
+                    <button class="map-control-button" id="my-location" tabindex="0" aria-label="My location">
+                        <span class="material-icons">my_location</span>
+                    </button>
+                </div>
+            </div>
+            <div class="history-slider-container">
+                <label for="history-slider" id="history-slider-label">Last 7d</label>
+                <input type="range" id="history-slider" min="1" max="168" step="1">
+            </div>
+            <div class="card" id="my-location-card">
+                <div class="card-title">My Current Location</div>
+                <div class="location-info">
+                    <span class="material-icons location-info-icon">location_on</span>
+                    <div class="location-info-text">
+                        <div class="location-address" id="location-address-text">Fetching address...</div>
+                        <div class="location-coordinates" id="location-coordinates-text">Fetching coordinates...</div>
+                    </div>
+                </div>
+                <div class="location-info">
+                    <span class="material-icons location-info-icon">update</span>
+                    <div class="location-info-text">
+                        <!-- Add tabindex and role, keep relative-time class -->
+                        <div class="location-address relative-time" id="last-updated-text" tabindex="0" role="button"
+                            style="cursor: pointer;" title="View Location History">Last updated: Never</div>
+                    </div>
+                </div>
+                <div class="button-row">
+                    <button class="text-button" id="share-button" data-dialog="share-location-dialog">Share</button>
+                    <button class="button" id="refresh-button">Update</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Devices Screen -->
+        <div id="shared-page" style="display: none;">
+            <div class="card">
+                <div class="card-title">My Devices</div>
+                <p>Locations of accessories via <code>data/{{ username }}</code>.</p>
+                <div class="location-info" style="margin-top: 8px; margin-bottom: 0;">
+                    <span class="material-icons location-info-icon" style="margin-right: 16px;">update</span>
+                    <div class="location-info-text">
+                        <div class="location-coordinates relative-time" id="devices-last-updated">Last updated: Never
+                        </div>
+                    </div>
+                </div>
+                <div class="button-row"> <button class="text-button" id="add-device-link-button"
+                        onclick="AppUI.changePage('settings', 'settings-upload-section')"> <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">add</span> Add Device
+                    </button>
+                    <button class="button" id="refresh-devices-button">
+                        <span class="material-icons"
+                            style="font-size: 18px; vertical-align: middle; margin-right: 4px;">refresh</span> Update
+                        Status
+                    </button>
+                </div>
+            </div>
+            <div id="shared-devices-list-container">
+                <div class="loading-indicator" id="devices-loading-indicator"
+                    style="padding: 24px; text-align: center;">
+                    <div class="spinner"></div> Fetching devices...
+                </div>
+                <div id="shared-devices-list" style="display: none;"></div>
+                <p class="no-devices-message" id="no-devices-message"
+                    style="display: none; padding: 24px; text-align: center; color: var(--m3-sys-color-outline-variant);">
+                </p>
+                <p class="error-message" id="devices-error-message"
+                    style="display: none; padding: 24px; text-align: center; color: var(--m3-sys-color-error);"> Error
+                    fetching devices. </p>
+            </div>
+            <!-- Add Shares List to Devices Page -->
+            <div class="settings-section" id="devices-active-shares-section" style="margin-top: 24px;">
+                <h4 class="settings-section-title">Active Shares</h4>
+                <div id="devices-active-shares-list-container">
+                    <div class="loading-indicator" id="devices-active-shares-loading"
+                        style="padding: 16px; text-align: center; display: none;">
+                        <div class="spinner" style="width: 20px; height: 20px; margin: 10px auto;"></div> Loading
+                        shares...
+                    </div>
+                    <div id="devices-active-shares-list" style="display: block;">
+                        <!-- Shares will be rendered here by JS -->
+                    </div>
+                    <p class="no-devices-message" id="devices-no-active-shares-message"
+                        style="display: none; padding: 16px; text-align: center; color: var(--m3-sys-color-outline-variant);">
+                        No active shares found. Use the menu (<span class="material-icons"
+                            style="font-size: 1em; vertical-align: middle;">more_vert</span>) to share a device.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Geofences Screen -->
+        <div id="geofences-page" style="display: none;">
+            <div class="card">
+                <div class="card-title">Geofences</div>
+                <p>Define global areas, then link to devices and set notifications.</p>
+                <div class="button-row"> <button class="text-button" id="test-notification-button">Test
+                        Notification</button> <button class="button" id="add-global-geofence-button"> <span
+                            class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">add_location</span>
+                        Create New Geofence </button> </div>
+            </div>
+            <div class="settings-section">
+                <h4 class="settings-section-title">Global Geofence Definitions</h4>
+                <div id="global-geofences-list-container">
+                    <div class="loading-indicator" id="global-geofences-loading"
+                        style="padding: 16px; text-align: center;">
+                        <div class="spinner" style="width: 20px; height: 20px; margin: 10px auto;"></div> Loading...
+                    </div>
+                    <div id="global-geofences-list" style="display: none;"></div>
+                    <p class="no-devices-message" id="no-global-geofences-message"
+                        style="display: none; padding: 16px; text-align: center; color: var(--m3-sys-color-outline-variant);">
+                        No geofences defined. </p>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4 class="settings-section-title">Device Geofence Links & Notifications</h4>
+                <div id="device-geofence-links-container">
+                    <div class="loading-indicator" id="device-links-loading" style="padding: 16px; text-align: center;">
+                        <div class="spinner" style="width: 20px; height: 20px; margin: 10px auto;"></div> Loading
+                        devices...
+                    </div>
+                    <div id="device-geofence-links-list"></div>
+                    <p class="no-devices-message" id="links-no-devices-message"
+                        style="display: none; padding: 16px; text-align: center; color: var(--m3-sys-color-outline-variant);">
+                        No devices found. </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Saved Places Screen -->
+        <div id="places-page" style="display: none;">
+            <div class="card">
+                <div class="card-title">Saved Places</div>
+                <p>Your saved locations.</p>
+            </div>
+            <div id="saved-places-list">
+                <p class="no-devices-message" id="no-places-message"
+                    style="display: block; padding: 16px; text-align: center; color: var(--m3-sys-color-outline-variant);">
+                    No places saved. Tap '+' to add.</p>
+            </div>
+        </div>
+
+        <!-- History Screen -->
+        <div id="history-page" style="display: none;">
+            <div class="card">
+                <div class="card-title">My Location History</div>
+                <p>Recent location checks.</p>
+                <div class="button-row"> <button class="text-button" id="clear-history-button">Clear History</button>
+                </div>
+            </div>
+            <div id="location-history-container">
+                <div class="loading-indicator" id="history-loading-indicator"
+                    style="padding: 24px; text-align: center; display: none;">
+                    <div class="spinner"></div> Loading history...
+                </div>
+                <div class="timeline" id="location-timeline" style="display: block;">
+                    <p class="no-devices-message" id="no-history-message"
+                        style="display: block; padding: 16px; text-align: center; color: var(--m3-sys-color-outline-variant);">
+                        No history recorded.</p>
+                </div>
+                <p class="no-devices-message" id="history-disabled-message"
+                    style="display: none; padding: 24px; text-align: center; color: var(--m3-sys-color-outline-variant);">
+                    History disabled in settings. </p>
+            </div>
+        </div>
+
+        <!-- Settings Screen -->
+        <div id="settings-page" style="display: none;">
+            <div class="card">
+                <div class="card-title">App Settings</div>
+                <p>Customize your experience.</p>
+            </div>
+            <div class="settings-section" id="settings-upload-section">
+                <h4 class="settings-section-title">Manage Device Files</h4>
+                <div class="settings-item" style="flex-direction: column; align-items: stretch;">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Upload Device File(s)</div>
+                        <div class="settings-item-description">Upload <code>.plist</code> or <code>.keys</code> files.
+                        </div>
+                    </div> <input type="file" id="device-file-input" accept=".plist,.keys" class="hidden-file-input"
+                        multiple> <button class="button" id="select-files-button"
+                        style="margin-top: 12px; align-self: flex-start;"
+                        onclick="document.getElementById('device-file-input').click()"> <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">attach_file</span>
+                        Select File(s) </button>
+                    <div id="selected-files-list"></div> <button class="button" id="upload-file-button"
+                        style="margin-top: 12px; align-self: flex-start;" disabled> <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">upload_file</span>
+                        Upload Selected Files </button>
+                    <p id="upload-status"
+                        style="font-size: var(--body-small-size); margin-top: 8px; min-height: 1.2em;"></p>
+                </div>
+            </div>
+            <div class="settings-section" id="settings-import-export">
+                <h4 class="settings-section-title">Import / Export</h4>
+                <div class="settings-item" style="flex-direction: column; align-items: stretch;">
+                    <div class="settings-item-text" style="margin-bottom: 12px;">
+                        <div class="settings-item-title">Export Configuration</div>
+                        <div class="settings-item-description">Save settings to JSON (backup).</div>
+                    </div>
+                    <div id="export-parts-selection" style="margin-bottom: 12px;">
+                        <h4 class="settings-section-title" style="margin-bottom: 8px;">Select Parts to Export</h4>
+                        <label> <input type="checkbox" name="export_part" value="devices" checked> Device Configs
+                            <span>(Server)</span> </label>
+                        <label> <input type="checkbox" name="export_part" value="geofences" checked> Geofences
+                            <span>(Server)</span> </label>
+                        <label> <input type="checkbox" name="export_part" value="clientSettings" checked> UI & Map
+                            Settings <span>(Client)</span> </label>
+                        <label> <input type="checkbox" name="export_part" value="savedPlaces" checked> Saved Places
+                            <span>(Client)</span> </label>
+                        <label> <input type="checkbox" name="export_part" value="locationHistory" checked> Location
+                            History <span>(Client)</span> </label>
+                        <label> <input type="checkbox" name="export_part" value="deviceVisibility" checked> Device
+                            Visibility <span>(Client)</span> </label>
+                    </div>
+                    <button class="button" id="export-config-button" style="align-self: flex-start;">
+                        <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">download</span> Export
+                        Selected
+                    </button>
+                </div>
+                <div class="settings-item" style="flex-direction: column; align-items: stretch; margin-top: 16px;">
+                    <div class="settings-item-text" style="margin-bottom: 12px;">
+                        <div class="settings-item-title">Import Configuration</div>
+                        <div class="settings-item-description">Load from exported JSON. <strong>Replaces</strong>
+                            selected parts.</div>
+                    </div>
+                    <!-- Button to OPEN the dialog -->
+                    <button class="button" id="open-import-dialog-button" style="align-self: flex-start;">
+                        <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">upload_file</span>
+                        Import from File...
+                    </button>
+                    <!-- REMOVED the file input, list, parts selection, confirm button, status message from here -->
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4 class="settings-section-title">Appearance</h4>
+                <div class="settings-item">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Theme Mode</div>
+                        <div class="settings-item-description">App theme</div>
+                    </div>
+                    <div class="theme-selector"> <label><input type="radio" name="theme" value="system"> System</label>
+                        <label><input type="radio" name="theme" value="light"> Light</label> <label><input type="radio"
+                                name="theme" value="dark"> Dark</label>
+                    </div>
+                </div>
+                <div class="settings-item">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Accent Color</div>
+                        <div class="settings-item-description">Primary theme color</div>
+                    </div>
+                    <div class="color-picker-container"> <input type="color" id="theme-color-picker"
+                            title="Select theme color"> <button class="text-button" id="reset-theme-color-button"
+                            title="Reset to default color"> <span class="material-icons">restart_alt</span> </button>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4 class="settings-section-title">Location</h4>
+                <div class="settings-item">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Location History</div>
+                        <div class="settings-item-description">Save history</div>
+                    </div> <label class="toggle-switch"> <input type="checkbox" id="location-history-toggle" checked>
+                        <span class="toggle-slider"></span> </label>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4 class="settings-section-title">Map View Defaults</h4>
+                <div class="settings-item">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Show Devices on Load</div>
+                        <div class="settings-item-description">Start with visible devices displayed on the map</div>
+                    </div> <label class="toggle-switch"> <input type="checkbox" id="show-all-default-toggle"> <span
+                            class="toggle-slider"></span> </label>
+                </div>
+                <div class="settings-item">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Show History Trail on Load</div>
+                        <div class="settings-item-description">Start with history visible</div>
+                    </div> <label class="toggle-switch"> <input type="checkbox" id="show-history-default-toggle"> <span
+                            class="toggle-slider"></span> </label>
+                </div>
+            </div>
+
+            <div class="settings-section" id="settings-notifications">
+                <h4 class="settings-section-title">Notifications</h4>
+                <div class="settings-item">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Push Notifications</div>
+                        <div class="settings-item-description">Get geofence/battery alerts</div>
+                    </div> <button class="button" id="enable-notifications-button"
+                        style="margin-left: auto; min-width: 180px;">Enable Notifications</button>
+                </div>
+                <div class="settings-item"
+                    style="background: none; box-shadow: none; padding-top: 0; align-items: center;">
+                    <div id="notification-status-container" style="width: 100%;"> <span id="notification-status"
+                            style="margin-top: 0;">Checking...</span> <button class="text-button"
+                            id="unsubscribe-button" style="display: none;">Unsubscribe</button> </div>
+                </div>
+                <div class="settings-item"
+                    style="background: none; box-shadow: none; padding-top: 0; align-items: center;"> <button
+                        class="text-button" id="test-notification-button" style="display: none; margin-left: auto;">Test
+                        Notification</button> </div>
+            </div>
+            <div class="settings-section" id="settings-account-management">
+                <h4 class="settings-section-title" style="color: var(--m3-sys-color-error);">Danger Zone</h4>
+                <div class="settings-item"
+                    style="border-color: var(--m3-sys-color-error); background-color: color-mix(in srgb, var(--m3-sys-color-error-container) 50%, transparent);">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title" style="color: var(--m3-sys-color-error);">Delete Account</div>
+                        <div class="settings-item-description" style="color: var(--m3-sys-color-on-error-container);">
+                            Permanently delete account and all data. Cannot be undone.</div>
+                    </div> <button class="button" id="delete-account-button"
+                        style="margin-left: auto; background-color: var(--m3-sys-color-error); color: var(--m3-sys-color-on-error);">
+                        <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">delete_forever</span>
+                        Delete My Account </button>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h4 class="settings-section-title">About</h4>
+                <div class="settings-item" style="flex-direction: column; align-items: flex-start;">
+                    <div class="settings-item-text">
+                        <div class="settings-item-title">Find My Location Web App</div>
+                        <div class="settings-item-description" id="app-version">Version {{ APP_VERSION }}</div> <button
+                            class="text-button" style="padding-left: 0; margin-top: 8px;"
+                            onclick="AppUI.openDialog('help-dialog')">Help & Info</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification History Screen -->
+        <div id="notifications-history-page" style="display: none;">
+            <div class="card">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Notification History</span>
+                    <div style="display: flex; gap: 8px;"> <button class="text-button" id="mark-all-read-button"
+                            title="Mark all as read"> <span class="material-icons"
+                                style="font-size: 18px;">mark_chat_read</span> </button> <button class="text-button"
+                            id="clear-all-history-button" title="Clear all history"
+                            style="color: var(--m3-sys-color-error);"> <span class="material-icons"
+                                style="font-size: 18px;">delete_sweep</span> </button> </div>
+                </div>
+                <p>Recent backend notifications. Read status managed here.</p>
+            </div>
+            <div id="notifications-history-list-container">
+                <div class="loading-indicator" id="notifications-history-loading"
+                    style="padding: 24px; text-align: center;">
+                    <div class="spinner"></div> Loading history...
+                </div>
+                <div id="notifications-history-list" style="display: none;"></div>
+                <p class="no-devices-message" id="no-notifications-history-message"
+                    style="display: none; padding: 24px; text-align: center; color: var(--m3-sys-color-outline);"> No
+                    history found. </p>
+            </div>
+        </div>
+
+    </main>
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+        <a href="#" class="nav-item nav-link active" data-page="index">
+            <span class="material-icons nav-icon">map</span>
+            <span class="nav-label">Map</span>
+        </a>
+        <a href="#" class="nav-item nav-link" data-page="shared">
+            <span class="material-icons nav-icon">devices</span>
+            <span class="nav-label">Devices</span>
+        </a>
+        <a href="#" class="nav-item nav-link" data-page="geofences">
+            <span class="material-icons nav-icon">radar</span>
+            <span class="nav-label">Geofences</span>
+        </a>
+        <a href="#" class="nav-item nav-link" data-page="notifications-history"> <!-- Added -->
+            <span class="material-icons nav-icon">notifications</span>
+            <span class="nav-label">Alerts</span>
+        </a>
+        <a href="#" class="nav-item nav-link" data-page="settings">
+            <span class="material-icons nav-icon">settings</span>
+            <span class="nav-label">Settings</span>
+        </a>
+    </nav>
+
+    <!-- FAB Button (Keep hidden, re-enable if places page is used) -->
+    <div class="fab" id="add-place-button" style="display: none;" aria-label="Add Place"> <span class="material-icons"
+            style="color: white;">add_location</span> </div>
+
+    <!-- Scripts -->
+    <script id="leaflet-js" src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="{{ url_for('static', filename='js/config.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/state.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/api.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/map.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/ui.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/notifications.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+    <!-- Load Material Color Utilities (Keep as before) -->
+    <script type="module">
+        import("{{ url_for('static', filename='libs/material-color/material-color-utilities.esm.js') }}")
+            .then((module) => {
+                window.M3ColorUtils = module;
+                console.log("Loaded Material Color Utilities locally via module import.");
+            })
+            .catch(err => {
+                console.error("Failed to load Material Color Utilities locally:", err);
+            });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,103 @@
+<!-- app/templates/logout_success.html -->
+<!-- NEW FILE -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Redirect to login page after 2 seconds -->
+    <meta http-equiv="refresh" content="2;url={{ url_for('auth.login_route') }}">
+    <title>Logged Out - Find My Location</title>
+
+    <link rel="preload" href="https://fonts.googleapis.com/icon?family=Material+Icons" as="style"
+        onload="this.onload=null;this.rel='stylesheet'">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            text-align: center;
+        }
+
+        .message-card {
+            max-width: 450px;
+            width: 90%;
+            padding: 32px;
+        }
+
+        .message-icon {
+            font-size: 48px;
+            color: var(--primary-color);
+            margin-bottom: 16px;
+        }
+
+        body.dark-theme .message-icon {
+            color: var(--dark-primary-color);
+        }
+
+        .flash-messages {
+            margin-top: 16px;
+        }
+
+        .flash-messages .info {
+            color: var(--on-surface-color);
+            opacity: 0.8;
+        }
+
+        body.dark-theme .flash-messages .info {
+            color: var(--dark-on-surface-color);
+        }
+
+        .redirect-info {
+            margin-top: 20px;
+            font-size: var(--body-small-size);
+            color: var(--outline-color);
+        }
+
+        body.dark-theme .redirect-info {
+            color: var(--dark-outline-color);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card message-card">
+        <span class="material-icons message-icon">check_circle</span>
+        <h1 class="card-title">Logout Successful</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            {# Display only info messages here, errors handled differently if needed #}
+            {% if category == 'info' %}
+            <p class="{{ category }}">{{ message | safe }}</p>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>You have been successfully logged out.</p>
+        {% endif %}
+        {% endwith %}
+
+        <p class="redirect-info">You will be redirected to the login page shortly...</p>
+        <p class="redirect-info">(If not redirected automatically, <a href="{{ url_for('auth.login_route') }}">click
+                here</a>.)</p>
+    </div>
+
+    <script>
+        // Apply theme based on localStorage - Keep this, as backend prefs are gone
+        (function () {
+            const theme = localStorage.getItem('theme') || 'system';
+            if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.body.classList.add('dark-theme');
+            }
+            // No need to add light-theme class explicitly if it's the default without dark-theme
+        })();
+    </script>
+</body>
+
+</html>

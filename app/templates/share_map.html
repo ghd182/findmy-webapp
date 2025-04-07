@@ -1,0 +1,867 @@
+<!-- app/templates/share_map.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Shared Location</title>
+    <link rel="stylesheet" id="leaflet-css" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" id="material-symbols-css"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" />
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+    <meta name="theme-color" content="#FCFCFF" id="share-meta-theme-color">
+    <style>
+        /* --- M3 Variables and other styles (Keep as before) --- */
+        :root {
+            /* Light Theme Colors */
+            --m3-sys-color-primary: #4285F4;
+            --m3-sys-color-on-primary: #FFFFFF;
+            --m3-sys-color-primary-container: #D8E2FF;
+            --m3-sys-color-on-primary-container: #001A43;
+            --m3-sys-color-secondary: #555F71;
+            --m3-sys-color-on-secondary: #FFFFFF;
+            --m3-sys-color-secondary-container: #D9E3F8;
+            --m3-sys-color-on-secondary-container: #121C2B;
+            --m3-sys-color-tertiary: #6F5675;
+            --m3-sys-color-on-tertiary: #FFFFFF;
+            --m3-sys-color-tertiary-container: #F9D8FD;
+            --m3-sys-color-on-tertiary-container: #29142F;
+            --m3-sys-color-error: #BA1A1A;
+            --m3-sys-color-on-error: #FFFFFF;
+            --m3-sys-color-error-container: #FFDAD6;
+            --m3-sys-color-on-error-container: #410002;
+            --m3-sys-color-background: #FCFCFF;
+            --m3-sys-color-on-background: #1A1C1E;
+            --m3-sys-color-surface: #FCFCFF;
+            --m3-sys-color-surface-rgb: 252, 252, 255;
+            --m3-sys-color-on-surface: #1A1C1E;
+            --m3-sys-color-surface-variant: #E0E2EC;
+            --m3-sys-color-on-surface-variant: #44474F;
+            --m3-sys-color-outline: #74777F;
+            --m3-sys-color-outline-variant: #C4C6D0;
+            --m3-sys-color-shadow: #000000;
+            --m3-sys-color-scrim: #000000;
+            --m3-sys-color-scrim-rgb: 0, 0, 0;
+            --m3-sys-color-inverse-surface: #2F3033;
+            --m3-sys-color-inverse-on-surface: #F1F0F4;
+            --m3-sys-color-inverse-primary: #ABC7FF;
+            --m3-sys-color-surface-dim: #DBDADE;
+            --m3-sys-color-surface-bright: #FCFCFF;
+            --m3-sys-color-surface-container-lowest: #FFFFFF;
+            --m3-sys-color-surface-container-low: #F6F6F9;
+            --m3-sys-color-surface-container: #F0F0F3;
+            --m3-sys-color-surface-container-high: #EAEBED;
+            --m3-sys-color-surface-container-highest: #E4E4E7;
+            --font-family: 'Roboto', 'Segoe UI', system-ui, sans-serif;
+            --label-small-size: 11px;
+            --body-small-size: 12px;
+            --body-medium-size: 14px;
+            --title-medium-size: 16px;
+            --title-large-size: 22px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                /* Dark Theme Colors */
+                --m3-sys-color-primary: #ABC7FF;
+                --m3-sys-color-on-primary: #002F64;
+                --m3-sys-color-primary-container: #00458D;
+                --m3-sys-color-on-primary-container: #D8E2FF;
+                --m3-sys-color-secondary: #BDC7DC;
+                --m3-sys-color-on-secondary: #273141;
+                --m3-sys-color-secondary-container: #3E4758;
+                --m3-sys-color-on-secondary-container: #D9E3F8;
+                --m3-sys-color-tertiary: #DCBCE0;
+                --m3-sys-color-on-tertiary: #3F2945;
+                --m3-sys-color-tertiary-container: #573F5D;
+                --m3-sys-color-on-tertiary-container: #F9D8FD;
+                --m3-sys-color-error: #FFB4AB;
+                --m3-sys-color-on-error: #690005;
+                --m3-sys-color-error-container: #93000A;
+                --m3-sys-color-on-error-container: #FFDAD6;
+                --m3-sys-color-background: #1A1C1E;
+                --m3-sys-color-on-background: #E3E2E6;
+                --m3-sys-color-surface: #1A1C1E;
+                --m3-sys-color-surface-rgb: 26, 28, 30;
+                --m3-sys-color-on-surface: #E3E2E6;
+                --m3-sys-color-surface-variant: #44474F;
+                --m3-sys-color-on-surface-variant: #C4C6D0;
+                --m3-sys-color-outline: #8E9099;
+                --m3-sys-color-outline-variant: #44474F;
+                --m3-sys-color-inverse-surface: #E3E2E6;
+                --m3-sys-color-inverse-on-surface: #1A1C1E;
+                --m3-sys-color-inverse-primary: #4285F4;
+                --m3-sys-color-surface-dim: #121416;
+                --m3-sys-color-surface-bright: #383A3D;
+                --m3-sys-color-surface-container-lowest: #0F1113;
+                --m3-sys-color-surface-container-low: #1A1C1E;
+                --m3-sys-color-surface-container: #1E2022;
+                --m3-sys-color-surface-container-high: #292B2D;
+                --m3-sys-color-surface-container-highest: #333538;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-family);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        html,
+        body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            background-color: var(--m3-sys-color-background);
+            color: var(--m3-sys-color-on-background);
+        }
+
+        #share-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .share-app-bar {
+            background-color: var(--m3-sys-color-surface-container-low);
+            color: var(--m3-sys-color-on-surface);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.1);
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .share-app-bar-icon {
+            font-size: 24px;
+            color: var(--m3-sys-color-primary);
+        }
+
+        .share-app-bar-title {
+            font-size: var(--title-large-size);
+            font-weight: 500;
+            margin-left: 16px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #share-map-wrapper {
+            flex-grow: 1;
+            position: relative;
+            background-color: var(--m3-sys-color-surface-variant);
+        }
+
+        #share-map {
+            height: 100%;
+            width: 100%;
+            z-index: 1;
+        }
+
+        .map-controls-share {
+            position: absolute;
+            right: 16px;
+            bottom: 150px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 850;
+            align-items: flex-end;
+        }
+
+        .map-control-button-share {
+            width: 40px;
+            height: 40px;
+            background-color: var(--m3-sys-color-surface-container-high);
+            color: var(--m3-sys-color-on-surface-variant);
+            border-radius: 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.1);
+            cursor: pointer;
+            transition: box-shadow 0.2s, background-color 0.2s, color 0.2s;
+            border: none;
+            padding: 0;
+            font-family: 'Material Symbols Outlined';
+            font-size: 24px;
+        }
+
+        .map-control-button-share:hover {
+            box-shadow: 0 2px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+            background-color: var(--m3-sys-color-surface-container-highest);
+            color: var(--m3-sys-color-on-surface);
+        }
+
+        .map-control-button-share:active {
+            background-color: var(--m3-sys-color-surface-container-high);
+            box-shadow: inset 0 1px 1px rgba(var(--m3-sys-color-shadow), 0.1);
+        }
+
+        .map-control-button-share:disabled,
+        .map-control-button-share.disabled {
+            color: var(--m3-sys-color-outline);
+            opacity: 0.5;
+            cursor: default;
+            background-color: var(--m3-sys-color-surface-container-high) !important;
+            box-shadow: none !important;
+        }
+
+        .share-user-location-marker {
+            width: 14px;
+            height: 14px;
+            background-color: #4285F4;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.3);
+        }
+
+        .custom-marker-share {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .custom-marker-share svg {
+            filter: drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.4));
+        }
+
+        .info-card-details-item {
+            display: flex;
+            align-items: center;
+        }
+
+        .info-card {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            right: 16px;
+            background-color: var(--m3-sys-color-surface-container-high);
+            color: var(--m3-sys-color-on-surface);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(var(--m3-sys-color-shadow), 0.15);
+            z-index: 900;
+            max-width: 500px;
+            margin: 0 auto;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+            pointer-events: none;
+        }
+
+        .info-card.visible {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .info-card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .info-card-icon {
+            font-size: 20px;
+            color: var(--m3-sys-color-secondary);
+        }
+
+        .info-card-title {
+            font-size: var(--title-medium-size);
+            font-weight: 500;
+            margin-left: 8px;
+            flex-grow: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .info-card-details {
+            font-size: var(--body-medium-size);
+            color: var(--m3-sys-color-on-surface-variant);
+            line-height: 1.5;
+        }
+
+        .info-card-details .material-symbols-outlined {
+            font-size: 1.1em;
+            vertical-align: bottom;
+            margin-right: 6px;
+            opacity: 0.8;
+        }
+
+        .info-card-note-container {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--m3-sys-color-outline-variant);
+            display: none;
+        }
+
+        .info-card-note {
+            font-size: var(--body-small-size);
+            /* font-style: italic; */
+            color: var(--m3-sys-color-on-surface-variant);
+        }
+
+
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: color-mix(in srgb, var(--m3-sys-color-scrim) 40%, transparent);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9;
+            text-align: center;
+            transition: opacity 0.3s ease-out;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+
+        .loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-overlay .material-symbols-outlined {
+            font-size: 48px;
+            color: var(--m3-sys-color-error);
+            margin-bottom: 12px;
+            display: none;
+        }
+
+        .loading-overlay.error .material-symbols-outlined {
+            display: inline-block;
+        }
+
+        .loading-overlay p {
+            margin-top: 12px;
+            color: var(--m3-sys-color-surface-variant);
+            font-size: var(--body-medium-size);
+            padding: 0 20px;
+            /* Keep existing padding */
+            transition: color 0.3s, background-color 0.3s, box-shadow 0.3s;
+            /* Add transitions */
+            border-radius: 8px;
+            /* Add rounding */
+        }
+
+        /* --- Enhanced Error Message Styling --- */
+        .loading-overlay.error p {
+            color: var(--m3-sys-color-error);
+            /* Ensure error text color */
+            font-weight: 500;
+            background-color: color-mix(in srgb, var(--m3-sys-color-error-container) 40%, transparent);
+            /* Subtle error background */
+            padding: 8px 16px;
+            /* Add padding */
+            margin: 12px 20px 0 20px;
+            /* Adjust margin to account for padding */
+            border: 1px solid color-mix(in srgb, var(--m3-sys-color-error) 30%, transparent);
+            /* Subtle border */
+            box-shadow: 0 1px 4px rgba(var(--m3-sys-color-shadow), 0.1);
+            /* Soft shadow */
+            max-width: 80%;
+            /* Prevent it getting too wide */
+            display: inline-block;
+            /* Allow background to fit content */
+        }
+
+        .spinner {
+            border: 4px solid var(--m3-sys-color-surface-variant);
+            border-top: 4px solid var(--m3-sys-color-primary);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-overlay.error .spinner {
+            display: none;
+        }
+
+        .leaflet-popup-content-wrapper {
+            background: var(--m3-sys-color-surface-container-high);
+            color: var(--m3-sys-color-on-surface);
+            box-shadow: 0 1px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+        }
+
+        .leaflet-popup-tip {
+            background: var(--m3-sys-color-surface-container-high);
+            color: var(--m3-sys-color-on-surface);
+            box-shadow: 0 1px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+            border-radius: 2px;
+        }
+
+        .leaflet-popup-content {
+            margin: 12px;
+            font-size: var(--body-medium-size);
+            line-height: 1.5;
+            max-width: 280px;
+        }
+
+        .leaflet-popup-content b {
+            font-weight: 500;
+            color: var(--m3-sys-color-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+
+        .leaflet-popup-content b .marker-icon-popup {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        .leaflet-popup-content .material-symbols-outlined {
+            font-size: 1.1em;
+            vertical-align: bottom;
+            margin-right: 5px;
+            opacity: 0.8;
+            color: var(--m3-sys-color-on-surface-variant);
+        }
+
+        .leaflet-popup-content div {
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+        }
+
+        .leaflet-popup-content div span:first-child {
+            flex-shrink: 0;
+        }
+
+        .leaflet-popup-content small {
+            font-size: var(--body-small-size);
+            color: var(--m3-sys-color-on-surface-variant);
+            opacity: 0.9;
+            display: block;
+            margin-top: 2px;
+        }
+
+        .leaflet-popup-content hr {
+            margin: 6px 0;
+            border: none;
+            border-top: 1px solid var(--m3-sys-color-outline-variant);
+        }
+
+        .leaflet-popup-content a {
+            color: var(--m3-sys-color-primary);
+            text-decoration: none;
+        }
+
+        .leaflet-popup-content a:hover {
+            text-decoration: underline;
+        }
+
+        .leaflet-container a.leaflet-popup-close-button {
+            color: var(--m3-sys-color-on-surface-variant);
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        /* Added: Style for absolute time part */
+        #info-card-time .absolute-time {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-left: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="share-container">
+        <header class="share-app-bar">
+            <span class="material-symbols-outlined share-app-bar-icon">share_location</span>
+            <h1 class="share-app-bar-title" id="share-title">Shared Location</h1>
+        </header>
+
+        <div id="share-map-wrapper">
+            <div id="share-map"></div>
+            <div class="map-controls-share">
+                <button class="map-control-button-share" id="zoom-in-share" title="Zoom in"
+                    aria-label="Zoom in">add</button>
+                <button class="map-control-button-share" id="zoom-out-share" title="Zoom out"
+                    aria-label="Zoom out">remove</button>
+                <button class="map-control-button-share" id="center-device-share" title="Center on shared device"
+                    aria-label="Center on shared device">devices</button>
+                <button class="map-control-button-share" id="my-location-share" title="Center on my location"
+                    aria-label="Center on my location">my_location</button>
+            </div>
+            <div class="info-card" id="info-card">
+                <div class="info-card-header">
+                    <span class="material-symbols-outlined info-card-icon" id="info-card-icon">devices</span>
+                    <span class="info-card-title" id="info-card-title">Device Name</span>
+                </div>
+                <div class="info-card-details">
+                    <div class="info-card-details-item"><span class="material-symbols-outlined">schedule</span>
+                        <span id="info-card-time" data-timestamp="">Loading time...</span>
+                    </div>
+                    <div class="info-card-details-item"><span class="material-symbols-outlined"
+                            id="info-card-battery-icon">battery_unknown</span>
+                        <span id="info-card-battery">Loading battery...</span>
+                    </div>
+                    <hr>
+                    <div id="info-card-note-container" style="display: none;">
+                        <div class="info-card-note info-card-details-item" id="info-card-note"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading-overlay" class="loading-overlay">
+        <span class="material-symbols-outlined"></span>
+        <div class="spinner"></div>
+        <p id="loading-message">Loading shared location...</p>
+    </div>
+
+    <script id="leaflet-js" src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Embed share_page.js directly
+        window.SharePage = {
+            map: null,
+            marker: null,
+            userLocationMarker: null,
+            shareId: null,
+            fetchInterval: null,
+            relativeTimeUpdateInterval: null, // <<< NEW: Timer for relative time
+            lastTimestamp: null,
+            pollIntervalMs: 30 * 1000,
+            isInitialLoad: true,
+            isLocatingUser: false,
+
+            UI: {
+                elements: {},
+                cacheElements: function () {
+                    this.elements.overlay = document.getElementById('loading-overlay');
+                    this.elements.message = document.getElementById('loading-message');
+                    this.elements.spinner = this.elements.overlay?.querySelector('.spinner');
+                    this.elements.errorIcon = this.elements.overlay?.querySelector('.material-symbols-outlined');
+                    this.elements.title = document.getElementById('share-title');
+                    this.elements.infoCard = document.getElementById('info-card');
+                    this.elements.infoTitle = document.getElementById('info-card-title');
+                    this.elements.infoIcon = document.getElementById('info-card-icon');
+                    this.elements.infoTime = document.getElementById('info-card-time'); // <<< CACHE time element
+                    this.elements.infoBattery = document.getElementById('info-card-battery');
+                    this.elements.infoBatteryIcon = document.getElementById('info-card-battery-icon');
+                    this.elements.infoNoteContainer = document.getElementById('info-card-note-container');
+                    this.elements.infoNote = document.getElementById('info-card-note');
+                    this.elements.zoomInBtn = document.getElementById('zoom-in-share');
+                    this.elements.zoomOutBtn = document.getElementById('zoom-out-share');
+                    this.elements.centerDeviceBtn = document.getElementById('center-device-share');
+                    this.elements.myLocationBtn = document.getElementById('my-location-share');
+                },
+                displayMessage: function (message, isError = false, showSpinner = !isError, iconName = 'cloud_off') {
+                    if (!this.elements.overlay || !this.elements.message) this.cacheElements(); if (!this.elements.overlay || !this.elements.message) return; this.elements.overlay.classList.remove('hidden'); this.elements.overlay.classList.toggle('error', isError); if (this.elements.spinner) this.elements.spinner.style.display = showSpinner ? 'block' : 'none'; if (this.elements.errorIcon) { this.elements.errorIcon.style.display = isError ? 'inline-block' : 'none'; this.elements.errorIcon.textContent = iconName; } this.elements.message.innerHTML = message; this.elements.message.className = isError ? 'error-message' : '';
+                },
+                hideOverlay: function () {
+                    if (!this.elements.overlay) this.cacheElements(); if (this.elements.overlay) this.elements.overlay.classList.add('hidden');
+                },
+                showInfoCard: function () {
+                    if (!this.elements.infoCard) this.cacheElements(); if (this.elements.infoCard) this.elements.infoCard.classList.add('visible');
+                },
+                // --- MODIFY updateInfoCard ---
+                updateInfoCard: function (data) {
+                    if (!this.elements.infoCard) this.cacheElements();
+                    if (!this.elements.infoCard) return;
+
+                    const deviceName = data.device_name || "Shared Device";
+                    this.elements.title.textContent = `Location: ${deviceName}`;
+                    this.elements.infoTitle.textContent = deviceName;
+                    this.elements.infoIcon.textContent = 'devices';
+
+                    // --- Store timestamp and update text initially ---
+                    if (data.timestamp && this.elements.infoTime) {
+                        const timestampISO = data.timestamp;
+                        this.elements.infoTime.dataset.timestamp = timestampISO; // Store full timestamp
+                        SharePage.refreshRelativeTimeUI(); // Call the update function immediately
+                    } else if (this.elements.infoTime) {
+                        this.elements.infoTime.textContent = "Unknown time";
+                        delete this.elements.infoTime.dataset.timestamp; // Remove attribute if no timestamp
+                    }
+                    // --- ------------------------------------------- ---
+
+                    // Battery info (keep as before)
+                    let batteryText = "Unknown"; let batteryIcon = 'battery_unknown';
+                    if (data.battery_level !== null) { batteryText = `${data.battery_level.toFixed(0)}%`; const level = data.battery_level; if (level > 95) batteryIcon = 'battery_full'; else if (level > 80) batteryIcon = 'battery_6_bar'; else if (level > 60) batteryIcon = 'battery_5_bar'; else if (level > 40) batteryIcon = 'battery_4_bar'; else if (level > 25) batteryIcon = 'battery_3_bar'; else if (level >= 15) batteryIcon = 'battery_alert'; else batteryIcon = 'battery_0_bar'; }
+                    else if (data.battery_status && data.battery_status !== 'Unknown') { batteryText = data.battery_status; if (data.battery_status === 'Low' || data.battery_status === 'Very Low') batteryIcon = 'battery_alert'; }
+                    this.elements.infoBattery.textContent = batteryText; this.elements.infoBatteryIcon.textContent = batteryIcon;
+
+                    // Note info (keep as before)
+                    if (data.share_note && this.elements.infoNoteContainer && this.elements.infoNote) {
+                        this.elements.infoNote.innerHTML = `<hr><div class="info-card-details-item"><span class="material-symbols-outlined">info</span>Note: ${SharePage.escapeHtml(data.share_note)}</div>`; this.elements.infoNoteContainer.style.display = 'block';
+                    }
+                    else if (this.elements.infoNoteContainer) { this.elements.infoNoteContainer.style.display = 'none'; }
+                },
+                updateZoomButtons: function () {
+                    if (!SharePage.map || !this.elements.zoomInBtn || !this.elements.zoomOutBtn) return; this.elements.zoomInBtn.disabled = SharePage.map.getZoom() >= SharePage.map.getMaxZoom(); this.elements.zoomOutBtn.disabled = SharePage.map.getZoom() <= SharePage.map.getMinZoom();
+                }
+            },
+
+            formatTimeRelative: function (date) {
+                if (!date || !(date instanceof Date) || isNaN(date)) return "Unknown time"; const now = new Date(); const deltaSeconds = Math.round((now.getTime() - date.getTime()) / 1000); if (deltaSeconds < 0) return "Just now"; if (deltaSeconds < 5) return "Just now"; if (deltaSeconds < 60) return `${deltaSeconds} sec ago`; const deltaMinutes = Math.round(deltaSeconds / 60); if (deltaMinutes < 60) return `${deltaMinutes} min ago`; const deltaHours = Math.round(deltaMinutes / 60); if (deltaHours < 24) return `${deltaHours} hr ago`; const deltaDays = Math.round(deltaHours / 24); if (deltaDays === 1) return "Yesterday"; if (deltaDays < 7) return `${deltaDays} days ago`; try { return new Intl.DateTimeFormat(navigator.language || 'en-US', { dateStyle: 'short', timeStyle: 'short' }).format(date); } catch (e) { return date.toLocaleDateString(); }
+            },
+
+            escapeHtml: function (unsafe) {
+                if (typeof unsafe !== 'string') return unsafe; return unsafe.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, '"').replace(/'/g, "'");
+            },
+
+            generateDeviceIconSVG: function (label, color, size = 36) {
+                const sanitizedLabel = (label || '?'); let displayLabel = '?'; try { const graphemes = [...sanitizedLabel]; displayLabel = graphemes.slice(0, 2).join("").toUpperCase(); } catch (e) { if (sanitizedLabel.length > 0) { if (sanitizedLabel.length >= 2 && 0xD800 <= sanitizedLabel.charCodeAt(0) && sanitizedLabel.charCodeAt(0) <= 0xDBFF) { displayLabel = sanitizedLabel.substring(0, 2).toUpperCase(); } else { displayLabel = sanitizedLabel.substring(0, 1).toUpperCase(); } } } const sanitizedColor = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#70757a'; const border_width = Math.max(1, Math.round(size * 0.1)); const inner_radius = Math.max(1, Math.round(size / 2) - border_width); const text_size = size * (displayLabel.length === 1 ? 0.50 : 0.40); let text_color = '#FFFFFF'; try { const r = parseInt(sanitizedColor.substring(1, 3), 16); const g = parseInt(sanitizedColor.substring(3, 5), 16); const b = parseInt(sanitizedColor.substring(5, 7), 16); const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; if (lum > 0.55) { text_color = '#333333'; } } catch (e) { } const label_safe = this.escapeHtml(displayLabel); return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="${sanitizedColor}" /><circle cx="${size / 2}" cy="${size / 2}" r="${inner_radius}" fill="#FFFFFF" /><text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" font-family="sans-serif" font-size="${text_size}px" font-weight="bold" fill="${text_color}">${label_safe}</text></svg>`;
+            },
+
+            createDeviceIcon: function (label, color) {
+                const size = 36; const svgHtml = this.generateDeviceIconSVG(label, color, size); return L.divIcon({ className: 'custom-marker-share', html: svgHtml, iconSize: [size, size], iconAnchor: [size / 2, size], popupAnchor: [0, -size] });
+            },
+
+            createUserLocationIcon: function () {
+                return L.divIcon({ className: 'share-user-location-marker', iconSize: [14, 14], iconAnchor: [7, 7] });
+            },
+
+            // --- NEW: Relative Time UI Update Function ---
+            refreshRelativeTimeUI: function () {
+                const timeElement = this.UI.elements.infoTime;
+                if (!timeElement || !timeElement.dataset.timestamp) return;
+
+                try {
+                    const timestampISO = timeElement.dataset.timestamp;
+                    const date = new Date(timestampISO); // Parse the stored ISO string
+                    if (isNaN(date)) {
+                        timeElement.textContent = "Invalid time data";
+                        return;
+                    }
+                    const relativeTime = this.formatTimeRelative(date);
+                    const absoluteTime = date.toLocaleString();
+                    // Update the text content, keeping absolute time smaller
+                    timeElement.innerHTML = `${relativeTime} <span class="absolute-time">(${absoluteTime})</span>`;
+                } catch (e) {
+                    console.warn("Error refreshing relative time UI:", e);
+                    timeElement.textContent = "Error updating time"; // Indicate error
+                }
+            },
+            // --- ------------------------------------ ---
+
+            fetchAndUpdateLocation: async function () {
+                if (!this.shareId) return; console.log(`[SharePage] Fetching location for share: ${this.shareId}`); try {
+                    const apiUrl = `/public/api/shared/${this.shareId}`; const response = await fetch(apiUrl); const contentType = response.headers.get("content-type"); if (!response.ok) { let errorMsg = `Error ${response.status}`; let errorIcon = 'cloud_off'; let errorData = null; if (contentType && contentType.includes("application/json")) { try { errorData = await response.json(); errorMsg = errorData.description || errorData.error || `${errorMsg}: ${response.statusText}`; } catch (e) { errorMsg = `${errorMsg}: Invalid error format from server.`; } } else if (contentType && contentType.includes("text/html")) { errorMsg = `Server Error (${response.status}). Please try again later.`; errorIcon = 'dns'; } else { try { const text = await response.text(); errorMsg = `${errorMsg}: ${response.statusText} - ${text.substring(0, 100)}`; } catch (e) { errorMsg = `${errorMsg}: ${response.statusText}`; } } if (response.status === 404 || response.status === 410) { errorIcon = 'link_off'; errorMsg = "Link invalid, expired, or revoked."; this.stopPolling(); } else if (response.status === 503) { errorIcon = 'sync_problem'; errorMsg = "Location data temporarily unavailable."; } else if (response.status === 500) { errorIcon = 'dns'; errorMsg = "Server error retrieving location."; } const error = new Error(errorMsg); error.icon = errorIcon; error.status = response.status; throw error; } if (!contentType || !contentType.includes("application/json")) { throw new Error("Invalid data format received from server."); } const data = await response.json(); console.log("[SharePage] Received data:", data); if (!this.isInitialLoad && data.last_updated && this.lastTimestamp && data.last_updated <= this.lastTimestamp) { console.log("[SharePage] Data timestamp not newer."); this.UI.hideOverlay(); return; } this.lastTimestamp = data.last_updated; if (data.lat === null || data.lng === null) {
+                        this.UI.displayMessage("Device location is currently unavailable.", true, false, 'location_off');
+                        if (this.UI.elements.infoCard) this.UI.elements.infoCard.classList.remove('visible'); return;
+                    } this.UI.updateInfoCard(data);
+                    this.UI.showInfoCard();
+                    const latLng = L.latLng(data.lat, data.lng);
+                    const deviceName = data.device_name || "Shared Device";
+                    const deviceLabel = data.device_label || "?";
+                    const deviceColor = data.device_color || "#70757a";
+                    let popupContent = `<b><span class="marker-icon-popup">${this.generateDeviceIconSVG(deviceLabel, deviceColor, 20)}</span>${this.escapeHtml(deviceName)}</b><br>`;
+                    let timestampRelative = "Unknown time";
+                    if (data.timestamp) {
+                        try {
+                            timestampRelative = this.formatTimeRelative(new Date(data.timestamp));
+                            popupContent += `<div><span class="material-symbols-outlined">schedule</span> ${new Date(data.timestamp).toLocaleString()} (${timestampRelative})</div>`;
+                        } catch (e) {
+                            popupContent += `<div><span class="material-symbols-outlined">schedule</span> Invalid Time</div>`;
+                        }
+                    } if (data.battery_level !== null) {
+                        popupContent += `<div><span class="material-symbols-outlined">battery_std</span> ${data.battery_level.toFixed(0)}%${data.battery_status && data.battery_status !== 'Unknown' ? ` (${data.battery_status})` : ''}</div>`;
+                    } else if (data.battery_status && data.battery_status !== 'Unknown') {
+                        popupContent += `<div><span class="material-symbols-outlined">battery_unknown</span> ${data.battery_status}</div>`;
+                    } popupContent += `<div><span class="material-symbols-outlined">pin_drop</span> ${data.lat.toFixed(5)}°, ${data.lng.toFixed(5)}</div>`;
+                    popupContent += `<div><span class="material-symbols-outlined">map</span> <a href="https://www.google.com/maps?q=${data.lat},${data.lng}" target="_blank" rel="noopener noreferrer">View on Google Maps</a></div>`;
+                    if (data.share_note) {
+                        popupContent += `<hr><div><span class="material-symbols-outlined">info</span>Note: ${this.escapeHtml(data.share_note)}</div>`;
+                    } const newIcon = this.createDeviceIcon(deviceLabel, deviceColor);
+                    if (!this.marker) {
+                        this.marker = L.marker(latLng, { icon: newIcon }).addTo(this.map);
+                        this.marker.bindPopup(popupContent);
+                        this.map.setView(latLng, 16);
+                        console.log("[SharePage] Marker created and map centered.");
+                    } else {
+                        this.marker.setLatLng(latLng);
+                        this.marker.setIcon(newIcon);
+                        this.marker.setPopupContent(popupContent);
+                        if (this.isInitialLoad) {
+                            this.map.setView(latLng, 16);
+                            console.log("[SharePage] Marker updated and map centered (initial).");
+                        } else if (!this.map.getBounds().contains(latLng)) {
+                            this.map.panTo(latLng);
+                            console.log("[SharePage] Marker updated and map panned.");
+                        } else {
+                            console.log("[SharePage] Marker updated (no pan needed).");
+                        }
+                    } this.UI.hideOverlay();
+                    this.isInitialLoad = false;
+                } catch (error) {
+                    console.error("[SharePage] Error fetching/processing shared location:", error);
+                    let displayError = error.message || "An unknown error occurred.";
+                    let errorIcon = error.icon || 'cloud_off';
+                    if (error instanceof SyntaxError) {
+                        displayError = "Error processing data from server.";
+                        errorIcon = 'sync_problem';
+                    } this.UI.displayMessage(displayError, true, false, errorIcon);
+                    if (this.UI.elements.infoCard) this.UI.elements.infoCard.classList.remove('visible');
+                    if (error.status === 404 || error.status === 410 || error.status === 500) {
+                        this.stopPolling();
+                    }
+                }
+            },
+
+            startPolling: function () {
+                if (this.fetchInterval) return;
+                if (!this.shareId) {
+                    console.error("[SharePage] Cannot start polling without shareId.");
+                    return;
+                } console.log(`[SharePage] Starting polling every ${this.pollIntervalMs / 1000} seconds.`); this.fetchAndUpdateLocation(); this.fetchInterval = setInterval(() => { this.fetchAndUpdateLocation(); }, this.pollIntervalMs);
+                // --- START: Add Relative Time Update Interval ---
+                if (this.relativeTimeUpdateInterval) clearInterval(this.relativeTimeUpdateInterval); // Clear previous if any
+                this.relativeTimeUpdateInterval = setInterval(() => {
+                    this.refreshRelativeTimeUI();
+                }, 60 * 1000); // Update every minute
+                // --- END: Add Relative Time Update Interval ---
+            },
+
+            stopPolling: function () {
+                if (this.fetchInterval) { console.log("[SharePage] Stopping polling."); clearInterval(this.fetchInterval); this.fetchInterval = null; }
+                // --- START: Clear Relative Time Update Interval ---
+                if (this.relativeTimeUpdateInterval) {
+                    console.log("[SharePage] Stopping relative time updates.");
+                    clearInterval(this.relativeTimeUpdateInterval);
+                    this.relativeTimeUpdateInterval = null;
+                }
+                // --- END: Clear Relative Time Update Interval ---
+            },
+
+            centerOnDevice: function () {
+                if (this.marker && this.map) { const latLng = this.marker.getLatLng(); this.map.setView(latLng, 16); this.marker.openPopup(); console.log("[SharePage] Centered map on shared device."); } else { console.warn("[SharePage] Cannot center: Device marker or map not available."); }
+            },
+
+            locateUserOnShareMap: function () {
+                if (this.isLocatingUser) return; if (!navigator.geolocation) { this.UI.displayMessage("Geolocation not supported.", true, false, 'location_disabled'); setTimeout(() => this.UI.hideOverlay(), 3000); return; } this.isLocatingUser = true; this.UI.displayMessage("Getting your location...", false, true); navigator.geolocation.getCurrentPosition((position) => { this.isLocatingUser = false; this.UI.hideOverlay(); const lat = position.coords.latitude; const lng = position.coords.longitude; const latLng = L.latLng(lat, lng); console.log("[SharePage] User location found:", lat, lng); if (!this.userLocationMarker) { this.userLocationMarker = L.marker(latLng, { icon: this.createUserLocationIcon() }).addTo(this.map); } else { this.userLocationMarker.setLatLng(latLng); if (!this.map.hasLayer(this.userLocationMarker)) { this.userLocationMarker.addTo(this.map); } } this.map.setView(latLng, 16); }, (error) => { this.isLocatingUser = false; this.UI.hideOverlay(); console.error("[SharePage] Geolocation Error:", error); let msg = "Could not get your location."; if (error.code === error.PERMISSION_DENIED) msg = "Location permission denied."; else if (error.code === error.POSITION_UNAVAILABLE) msg = "Location information is unavailable."; else if (error.code === error.TIMEOUT) msg = "Location request timed out."; this.UI.displayMessage(msg, true, false, 'location_disabled'); setTimeout(() => this.UI.hideOverlay(), 4000); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+            },
+
+            initialize: function (shareId) {
+                console.log("[SharePage] Initializing..."); this.shareId = shareId; this.UI.cacheElements(); if (!this.shareId) { this.UI.displayMessage("Invalid share link provided.", true, false, 'error'); return; } this.UI.displayMessage("Loading shared location...", false, true); try { this.map = L.map('share-map', { zoomControl: false, attributionControl: false }).setView([0, 0], 3); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '', maxZoom: 19, }).addTo(this.map); if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) { const tilePane = this.map.getPane('tilePane'); if (tilePane) { tilePane.style.filter = 'invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%)'; } } this.UI.elements.zoomInBtn?.addEventListener('click', () => { this.map?.zoomIn(); }); this.UI.elements.zoomOutBtn?.addEventListener('click', () => { this.map?.zoomOut(); }); this.UI.elements.centerDeviceBtn?.addEventListener('click', () => { this.centerOnDevice(); }); this.UI.elements.myLocationBtn?.addEventListener('click', () => { this.locateUserOnShareMap(); }); this.map.on('zoomend', () => this.UI.updateZoomButtons()); this.startPolling(); this.UI.updateZoomButtons(); } catch (error) { console.error("[SharePage] Map initialization error:", error); this.UI.displayMessage(`Map initialization failed: ${error.message}`, true, false, 'map'); }
+            }
+        };
+    </script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const shareId = "{{ share_id }}"; // Get shareId from Flask
+            const metaTag = document.getElementById('share-meta-theme-color');
+            // Apply theme (keep existing theme logic)
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.style.setProperty('--m3-sys-color-primary', '#ABC7FF');
+                document.documentElement.style.setProperty('--m3-sys-color-on-primary', '#002F64');
+                document.documentElement.style.setProperty('--m3-sys-color-primary-container', '#00458D');
+                document.documentElement.style.setProperty('--m3-sys-color-on-primary-container', '#D8E2FF');
+                document.documentElement.style.setProperty('--m3-sys-color-secondary', '#BDC7DC');
+                document.documentElement.style.setProperty('--m3-sys-color-on-secondary', '#273141');
+                document.documentElement.style.setProperty('--m3-sys-color-secondary-container', '#3E4758');
+                document.documentElement.style.setProperty('--m3-sys-color-on-secondary-container', '#D9E3F8');
+                document.documentElement.style.setProperty('--m3-sys-color-tertiary', '#DCBCE0');
+                document.documentElement.style.setProperty('--m3-sys-color-on-tertiary', '#3F2945');
+                document.documentElement.style.setProperty('--m3-sys-color-tertiary-container', '#573F5D');
+                document.documentElement.style.setProperty('--m3-sys-color-on-tertiary-container', '#F9D8FD');
+                document.documentElement.style.setProperty('--m3-sys-color-error', '#FFB4AB');
+                document.documentElement.style.setProperty('--m3-sys-color-on-error', '#690005');
+                document.documentElement.style.setProperty('--m3-sys-color-error-container', '#93000A');
+                document.documentElement.style.setProperty('--m3-sys-color-on-error-container', '#FFDAD6');
+                document.documentElement.style.setProperty('--m3-sys-color-background', '#1A1C1E');
+                document.documentElement.style.setProperty('--m3-sys-color-on-background', '#E3E2E6');
+                document.documentElement.style.setProperty('--m3-sys-color-surface', '#1A1C1E');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-rgb', '26, 28, 30');
+                document.documentElement.style.setProperty('--m3-sys-color-on-surface', '#E3E2E6');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-variant', '#44474F');
+                document.documentElement.style.setProperty('--m3-sys-color-on-surface-variant', '#C4C6D0');
+                document.documentElement.style.setProperty('--m3-sys-color-outline', '#8E9099');
+                document.documentElement.style.setProperty('--m3-sys-color-outline-variant', '#44474F');
+                document.documentElement.style.setProperty('--m3-sys-color-inverse-surface', '#E3E2E6');
+                document.documentElement.style.setProperty('--m3-sys-color-inverse-on-surface', '#1A1C1E');
+                document.documentElement.style.setProperty('--m3-sys-color-inverse-primary', '#4285F4');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-dim', '#121416');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-bright', '#383A3D');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-lowest', '#0F1113');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-low', '#1A1C1E');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container', '#1E2022');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-high', '#292B2D');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-highest', '#333538');
+                if (metaTag) { metaTag.setAttribute('content', '#1A1C1E'); }
+            } else {
+                document.documentElement.style.setProperty('--m3-sys-color-primary', '#4285F4');
+                document.documentElement.style.setProperty('--m3-sys-color-on-primary', '#FFFFFF');
+                document.documentElement.style.setProperty('--m3-sys-color-primary-container', '#D8E2FF');
+                document.documentElement.style.setProperty('--m3-sys-color-on-primary-container', '#001A43');
+                document.documentElement.style.setProperty('--m3-sys-color-secondary', '#555F71');
+                document.documentElement.style.setProperty('--m3-sys-color-on-secondary', '#FFFFFF');
+                document.documentElement.style.setProperty('--m3-sys-color-secondary-container', '#D9E3F8');
+                document.documentElement.style.setProperty('--m3-sys-color-on-secondary-container', '#121C2B');
+                document.documentElement.style.setProperty('--m3-sys-color-tertiary', '#6F5675');
+                document.documentElement.style.setProperty('--m3-sys-color-on-tertiary', '#FFFFFF');
+                document.documentElement.style.setProperty('--m3-sys-color-tertiary-container', '#F9D8FD');
+                document.documentElement.style.setProperty('--m3-sys-color-on-tertiary-container', '#29142F');
+                document.documentElement.style.setProperty('--m3-sys-color-error', '#BA1A1A');
+                document.documentElement.style.setProperty('--m3-sys-color-on-error', '#FFFFFF');
+                document.documentElement.style.setProperty('--m3-sys-color-error-container', '#FFDAD6');
+                document.documentElement.style.setProperty('--m3-sys-color-on-error-container', '#410002');
+                document.documentElement.style.setProperty('--m3-sys-color-background', '#FCFCFF');
+                document.documentElement.style.setProperty('--m3-sys-color-on-background', '#1A1C1E');
+                document.documentElement.style.setProperty('--m3-sys-color-surface', '#FCFCFF');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-rgb', '252, 252, 255');
+                document.documentElement.style.setProperty('--m3-sys-color-on-surface', '#1A1C1E');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-variant', '#E0E2EC');
+                document.documentElement.style.setProperty('--m3-sys-color-on-surface-variant', '#44474F');
+                document.documentElement.style.setProperty('--m3-sys-color-outline', '#74777F');
+                document.documentElement.style.setProperty('--m3-sys-color-outline-variant', '#C4C6D0');
+                document.documentElement.style.setProperty('--m3-sys-color-inverse-surface', '#2F3033');
+                document.documentElement.style.setProperty('--m3-sys-color-inverse-on-surface', '#F1F0F4');
+                document.documentElement.style.setProperty('--m3-sys-color-inverse-primary', '#ABC7FF');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-dim', '#DBDADE');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-bright', '#FCFCFF');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-lowest', '#FFFFFF');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-low', '#F6F6F9');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container', '#F0F0F3');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-high', '#EAEBED');
+                document.documentElement.style.setProperty('--m3-sys-color-surface-container-highest', '#E4E4E7');
+                if (metaTag) { metaTag.setAttribute('content', '#FCFCFF'); }
+                else { console.warn("Meta theme color tag not found during light mode application."); }
+            }
+            // Initialize Share Page
+            if (window.SharePage && typeof window.SharePage.initialize === 'function') { window.SharePage.initialize(shareId); }
+            else {
+                console.error("SharePage object or initialize function not found!");
+                const loadingOverlay = document.getElementById('loading-overlay');
+                const loadingMessage = document.getElementById('loading-message');
+                const spinner = loadingOverlay?.querySelector('.spinner');
+                const errorIcon = loadingOverlay?.querySelector('.material-symbols-outlined');
+                if (loadingMessage) loadingMessage.innerHTML = '<span class="error-message" style="color: var(--m3-sys-color-error);">Error loading map script.</span>';
+                if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+                if (spinner) spinner.style.display = 'none';
+                if (errorIcon) { errorIcon.textContent = 'error'; errorIcon.style.display = 'inline-block'; errorIcon.style.color = 'var(--m3-sys-color-error)'; }
+            }
+        });
+    </script>
+</body>
+
+</html>

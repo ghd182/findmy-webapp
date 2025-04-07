@@ -1,0 +1,78 @@
+# docker-compose.yml
+
+services:
+  findmyapp:
+    # Build the image using the Dockerfile in the current directory
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Specify the target platform
+    platform: linux/arm64/v8
+    # Optional: Explicitly name the image built by compose
+    image: ghd182/findmy-app:latest
+    # Sets a specific container name
+    container_name: findmyapp
+    # Restart policy
+    restart: unless-stopped
+    ports:
+      # Map host port 5000 to container port 5000
+      # Change host port (left side) if 5000 is already in use on your Pi
+      - "5000:5000"
+    volumes:
+      # Mount the local ./data directory into the container for persistence
+      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
+      # Example for user 'pi': /home/username/findmy-app/data:/app/data
+      - ./data:/app/data
+      # Mount the .env file for configuration secrets
+      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
+      # Example for user 'pi': /home/username/findmy-app/.env:/app/.env
+      # - ./.env:/app/.env
+      # Mount the private key file if needed by your app (e.g., VAPID requires it)
+      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
+      # Example for user 'pi': /home/username/findmy-app/private_key.pem:/app/private_key.pem
+      # - ./private_key.pem:/app/private_key.pem # Uncomment if needed
+
+      # Mount the public key file if needed by your app
+      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
+      # Example for user 'pi': /home/username/findmy-app/public_key.pem:/app/public_key.pem
+      # - ./public_key.pem:/app/public_key.pem # Uncomment if needed
+    environment:
+      # --- Core Flask/App Settings ---
+      # IMPORTANT for production
+      FLASK_ENV: production
+      # Or DEBUG, WARNING, ERROR
+      LOG_LEVEL: INFO
+      # Set your timezone
+      TZ: Europe/Amsterdam
+      # Override if needed
+      WAITRESS_THREADS: 8
+
+      # --- SEED Variables (DEFINE THESE WITH STRONG SECRETS!) ---
+      # These seeds will be used to generate the actual keys internally.
+      # KEEP THESE SEEDS SECRET!
+      SECRET_SEED: "your-very-long-random-secret-phrase-for-sessions-portainer"
+      FERNET_SEED: "another-different-long-random-secret-phrase-for-encryption-portainer"
+      VAPID_SEED: "a-third-unique-long-random-phrase-for-push-keys-portainer"
+      VAPID_CLAIMS_EMAIL: "mailto:user@email.com"
+    
+      
+      # You can override .env variables here if needed, but mounting .env is usually sufficient
+      # Example: Override log level
+      # LOG_LEVEL: DEBUG
+      # Set timezone if needed by scheduler/logs
+      # User default is 10 mins
+      DEFAULT_FETCH_INTERVAL_MINUTES: 15
+      # Master job runs every 2 mins
+      SCHEDULER_MASTER_JOB_INTERVAL_MINUTES: 2
+      # Override fetch interval
+      FETCH_INTERVAL_MINUTES: 15
+      # Override battery threshold
+      LOW_BATTERY_THRESHOLD: 20
+      # Override notification cooldown (10 minutes)
+      NOTIFICATION_COOLDOWN_SECONDS: 600
+      # Override history retention
+      NOTIFICATION_HISTORY_DAYS: 60
+      # Override location history fetch duration     
+      HISTORY_DURATION_DAYS: 14
+      # Optionally set here
+      # ANISETTE_SERVERS: "https://anisette.example.com,http://localhost:6969"

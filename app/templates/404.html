@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 Not Found</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body { display: flex; justify-content: center; align-items: center; min-height: 100vh; text-align: center; }
+        .message-card { max-width: 450px; width: 90%; padding: 32px; }
+        .message-icon { font-size: 48px; color: var(--m3-sys-color-secondary); margin-bottom: 16px; }
+         html.dark-theme .message-icon { color: var(--m3-sys-color-secondary); } /* Keep consistent */
+    </style>
+</head>
+<body class="error-page"> {# Add class if you want specific body styles #}
+    <div class="card message-card">
+         <span class="material-icons message-icon">error_outline</span>
+         <h1 class="card-title">404 - Page Not Found</h1>
+         <p>Sorry, the page you were looking for doesn't exist.</p>
+         <div class="button-row" style="justify-content: center;">
+             <a href="{{ url_for('main.index_route') }}" class="button">Go Home</a>
+         </div>
+    </div>
+    <script>
+        (function(){const theme=localStorage.getItem('theme')||'system';if(theme==='dark'||(theme==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark-theme');}})();
+    </script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+{
+  "name": "Find My Location Web",
+  "short_name": "FindMy",
+  "description": "Alternative Find My location tracking web app.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#4285F4",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/static/icons/web-app-manifest-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/web-app-manifest-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "View Map",
+      "short_name": "Map",
+      "description": "Open the main map view",
+      "url": "/?page=index",
+      "icons": [
+        {
+          "src": "/static/icons/map_24dp.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "View Devices",
+      "short_name": "Devices",
+      "description": "Open the device list",
+      "url": "/?page=shared",
+      "icons": [
+        {
+          "src": "/static/icons/devices_24dp.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/static/img/screenshot1.png",
+      "sizes": "506x553",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Main Map View"
+    },
+    {
+      "src": "/static/img/screenshot2.png",
+      "sizes": "327x697",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Device List"
+    }
+  ]
+}

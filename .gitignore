@@ -1,0 +1,117 @@
+# .gitignore for FindMy WebApp
+
+# --- Python Bytecode and Cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Python Virtual Environments ---
+# Common names for virtual environments
+venv/
+.venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# --- Configuration / Secrets ---
+# Environment variable files (use seeds in docker-compose.yml instead)
+.env
+*.env.*
+.envrc
+
+# User-specific sensitive data (Apple credentials are saved here)
+# IMPORTANT: Do NOT commit the contents of the data directory!
+data/
+
+# Explicitly ignore credential files if accidentally placed outside data/
+apple_credentials.json
+*.pem
+*.key
+
+# --- IDE / Editor Configuration ---
+.idea/
+.vscode/
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# --- Build / Distribution Artifacts ---
+dist/
+build/
+*.egg-info/
+*.egg
+wheels/
+htmlcov/ # Coverage reports
+
+# --- Testing Artifacts ---
+.pytest_cache/
+.coverage
+*.cover
+nosetests.xml
+coverage.xml
+
+# --- Runtime / Temporary Files ---
+*.log
+*.log.*
+*.sqlite
+*.sqlite3
+# Celery / Task Queue files (if added later)
+celerybeat-schedule
+*.pid
+
+# --- OS Specific Files ---
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+# Linux
+*~
+# KDE temp files
+.~\$.*
+
+# --- Instance Folder (Common Flask Pattern) ---
+# Ignore instance folder if used (though not explicitly in structure now)
+/instance/
+
+# --- Node Modules (If frontend build tools are ever added) ---
+# node_modules/
+# npm-debug.log*
+# yarn-debug.log*
+# yarn-error.log*
+# package-lock.json # Sometimes ignored, sometimes committed
+# yarn.lock         # Sometimes ignored, sometimes committed
+
+# --- Jupyter Notebook Checkpoints ---
+.ipynb_checkpoints
+
+# --- Miscellaneous ---
+# If you use MyPy type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# If you use pyenv
+.python-version
+
+# If you use Ruff cache
+.ruff_cache/
+
+# If you use pytype cache
+.pytype/
+
+# --- Docker ---
+# Ignore docker contexts unless needed
+.docker/contexts/
+
+# ignore docker-compose files
+*.yaml
+codebase.txt
+codebase.py

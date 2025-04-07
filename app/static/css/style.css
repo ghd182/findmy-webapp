@@ -1,0 +1,2929 @@
+/* app/static/css/style.css */
+
+/* Define M3 variables with default LIGHT purple theme fallbacks */
+:root {
+    /* --- Core Roles (Blue Source #4285F4) --- */
+    --m3-sys-color-primary: #4285F4;
+    --m3-sys-color-on-primary: #FFFFFF;
+    --m3-sys-color-primary-container: #D8E2FF;
+    --m3-sys-color-on-primary-container: #001A43;
+    --m3-sys-color-secondary: #555F71;
+    --m3-sys-color-on-secondary: #FFFFFF;
+    --m3-sys-color-secondary-container: #D9E3F8;
+    --m3-sys-color-on-secondary-container: #121C2B;
+    --m3-sys-color-tertiary: #6F5675;
+    --m3-sys-color-on-tertiary: #FFFFFF;
+    --m3-sys-color-tertiary-container: #F9D8FD;
+    --m3-sys-color-on-tertiary-container: #29142F;
+    --m3-sys-color-error: #BA1A1A;
+    --m3-sys-color-on-error: #FFFFFF;
+    --m3-sys-color-error-container: #FFDAD6;
+    --m3-sys-color-on-error-container: #410002;
+    --m3-sys-color-background: #FCFCFF;
+    /* Neutral Tone 98 */
+    --m3-sys-color-on-background: #1A1C1E;
+    /* Neutral Tone 10 */
+    --m3-sys-color-surface: #FCFCFF;
+    /* Neutral Tone 98 */
+    --m3-sys-color-surface-rgb: 252, 252, 255;
+    --m3-sys-color-on-surface: #1A1C1E;
+    /* Neutral Tone 10 */
+    --m3-sys-color-surface-variant: #E0E2EC;
+    /* Neutral Variant 90 */
+    --m3-sys-color-on-surface-variant: #44474F;
+    /* Neutral Variant 30 */
+    --m3-sys-color-outline: #74777F;
+    /* Neutral Variant 50 */
+    --m3-sys-color-outline-variant: #C4C6D0;
+    /* Neutral Variant 80 */
+    --m3-sys-color-shadow: #000000;
+    --m3-sys-color-scrim: #000000;
+    --m3-sys-color-scrim-rgb: 0, 0, 0;
+    --m3-sys-color-inverse-surface: #2F3033;
+    /* Neutral Tone 20 */
+    --m3-sys-color-inverse-on-surface: #F1F0F4;
+    /* Neutral Tone 95 */
+    --m3-sys-color-inverse-primary: #ABC7FF;
+    /* Primary Tone 80 */
+
+    /* --- M3 Surface Tones (Light Theme - DERIVED FROM #4285F4) --- */
+    --m3-sys-color-surface-dim: #DBDADE;
+    /* Neutral Tone 87 */
+    --m3-sys-color-surface-bright: #FCFCFF;
+    /* Neutral Tone 98 (Same as Surface) */
+    --m3-sys-color-surface-container-lowest: #FFFFFF;
+    /* Neutral Tone 100 */
+    --m3-sys-color-surface-container-low: #F6F6F9;
+    /* Neutral Tone 96 */
+    --m3-sys-color-surface-container: #F0F0F3;
+    /* Neutral Tone 94 */
+    --m3-sys-color-surface-container-high: #EAEBED;
+    /* Neutral Tone 92 */
+    --m3-sys-color-surface-container-highest: #E4E4E7;
+    /* Neutral Tone 90 */
+
+    /* Typography (Keep unchanged) */
+    --font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+    --headline-large-size: 32px;
+    --headline-large-weight: 400;
+    --headline-medium-size: 28px;
+    --headline-medium-weight: 400;
+    --headline-small-size: 24px;
+    --headline-small-weight: 400;
+    --title-large-size: 22px;
+    --title-large-weight: 500;
+    --title-medium-size: 16px;
+    --title-medium-weight: 500;
+    --title-small-size: 14px;
+    --title-small-weight: 500;
+    --body-large-size: 16px;
+    --body-large-weight: 400;
+    --body-medium-size: 14px;
+    --body-medium-weight: 400;
+    --body-small-size: 12px;
+    --body-small-weight: 400;
+    --label-large-size: 14px;
+    --label-large-weight: 500;
+    --label-medium-size: 12px;
+    --label-medium-weight: 500;
+    --label-small-size: 11px;
+    --label-small-weight: 500;
+}
+
+/* --- DARK THEME OVERRIDES (Blue Source #4285F4) --- */
+/* Define dark variables when the dark-theme class is present on <html> */
+html.dark-theme {
+    /* Target html element */
+    /* M3 Sys Color Roles (Dark Theme - Blue Source #4285F4) */
+    --m3-sys-color-primary: #ABC7FF;
+    /* Primary 80 */
+    --m3-sys-color-on-primary: #002F64;
+    /* Primary 20 */
+    --m3-sys-color-primary-container: #00458D;
+    /* Primary 30 */
+    --m3-sys-color-on-primary-container: #D8E2FF;
+    /* Primary 90 */
+    --m3-sys-color-secondary: #BDC7DC;
+    /* Secondary 80 */
+    --m3-sys-color-on-secondary: #273141;
+    /* Secondary 20 */
+    --m3-sys-color-secondary-container: #3E4758;
+    /* Secondary 30 */
+    --m3-sys-color-on-secondary-container: #D9E3F8;
+    /* Secondary 90 */
+    --m3-sys-color-tertiary: #DCBCE0;
+    /* Tertiary 80 */
+    --m3-sys-color-on-tertiary: #3F2945;
+    /* Tertiary 20 */
+    --m3-sys-color-tertiary-container: #573F5D;
+    /* Tertiary 30 */
+    --m3-sys-color-on-tertiary-container: #F9D8FD;
+    /* Tertiary 90 */
+    --m3-sys-color-error: #FFB4AB;
+    /* Error 80 */
+    --m3-sys-color-on-error: #690005;
+    /* Error 20 */
+    --m3-sys-color-error-container: #93000A;
+    /* Error 30 */
+    --m3-sys-color-on-error-container: #FFDAD6;
+    /* Error 90 */
+    --m3-sys-color-background: #1A1C1E;
+    /* Neutral 10 */
+    --m3-sys-color-on-background: #E3E2E6;
+    /* Neutral 90 */
+    --m3-sys-color-surface: #1A1C1E;
+    /* Neutral 10 */
+    --m3-sys-color-surface-rgb: 26, 28, 30;
+    --m3-sys-color-on-surface: #E3E2E6;
+    /* Neutral 90 */
+    --m3-sys-color-surface-variant: #44474F;
+    /* Neutral Variant 30 */
+    --m3-sys-color-on-surface-variant: #C4C6D0;
+    /* Neutral Variant 80 */
+    --m3-sys-color-outline: #8E9099;
+    /* Neutral Variant 60 */
+    --m3-sys-color-outline-variant: #44474F;
+    /* Neutral Variant 30 */
+    --m3-sys-color-shadow: #000000;
+    --m3-sys-color-scrim: #000000;
+    --m3-sys-color-scrim-rgb: 0, 0, 0;
+    --m3-sys-color-inverse-surface: #E3E2E6;
+    /* Neutral 90 */
+    --m3-sys-color-inverse-on-surface: #1A1C1E;
+    /* Neutral 10 */
+    --m3-sys-color-inverse-primary: #4285F4;
+    /* Primary 40 */
+
+    /* --- M3 Surface Tones (Dark Theme - DERIVED FROM #4285F4) --- */
+    --m3-sys-color-surface-dim: #121416;
+    /* Neutral Tone 6 */
+    --m3-sys-color-surface-bright: #383A3D;
+    /* Neutral Tone 24 */
+    --m3-sys-color-surface-container-lowest: #0F1113;
+    /* Neutral Tone 4 */
+    --m3-sys-color-surface-container-low: #1A1C1E;
+    /* Neutral Tone 10 (Same as Background) */
+    --m3-sys-color-surface-container: #1E2022;
+    /* Neutral Tone 12 */
+    --m3-sys-color-surface-container-high: #292B2D;
+    /* Neutral Tone 17 */
+    --m3-sys-color-surface-container-highest: #333538;
+    /* Neutral Tone 22 */
+}
+
+/* Add the loading transition styles */
+body.app-loading {
+    opacity: 0;
+    /* Start fully transparent */
+    transition: opacity 0.25s ease-in-out;
+    /* Transition opacity */
+}
+
+body.app-loaded {
+    opacity: 1;
+    /* Fade in */
+}
+
+html.dark-theme input,
+html.dark-theme select,
+html.dark-theme textarea,
+html.dark-theme button {
+    color-scheme: dark;
+}
+
+/* General Reset and Body Styles (Keep as before) */
+
+
+/* Add the loading transition styles */
+body.app-loading .app-bar,
+body.app-loading #main-content,
+body.app-loading .bottom-nav {
+    opacity: 0;
+    visibility: hidden;
+}
+
+body.app-loaded .app-bar,
+body.app-loaded #main-content,
+body.app-loaded .bottom-nav {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.25s ease-in-out;
+    /* Adjust timing if needed */
+}
+
+/* General Reset and Body Styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-family);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    outline: none;
+}
+
+*:active {
+    outline: none;
+}
+
+*:focus {
+    outline: none;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+    width: 5px;
+}
+
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--m3-sys-color-outline);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--m3-sys-color-on-surface-variant);
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Style the scrollbar for dark theme */
+html.dark-theme ::-webkit-scrollbar-thumb {
+    background-color: var(--m3-sys-color-outline);
+}
+
+html.dark-theme ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--m3-sys-color-on-surface-variant);
+}
+
+
+
+body {
+    background-color: var(--m3-sys-color-background);
+    color: var(--m3-sys-color-on-background);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+/* Input color scheme hint for dark mode */
+.dark-theme input,
+.dark-theme select,
+.dark-theme textarea,
+.dark-theme button {
+    color-scheme: dark;
+}
+
+
+body.login-page,
+body.register-page,
+body.logout-success {
+    background-color: var(--m3-sys-color-surface-container);
+}
+
+html.dark-theme body.login-page,
+html.dark-theme body.register-page,
+html.dark-theme body.logout-success {
+    background-color: var(--m3-sys-color-surface-container);
+}
+
+
+/* App Bar styling */
+.app-bar {
+    background-color: var(--m3-sys-color-surface-container-low);
+    color: var(--m3-sys-color-on-surface);
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.1);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    transition: background-color 0.3s, color 0.3s, box-shadow 0.3s;
+}
+
+.app-bar h1 {
+    font-size: var(--title-large-size);
+    font-weight: var(--title-large-weight);
+    margin-left: 16px;
+    color: var(--m3-sys-color-on-surface);
+    transition: color 0.3s;
+}
+
+.app-bar .menu-icon,
+.app-bar .action-button {
+    width: 24px;
+    height: 24px;
+    opacity: 0.7;
+    cursor: pointer;
+    font-size: 24px;
+    color: var(--m3-sys-color-on-surface-variant);
+    transition: opacity 0.3s, color 0.3s;
+}
+
+.app-bar .action-buttons {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
+/* Content styling */
+.content {
+    flex: 1;
+    padding: 16px;
+    overflow: auto;
+    padding-bottom: 96px;
+}
+
+#index-page {
+    display: block;
+    height: 100%;
+}
+
+.history-slider-container {
+    /* Default hidden state */
+    opacity: 0;
+    visibility: hidden;
+    max-height: 0;
+    /* Use max-height for smooth collapse/expand */
+    overflow: hidden;
+    /* Hide content when collapsed */
+    transition: opacity 0.3s ease-out, visibility 0s linear 0.3s, max-height 0.3s ease-out;
+    /* Delay visibility change */
+    text-align: center;
+    margin-bottom: 0;
+    /* Collapse margin */
+    pointer-events: none;
+}
+
+.history-slider-container.visible {
+    /* Visible state */
+    opacity: 1;
+    visibility: visible;
+    max-height: 100px;
+    /* Adjust to fit content */
+    margin-bottom: 16px;
+    /* Restore margin */
+    transition: opacity 0.3s ease-out, visibility 0s linear 0s, max-height 0.3s ease-out;
+    pointer-events: auto;
+}
+
+#history-slider-label {
+    color: var(--m3-sys-color-on-surface-variant);
+    font-size: var(--label-medium-size);
+}
+
+#history-slider {
+    cursor: pointer;
+    accent-color: var(--m3-sys-color-primary);
+    margin-top: 2px;
+    width: 95%;
+}
+
+/* Map placeholder and container */
+/* .map-container {
+    height: 45vh;
+    background-color: var(--m3-sys-color-surface-container);
+    border-radius: 16px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+} */
+
+.map-container {
+    height: 45vh;
+    /* Or your desired height */
+    background-color: var(--m3-sys-color-surface-container);
+    border-radius: 16px;
+    margin-bottom: 16px;
+    position: relative;
+    /* Crucial for absolute positioning of child */
+    overflow: hidden;
+    /* Keep content within rounded corners */
+}
+
+
+#map {
+    height: 100%;
+    border-radius: 16px;
+    width: 100%;
+    display: block;
+    z-index: 1;
+    background: var(--m3-sys-color-background);
+}
+
+
+/* Map Placeholder - Make it an overlay */
+#map-placeholder {
+    position: absolute;
+    /* Position it over the map div */
+    top: 0;
+    left: 0;
+    width: 100%;
+    /* Cover full width */
+    height: 100%;
+    /* Cover full height */
+    display: flex;
+    /* Keep flex for centering content */
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: color-mix(in srgb, var(--m3-sys-color-surface) 90%, transparent);
+    /* Use surface with slight transparency */
+    /* Optional: Add backdrop blur if supported */
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    z-index: 5;
+    /* Ensure it's above #map but below map controls/popups */
+    border-radius: 16px;
+    /* Match container radius */
+    transition: opacity 0.3s ease-out, visibility 0.3s ease-out;
+    /* Fade transition */
+    opacity: 0;
+    /* Start hidden */
+    visibility: hidden;
+    /* Start hidden */
+    pointer-events: none;
+    /* Don't capture clicks when hidden */
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+#map-placeholder.visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    /* Allow interaction if needed (e.g., cancel button) */
+}
+
+#map-placeholder .spinner {
+    /* Spinner styles already defined */
+    border: 4px solid var(--m3-sys-color-surface-variant);
+    border-top: 4px solid var(--m3-sys-color-primary);
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+#map-placeholder p {
+    margin-top: 0;
+    /* Remove previous margin */
+    color: var(--m3-sys-color-on-surface-variant);
+    font-size: var(--body-medium-size);
+    opacity: 0.8;
+    transition: color 0.3s;
+}
+
+#map-placeholder .material-icons.error {
+    /* Error icon styling */
+    font-size: 48px;
+    color: var(--m3-sys-color-error);
+    margin-bottom: 16px;
+}
+
+
+
+/* Custom Leaflet marker style */
+.custom-marker {
+    display: flex;
+    justify-content: center;
+    text-align: center;
+    align-items: center;
+    align-content: center;
+    vertical-align: middle;
+}
+
+.custom-marker.fallback-icon div {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background-color: var(--m3-sys-color-outline-variant);
+    color: var(--m3-sys-color-on-surface-variant);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.custom-marker .material-icons {
+    font-size: 20px;
+    color: var(--m3-sys-color-primary);
+    display: block;
+}
+
+.saved-place-marker .material-icons {
+    color: var(--m3-sys-color-tertiary);
+    font-size: 22px;
+}
+
+.search-location-marker .material-icons {
+    color: var(--m3-sys-color-error);
+    font-size: 24px;
+}
+
+/* Dialog maps */
+#add-place-dialog .dialog-content #place-picker-map,
+#geofence-dialog .dialog-content #geofence-picker-map {
+    height: 250px;
+    margin-bottom: 16px;
+    border-radius: 12px;
+    background-color: var(--m3-sys-color-surface-container);
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+}
+
+/* Map Placeholder */
+.map-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: var(--m3-sys-color-surface-container);
+    background-image: radial-gradient(circle, var(--m3-sys-color-outline-variant) 1px, transparent 1px);
+    background-size: 20px 20px;
+    transition: background-color 0.3s, background-image 0.3s;
+}
+
+.map-placeholder .material-icons {
+    font-size: 48px;
+    color: var(--m3-sys-color-outline);
+    opacity: 0.5;
+    transition: color 0.3s;
+}
+
+.map-placeholder p {
+    margin-top: 12px;
+    color: var(--m3-sys-color-outline);
+    font-size: var(--body-medium-size);
+    opacity: 0.6;
+    transition: color 0.3s;
+}
+
+/* Hide default Leaflet attribution */
+.leaflet-control-attribution {
+    display: none;
+}
+
+/* User location marker style */
+.current-location-marker {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 14px;
+    height: 14px;
+    background-color: var(--m3-sys-color-primary);
+    border-radius: 50%;
+    border: 2px solid var(--m3-sys-color-surface);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--m3-sys-color-primary) 20%, transparent);
+    animation: pulse 2s infinite;
+    z-index: 3;
+}
+
+@keyframes pulse {
+
+    0% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--m3-sys-color-primary) 40%, transparent);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px color-mix(in srgb, var(--m3-sys-color-primary) 0%, transparent);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--m3-sys-color-primary) 0%, transparent);
+    }
+}
+
+/* Map Controls */
+.map-controls {
+    position: absolute;
+    right: 16px;
+    bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 6;
+    align-items: flex-end;
+}
+
+.map-control-button {
+    width: 40px;
+    height: 40px;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 0px;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.1);
+    cursor: pointer;
+    transition: box-shadow 0.2s, background-color 0.2s;
+}
+
+.map-control-button:hover {
+    box-shadow: 0 2px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+    background-color: var(--m3-sys-color-surface-container-highest);
+}
+
+.map-control-button .material-icons {
+    font-size: 24px;
+    color: var(--m3-sys-color-on-surface-variant);
+    transition: color 0.3s;
+}
+
+.map-control-button.active {
+    background-color: var(--m3-sys-color-primary-container);
+}
+
+.map-control-button.active .material-icons {
+    color: var(--m3-sys-color-on-primary-container);
+}
+
+/* Card styling */
+.card {
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 16px;
+    border: 1px solid var(--m3-sys-color-outline-variant);
+    padding: 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.08);
+    transition: background-color 0.3s, box-shadow 0.3s, border-color 0.3s;
+}
+
+#my-location span {
+    color: var(--m3-sys-color-primary);
+}
+
+.card-title {
+    font-size: var(--title-medium-size);
+    font-weight: var(--title-medium-weight);
+    margin-bottom: 12px;
+    color: var(--m3-sys-color-on-surface);
+    transition: color 0.3s;
+}
+
+/* Location Info */
+.location-info {
+    display: flex;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.location-info-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 24px;
+    opacity: 0.6;
+    font-size: 24px;
+    color: var(--m3-sys-color-on-surface-variant);
+    transition: opacity 0.3s, color 0.3s;
+}
+
+.location-info-text {
+    flex: 1;
+}
+
+.location-address {
+    font-size: var(--body-large-size);
+    color: var(--m3-sys-color-on-surface);
+    line-height: 1.4;
+    transition: color 0.3s;
+}
+
+.location-coordinates {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    margin-top: 6px;
+    transition: color 0.3s;
+}
+
+/* Button styling */
+.button {
+    background-color: var(--m3-sys-color-primary);
+    color: var(--m3-sys-color-on-primary);
+    border: none;
+    padding: 12px 24px;
+    border-radius: 100px;
+    font-size: var(--label-large-size);
+    font-weight: var(--label-large-weight);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: background-color 0.2s, box-shadow 0.2s;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+}
+
+.button:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary) 90%, black 10%);
+    box-shadow: 0 2px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+}
+
+.button:active {
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary) 85%, black 15%);
+    box-shadow: 0 1px 1px rgba(var(--m3-sys-color-shadow), 0.1);
+}
+
+.button:disabled {
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 8%, transparent);
+    color: var(--m3-sys-color-on-surface);
+    opacity: 0.38;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.button-row {
+    display: flex;
+    gap: 16px;
+    margin-top: 24px;
+    justify-content: flex-end;
+}
+
+.text-button {
+    background: none;
+    border: none;
+    color: var(--m3-sys-color-primary);
+    font-size: var(--label-large-size);
+    font-weight: var(--label-large-weight);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 12px 16px;
+    border-radius: 100px;
+    transition: background-color 0.2s, color 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.text-button:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary) 8%, transparent);
+    color: var(--m3-sys-color-primary);
+}
+
+.text-button:active {
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary) 12%, transparent);
+    color: var(--m3-sys-color-primary);
+}
+
+.text-button:disabled {
+    color: var(--m3-sys-color-on-surface);
+    opacity: 0.38;
+    cursor: not-allowed;
+    background-color: transparent;
+}
+
+/* Bottom navigation */
+.bottom-nav {
+    display: flex;
+    background-color: var(--m3-sys-color-surface-container);
+    border-top: 1px solid var(--m3-sys-color-outline-variant);
+    padding: 8px 0;
+    box-shadow: 0 -1px 2px rgba(var(--m3-sys-color-shadow), 0.08);
+    transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+}
+
+.nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+    cursor: pointer;
+    color: var(--m3-sys-color-on-surface-variant);
+    text-decoration: none;
+    transition: color 0.3s;
+}
+
+.nav-item.active {
+    color: var(--m3-sys-color-primary);
+}
+
+.nav-icon {
+    width: 24px;
+    height: 24px;
+    margin-bottom: 4px;
+    font-size: 24px;
+}
+
+.nav-label {
+    font-size: var(--label-medium-size);
+}
+
+/* FAB */
+.fab {
+    position: fixed;
+    bottom: 90px;
+    left: 16px;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background-color: var(--m3-sys-color-primary-container);
+    color: var(--m3-sys-color-on-primary-container);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 2px 6px rgba(var(--m3-sys-color-shadow), 0.15);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s, background-color 0.2s;
+    z-index: 11;
+}
+
+.fab:hover {
+    transform: scale(1.05);
+    box-shadow: 0 3px 8px rgba(var(--m3-sys-color-shadow), 0.2);
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary-container) 90%, black 10%);
+}
+
+.fab:active {
+    transform: scale(0.95);
+    box-shadow: 0 1px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary-container) 85%, black 15%);
+}
+
+.fab .material-icons {
+    font-size: 28px;
+}
+
+/* Dialog */
+.dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(var(--m3-sys-color-scrim-rgb, 0, 0, 0), 0.4);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease-out, visibility 0.2s ease-out;
+}
+
+.dialog-overlay.show {
+    display: flex;
+    opacity: 1;
+    visibility: visible;
+}
+
+.dialog {
+    margin: 32px;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 28px;
+    width: fit-content;
+    min-width: 280px;
+    max-width: calc(100% - 64px);
+    max-height: calc(100% - 64px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 3px 9px rgba(var(--m3-sys-color-shadow), 0.15);
+    opacity: 0;
+    transform: scale(0.95);
+    transition: opacity 0.2s ease-out, transform 0.2s ease-out, background-color 0.3s, box-shadow 0.3s;
+}
+
+.dialog-overlay.show .dialog {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.dialog-header {
+    padding: 24px;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+    transition: border-color 0.3s;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.dialog-title {
+    font-size: var(--headline-small-size);
+    font-weight: var(--headline-small-weight);
+    color: var(--m3-sys-color-on-surface);
+    transition: color 0.3s;
+}
+
+.dialog-content {
+    padding: 24px;
+    color: var(--m3-sys-color-on-surface);
+    font-size: var(--body-medium-size);
+    line-height: 1.5;
+    transition: color 0.3s;
+    overflow-y: auto;
+    flex-grow: 1;
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 16px 16px 16px;
+    border-top: 1px solid var(--m3-sys-color-outline-variant);
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+#more-button {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+
+}
+
+/* Tabs */
+.tabs {
+    display: flex;
+    background-color: var(--m3-sys-color-surface);
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.05);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+    transition: background-color 0.3s, box-shadow 0.3s, border-color 0.3s;
+}
+
+.tab {
+    padding: 16px 24px;
+    font-size: var(--label-large-size);
+    font-weight: var(--label-large-weight);
+    color: var(--m3-sys-color-on-surface-variant);
+    cursor: pointer;
+    white-space: nowrap;
+    position: relative;
+    border-bottom: 3px solid transparent;
+    transition: color 0.2s, border-bottom-color 0.2s;
+}
+
+.tab:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 4%, transparent);
+}
+
+.tab.active {
+    color: var(--m3-sys-color-primary);
+    border-bottom-color: var(--m3-sys-color-primary);
+}
+
+/* Drawer menu */
+.drawer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(var(--m3-sys-color-scrim-rgb, 0, 0, 0), 0.4);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    z-index: 100;
+}
+
+.drawer-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 300px;
+    background-color: var(--m3-sys-color-surface-container-low);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease, background-color 0.3s;
+    z-index: 101;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 2px 0 6px rgba(var(--m3-sys-color-shadow), 0.1);
+}
+
+.drawer.open {
+    transform: translateX(0);
+}
+
+.drawer-header {
+    padding: 16px 24px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+    transition: border-color 0.3s;
+    flex-shrink: 0;
+}
+
+.drawer-title {
+    font-size: var(--title-large-size);
+    font-weight: var(--title-large-weight);
+    color: var(--m3-sys-color-on-surface);
+    margin-left: 16px;
+    transition: color 0.3s;
+}
+
+.drawer-header .material-icons.menu-icon {
+    margin-left: -8px;
+}
+
+.drawer-content {
+    flex: 1;
+    overflow: auto;
+}
+
+.drawer-item {
+    display: flex;
+    align-items: center;
+    padding: 16px 24px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.drawer-item:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 4%, transparent);
+}
+
+.drawer-item-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 32px;
+    opacity: 0.6;
+    font-size: 24px;
+    color: var(--m3-sys-color-on-surface-variant);
+    transition: opacity 0.3s, color 0.3s;
+}
+
+.drawer-item-text {
+    font-size: var(--body-large-size);
+    color: var(--m3-sys-color-on-surface);
+    transition: color 0.3s;
+}
+
+.drawer-divider {
+    height: 1px;
+    background-color: var(--m3-sys-color-outline-variant);
+    margin: 12px 0;
+    transition: background-color 0.3s;
+}
+
+/* Settings page specific */
+.settings-section {
+    margin-bottom: 24px;
+}
+
+.settings-section-title {
+    font-size: var(--label-medium-size);
+    font-weight: var(--label-medium-weight);
+    color: var(--m3-sys-color-primary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    transition: color 0.3s;
+    padding: 0 8px;
+}
+
+.settings-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 16px 24px;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.08);
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.settings-item-text {
+    flex: 1;
+    margin-right: 16px;
+}
+
+.settings-item-title {
+    font-size: var(--body-large-size);
+    color: var(--m3-sys-color-on-surface);
+    margin-bottom: 4px;
+    transition: color 0.3s;
+}
+
+.settings-item-description {
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    transition: color 0.3s;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 26px;
+    margin-left: auto;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--m3-sys-color-outline);
+    transition: .4s, background-color 0.3s;
+    border-radius: 34px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 2px;
+    bottom: 2px;
+    background-color: var(--m3-sys-color-outline-variant);
+    transition: .4s, transform 0.3s;
+    border-radius: 50%;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.2);
+}
+
+input:checked+.toggle-slider {
+    background-color: var(--m3-sys-color-primary);
+}
+
+input:checked+.toggle-slider:before {
+    background-color: var(--m3-sys-color-on-primary);
+    transform: translateX(18px);
+}
+
+
+/* Shared devices page specific */
+#shared-devices-list .loading-indicator,
+#shared-devices-list .no-devices-message,
+.no-devices-message {
+    padding: 24px;
+    text-align: center;
+    color: var(--m3-sys-color-on-surface-variant);
+    font-style: italic;
+}
+
+.shared-device {
+    display: flex;
+    align-items: center;
+    padding: 16px 24px;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.08);
+    transition: background-color 0.3s, box-shadow 0.3s;
+    cursor: pointer;
+}
+
+.device-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-right: 20px;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.device-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.device-icon .device-icon-fallback {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background-color: var(--m3-sys-color-outline-variant);
+    color: var(--m3-sys-color-on-surface-variant);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.device-info {
+    flex: 1;
+    overflow: hidden;
+    margin-right: 16px;
+}
+
+.device-name {
+    font-size: var(--body-large-size);
+    color: var(--m3-sys-color-on-surface);
+    margin-bottom: 4px;
+    transition: color 0.3s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.device-status {
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    transition: color 0.3s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.device-status .material-icons {
+    font-size: 16px;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.device-status .material-icons.error {
+    color: var(--m3-sys-color-error);
+}
+
+.device-menu {
+    width: 24px;
+    height: 24px;
+    opacity: 0.6;
+    cursor: pointer;
+    font-size: 24px;
+    color: var(--m3-sys-color-on-surface-variant);
+    transition: opacity 0.3s, color 0.3s;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* History page specific */
+.timeline {
+    position: relative;
+    margin-left: 24px;
+    padding-left: 32px;
+}
+
+.timeline:before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background-color: var(--m3-sys-color-outline-variant);
+    transition: background-color 0.3s;
+}
+
+.timeline-item {
+    position: relative;
+    margin-bottom: 24px;
+}
+
+.timeline-item:last-child {
+    margin-bottom: 0;
+}
+
+.timeline-dot {
+    position: absolute;
+    left: -37px;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    background-color: var(--m3-sys-color-primary);
+    border-radius: 50%;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.1);
+}
+
+.timeline-time {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    margin-bottom: 6px;
+    transition: color 0.3s;
+}
+
+.timeline-content {
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.08);
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.timeline-location {
+    font-size: var(--body-large-size);
+    color: var(--m3-sys-color-on-surface);
+    font-weight: var(--body-large-weight);
+    margin-bottom: 4px;
+    transition: color 0.3s;
+}
+
+.timeline-content p {
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    line-height: 1.4;
+}
+
+/* Ripple effect */
+.button,
+.text-button,
+.map-control-button,
+.nav-item,
+.drawer-item,
+.tab,
+.settings-item,
+.shared-device,
+.fab {
+    overflow: hidden;
+    position: relative;
+    transform: translateZ(0);
+}
+
+.button::after,
+.text-button::after,
+.map-control-button::after,
+.nav-item::after,
+.drawer-item::after,
+.tab::after,
+.settings-item::after,
+.shared-device::after,
+.fab::after {
+    content: '';
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle, var(--m3-sys-color-primary) 10%, transparent 10.01%);
+    background-repeat: no-repeat;
+    background-position: 50%;
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(10, 10);
+    transition: transform 0.5s, opacity 1s;
+}
+
+.button:active::after,
+.text-button:active::after,
+.map-control-button:active::after,
+.nav-item:active::after,
+.drawer-item:active::after,
+.tab:active::after,
+.settings-item:active::after,
+.shared-device:active::after,
+.fab:active::after {
+    opacity: 0.12;
+    transform: scale(0, 0);
+    transition: transform 0s, opacity 0s;
+}
+
+/* Device Icon Selector */
+.device-icon-selector {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.device-icon-selector label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+}
+
+.device-icon-selector label input[type="radio"] {
+    display: none;
+}
+
+.device-icon-selector label span.material-icons {
+    font-size: 30px;
+    color: var(--m3-sys-color-outline);
+    opacity: 0.5;
+    transition: opacity 0.2s, color 0.2s;
+}
+
+.device-icon-selector label input[type="radio"]:checked+span.material-icons {
+    opacity: 1;
+    color: var(--m3-sys-color-primary);
+}
+
+
+/* Search Bar Styling */
+.search-bar {
+    display: flex;
+    align-items: center;
+    background-color: var(--m3-sys-color-surface-container-highest);
+    border-radius: 100px;
+    padding: 8px 16px;
+    margin-left: 8px;
+    margin-right: 8px;
+    flex-grow: 1;
+    transition: background-color 0.3s;
+}
+
+.search-icon {
+    color: var(--m3-sys-color-on-surface-variant);
+    margin-right: 12px;
+    opacity: 0.6;
+    font-size: 20px;
+    transition: color 0.3s, opacity 0.3s;
+}
+
+.search-input {
+    border: none;
+    background-color: transparent;
+    flex-grow: 1;
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+    outline: none;
+    transition: color 0.3s;
+}
+
+.search-input::placeholder {
+    color: var(--m3-sys-color-on-surface-variant);
+    opacity: 0.8;
+}
+
+/* Input fields */
+.dialog-content .settings-section .settings-item input[type="text"],
+.dialog-content .settings-section .settings-item input[type="number"],
+.dialog-content .settings-section .settings-item input[type="email"],
+.dialog-content .settings-section .settings-item input[type="password"],
+.dialog-content .settings-section .settings-item textarea,
+.dialog-content .settings-section .settings-item select,
+.login-card input[type="text"],
+.settings-item input[type="number"],
+.login-card input[type="password"],
+.login-card input[type="email"] {
+    margin-left: 0;
+    border: 1px solid var(--m3-sys-color-outline);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+    background-color: var(--m3-sys-color-surface);
+    outline: none;
+    transition: border-color 0.3s, box-shadow 0.3s, background-color 0.3s, color 0.3s;
+    margin-top: 8px;
+    font-family: var(--font-family);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.login-card input[type="text"],
+.login-card input[type="password"],
+.login-card input[type="email"] {
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+/* Input focus */
+.dialog-content .settings-section .settings-item input:focus-visible,
+.dialog-content .settings-section .settings-item textarea:focus-visible,
+.dialog-content .settings-section .settings-item select:focus-visible,
+.login-card input:focus-visible {
+    border-color: var(--m3-sys-color-primary);
+    box-shadow: 0 0 0 1px var(--m3-sys-color-primary);
+}
+
+/* Theme Selector Radio Buttons */
+.theme-selector {
+    margin-left: auto;
+    text-align: left;
+}
+
+.theme-selector label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+    cursor: pointer;
+}
+
+.theme-selector label:last-child {
+    margin-bottom: 0;
+}
+
+.theme-selector input[type="radio"] {
+    margin-right: 8px;
+    accent-color: var(--m3-sys-color-primary);
+}
+
+
+/* Color Picker Container */
+.color-picker-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
+}
+
+#theme-color-picker {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--m3-sys-color-outline-variant);
+    border-radius: 50%;
+    cursor: pointer;
+    overflow: hidden;
+    background-color: transparent;
+}
+
+#theme-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+    border-radius: 50%;
+}
+
+#theme-color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: 50%;
+}
+
+#theme-color-picker::-moz-color-swatch {
+    border: none;
+    border-radius: 50%;
+}
+
+#reset-theme-color-button {
+    margin-left: 8px;
+    padding: 6px 10px;
+    min-width: auto;
+}
+
+#reset-theme-color-button .material-icons {
+    font-size: 16px;
+}
+
+/* Map Dialog Controls */
+.map-dialog-controls {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 1001;
+    pointer-events: auto;
+}
+
+#place-picker-my-location,
+#geofence-picker-my-location {
+    width: 40px;
+    height: 40px;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.1);
+    cursor: pointer;
+    transition: box-shadow 0.2s, background-color 0.2s;
+}
+
+#place-picker-my-location:hover,
+#geofence-picker-my-location:hover {
+    box-shadow: 0 2px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+    background-color: var(--m3-sys-color-surface-container-highest);
+}
+
+#place-picker-my-location .material-icons,
+#geofence-picker-my-location .material-icons {
+    font-size: 24px;
+    color: var(--m3-sys-color-primary);
+}
+
+
+/* More Menu Dialog */
+#more-menu-dialog {
+    top: -16px;
+    /* Adjust positioning as needed */
+    right: -16px;
+    left: auto;
+    width: 200px;
+    min-width: auto;
+    max-width: 200px;
+    max-height: none;
+    border-radius: 16px;
+    padding: 8px 0;
+    box-shadow: 0 4px 12px rgba(var(--m3-sys-color-shadow), 0.15);
+    position: absolute;
+    background-color: var(--m3-sys-color-surface-container);
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.95);
+    transform-origin: top right;
+    transition: opacity 0.15s ease-out, transform 0.15s ease-out, visibility 0s linear 0.15s;
+    pointer-events: none;
+}
+
+#more-menu-dialog.show {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1);
+    transition: opacity 0.15s ease-out, transform 0.15s ease-out, visibility 0s linear 0s;
+    pointer-events: auto; /* Allow interaction when shown */
+}
+
+#more-menu-dialog .dialog-content {
+    padding: 0;
+}
+
+#more-menu-dialog .drawer-item {
+    padding: 12px 16px;
+}
+
+#more-menu-dialog .drawer-item-icon {
+    margin-right: 16px;
+}
+
+#more-menu-dialog .dialog-header,
+#more-menu-dialog .dialog-actions {
+    display: none;
+}
+
+/* Z-index stacking */
+.dialog-overlay {
+    z-index: 100;
+}
+
+.drawer-overlay {
+    z-index: 100;
+}
+
+.drawer {
+    z-index: 101;
+}
+
+.fab {
+    z-index: 11;
+}
+
+.bottom-nav {
+    z-index: 10;
+}
+
+.app-bar {
+    z-index: 10;
+}
+
+#more-menu-dialog-overlay {
+    z-index: 102;
+}
+
+#more-menu-dialog {
+    z-index: 103;
+}
+
+.search-results-container {
+    z-index: 105;
+}
+
+.dialog-search-results {
+    z-index: 106;
+}
+
+/* Focus outline */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--m3-sys-color-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.map-control-button:focus-visible {
+    box-shadow: 0 0 0 2px var(--m3-sys-color-primary);
+    outline: none;
+}
+
+/* Spinner */
+.spinner {
+    border: 4px solid var(--m3-sys-color-surface-variant);
+    border-top: 4px solid var(--m3-sys-color-primary);
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* History Popups */
+.leaflet-popup-content {
+    font-family: var(--font-family);
+    line-height: 1.6;
+    color: var(--m3-sys-color-on-surface);
+}
+
+.leaflet-popup-content .material-symbols-outlined {
+    font-size: 18px;
+    vertical-align: bottom;
+    margin-right: 8px;
+    opacity: 0.6;
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+.leaflet-popup-content strong {
+    font-weight: var(--title-small-weight);
+    display: inline-block;
+    margin-bottom: 4px;
+}
+
+.leaflet-popup-content a {
+    color: var(--m3-sys-color-primary);
+    text-decoration: none;
+}
+
+.leaflet-popup-content a:hover {
+    text-decoration: underline;
+}
+
+/* .leaflet-popup-tip { background: var(--m3-sys-color-surface-container-high); } */
+
+.history-popup-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--body-small-size);
+    max-width: 280px;
+    margin: -5px 0;
+}
+
+.history-popup-table td {
+    padding: 3px 5px;
+    vertical-align: top;
+}
+
+.history-popup-table td:first-child {
+    text-align: center;
+    width: 24px;
+}
+
+.history-popup-table .material-symbols-outlined {
+    font-size: 15px;
+    vertical-align: middle;
+    opacity: 0.7;
+    margin-right: 6px;
+    margin-top: -2px;
+}
+
+.history-popup-table td[colspan="2"] {
+    display: flex;
+    align-items: center;
+}
+
+.history-popup-table td[colspan="2"] span[style*="display:inline-block"] {
+    flex-shrink: 0;
+}
+
+/* Visibility toggle */
+.shared-device {
+    align-items: center;
+}
+
+.device-visibility-toggle {
+    margin-left: 8px;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+/* Notification status */
+#notification-status-container {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
+#notification-status {
+    font-size: var(--body-small-size);
+    opacity: 0.7;
+    text-align: right;
+    flex-grow: 1;
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+#unsubscribe-button {
+    font-size: var(--label-medium-size);
+    padding: 6px 12px;
+    min-width: auto;
+}
+
+/* Leaflet z-index */
+.leaflet-control-container {
+    z-index: 2;
+}
+
+.leaflet-pane {
+    z-index: 1;
+}
+
+/* Geofence list item */
+.geofence-list-item {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+}
+
+.geofence-list-item:last-child {
+    border-bottom: none;
+}
+
+.geofence-list-item:hover,
+.geofence-list-item:focus-visible {
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 4%, transparent);
+    outline: none;
+}
+
+.geofence-list-item:focus-visible,
+#global-geofences-list .settings-item:focus-visible {
+    outline: 2px solid var(--m3-sys-color-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.geofence-list-item .geofence-info,
+.geofence-link-info {
+    flex-grow: 1;
+    margin-right: 16px;
+    overflow: hidden;
+}
+
+.geofence-list-item .geofence-name,
+.geofence-link-name {
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+    font-weight: 500;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.geofence-list-item .geofence-details,
+.geofence-link-details {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Geofence Page List Actions */
+#global-geofences-list .settings-item .geofence-edit,
+#global-geofences-list .settings-item .geofence-remove {
+    color: var(--m3-sys-color-on-surface-variant);
+    opacity: 0.6;
+    padding: 4px;
+    margin-left: 8px;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+#global-geofences-list .settings-item .geofence-edit:hover,
+#global-geofences-list .settings-item .geofence-remove:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 8%, transparent);
+    opacity: 0.8;
+}
+
+#global-geofences-list .settings-item .geofence-remove {
+    color: var(--m3-sys-color-error);
+}
+
+
+/* Geofence Link List Actions */
+.geofence-link-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+}
+
+.geofence-link-item:last-child {
+    border-bottom: none;
+}
+
+.geofence-link-item .geofence-link-toggles {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.geofence-link-toggle-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: var(--label-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    gap: 2px;
+    cursor: pointer;
+}
+
+.geofence-link-toggle-label input {
+    accent-color: var(--m3-sys-color-primary);
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+}
+
+.geofence-link-item .geofence-remove {
+    margin-left: 8px;
+    cursor: pointer;
+    opacity: 0.6;
+    color: var(--m3-sys-color-error);
+    font-size: 22px;
+    transition: opacity 0.2s;
+}
+
+.geofence-link-item .geofence-remove:hover {
+    opacity: 1;
+}
+
+/* Leaflet Geofence Styles */
+.geofence-circle {
+    stroke-dasharray: 5, 5;
+    stroke: var(--m3-sys-color-secondary);
+    fill: var(--m3-sys-color-secondary);
+    fill-opacity: 0.05;
+    pointer-events: none;
+}
+
+.geofence-tooltip {
+    background-color: var(--m3-sys-color-inverse-surface);
+    border: 1px solid var(--m3-sys-color-outline);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: var(--label-small-size);
+    white-space: nowrap;
+    color: var(--m3-sys-color-inverse-on-surface);
+}
+
+/* Geofence Page Styles */
+.device-geofence-card .card-title {
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+}
+
+.device-geofence-card .card-title svg {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+}
+
+.add-geofence-button .material-icons {
+    font-size: 18px;
+    vertical-align: bottom;
+    margin-right: 4px;
+}
+
+.geofence-list {
+    margin-top: 16px;
+    border-top: 1px solid var(--m3-sys-color-outline-variant);
+    padding-top: 16px;
+}
+
+.geofence-icon {
+    color: var(--m3-sys-color-secondary);
+    margin-right: 24px;
+    opacity: 0.6;
+}
+
+.no-geofences-message {
+    padding: 16px 8px;
+    text-align: center;
+    color: var(--m3-sys-color-on-surface-variant);
+    font-style: italic;
+    font-size: var(--body-medium-size);
+}
+
+/* Geofence Dialog Map Specifics */
+#geofence-picker-map {
+    position: relative;
+    overflow: hidden;
+}
+
+#geofence-dialog .dialog-content #geofence-picker-map {
+    height: 250px;
+    margin-bottom: 16px;
+    border-radius: 12px;
+    background-color: var(--m3-sys-color-surface-container);
+}
+
+#geofence-dialog .map-dialog-controls {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 1001;
+}
+
+#geofence-dialog .settings-item input[type="text"],
+#geofence-dialog .settings-item input[type="number"] {
+    width: 100%;
+    margin-top: 8px;
+    margin-left: 0;
+}
+
+#geofence-dialog .settings-item>div[style*="display: flex"] {
+    width: 100%;
+}
+
+/* Dialog search bar */
+.dialog-search-bar {
+    display: flex;
+    align-items: center;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 100px;
+    padding: 6px 12px;
+    margin-bottom: 12px;
+    transition: background-color 0.3s;
+}
+
+.dialog-search-icon {
+    color: var(--m3-sys-color-on-surface-variant);
+    margin-right: 8px;
+    opacity: 0.6;
+    font-size: 18px;
+    transition: color 0.3s, opacity 0.3s;
+}
+
+.dialog-search-input {
+    border: none;
+    background-color: transparent;
+    flex-grow: 1;
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+    outline: none;
+    transition: color 0.3s;
+}
+
+.dialog-search-input::placeholder {
+    color: var(--m3-sys-color-on-surface-variant);
+    opacity: 0.8;
+}
+
+.dialog-search-error {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-error);
+    margin-left: 12px;
+    margin-top: -8px;
+    margin-bottom: 8px;
+    display: none;
+}
+
+/* File Input Styles */
+.hidden-file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+#selected-files-list,
+#selected-import-file-list {
+    margin-top: 12px;
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+#selected-files-list ul {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 4px;
+}
+
+#selected-files-list li {
+    margin-bottom: 4px;
+    padding: 4px 8px;
+    background-color: var(--m3-sys-color-surface-container);
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 90%;
+}
+
+#geofence-picker-search-results {
+    top: 15%;
+}
+
+#search-results-container {
+    top: 80%
+}
+
+/* Search Results Styles */
+.search-results-container {
+    position: absolute;
+    width: 90%;
+    max-width: 500px;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(var(--m3-sys-color-shadow), 0.1);
+    z-index: 105;
+    max-height: 40vh;
+    overflow-y: auto;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.2s ease-out;
+}
+
+.search-results-container.show {
+    display: block;
+    opacity: 1;
+}
+
+.search-result-category {
+    padding: 12px 16px 8px 16px;
+    font-size: var(--label-small-size);
+    font-weight: var(--label-small-weight);
+    color: var(--m3-sys-color-outline);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+}
+
+.search-result-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    text-decoration: none;
+    color: inherit;
+}
+
+.search-result-item:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 4%, transparent);
+}
+
+.search-result-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 16px;
+    opacity: 0.6;
+    font-size: 24px;
+    color: var(--m3-sys-color-on-surface-variant);
+    flex-shrink: 0;
+}
+
+.search-result-text {
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.search-result-title {
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.search-result-description {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.search-result-item .no-results {
+    font-style: italic;
+    opacity: 0.7;
+    width: 100%;
+    text-align: center;
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+/* Dialog Search Results */
+.dialog-search-results {
+    position: absolute;
+    /* top: auto; */
+    left: 5%;
+    right: 5%;
+    width: auto;
+    max-width: none;
+    background-color: var(--m3-sys-color-surface-container-high);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(var(--m3-sys-color-shadow), 0.1);
+    z-index: 106;
+    max-height: 25vh;
+    overflow-y: auto;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.2s ease-out;
+}
+
+.dialog-search-results.show {
+    display: block;
+    opacity: 1;
+}
+
+.dialog-search-results .search-result-item {
+    padding: 10px 16px;
+}
+
+.dialog-search-results .search-result-icon {
+    font-size: 20px;
+    margin-right: 12px;
+}
+
+.dialog-search-results .search-result-title {
+    font-size: var(--body-medium-size);
+}
+
+.dialog-search-results .search-result-description {
+    font-size: var(--body-small-size);
+}
+
+.dialog-search-results .no-results {
+    padding: 10px 16px;
+    text-align: left;
+}
+
+/* Import/Export Styles */
+#settings-import-export .settings-item {
+    align-items: center;
+}
+
+#settings-import-export .button {
+    margin-left: auto;
+    padding: 8px 16px;
+}
+
+#settings-import-export .button .material-icons {
+    font-size: 18px;
+    vertical-align: bottom;
+    margin-right: 4px;
+}
+
+#import-parts-selection,
+#export-parts-selection {
+    padding: 16px;
+    border: 1px solid var(--m3-sys-color-outline-variant);
+    border-radius: 12px;
+    margin-top: 16px;
+    background-color: var(--m3-sys-color-surface-container);
+}
+
+#import-parts-selection h4,
+#export-parts-selection h4 {
+    margin-bottom: 12px;
+    font-size: var(--label-large-size);
+    color: var(--m3-sys-color-outline);
+}
+
+#import-parts-selection label,
+#export-parts-selection label {
+    display: block;
+    margin-bottom: 8px;
+    cursor: pointer;
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+}
+
+#import-parts-selection input[type="checkbox"],
+#export-parts-selection input[type="checkbox"] {
+    margin-right: 8px;
+    accent-color: var(--m3-sys-color-primary);
+}
+
+#import-parts-selection span,
+#export-parts-selection span {
+    opacity: 0.7;
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+#import-status-message,
+#upload-status {
+    font-size: var(--body-small-size);
+    margin-top: 8px;
+    min-height: 1.2em;
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+/* Add Device Button on Devices Page */
+#shared-page .no-devices-message button {
+    margin-top: 16px;
+}
+
+/* Flash Messages */
+.flash-messages {
+    margin-bottom: 16px;
+    padding: 0 16px;
+}
+
+.flash-messages .error {
+    color: var(--m3-sys-color-error);
+}
+
+.flash-messages .success,
+.flash-messages .info {
+    color: var(--m3-sys-color-primary);
+}
+
+.flash-messages .warning {
+    color: var(--m3-sys-color-secondary);
+}
+
+/* Login/Register Card */
+.login-card {
+    max-width: 400px;
+    width: 90%;
+    padding: 32px;
+    text-align: center;
+}
+
+.login-card .button {
+    width: 100%;
+    margin-top: 16px;
+}
+
+.login-link {
+    margin-top: 20px;
+    font-size: var(--body-small-size);
+}
+
+.login-link a {
+    color: var(--m3-sys-color-primary);
+}
+
+.remember-me {
+    display: block;
+    margin-top: 16px;
+    text-align: left;
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+.remember-me input {
+    margin-right: 4px;
+    vertical-align: middle;
+    accent-color: var(--m3-sys-color-primary);
+}
+
+
+/* Manage Creds Card */
+.credential-info {
+    font-size: var(--body-small-size);
+    opacity: 0.7;
+    margin-bottom: 8px;
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+.credential-info+.settings-item {
+    margin-top: 16px;
+}
+
+.back-link {
+    margin-left: 16px;
+    margin-bottom: 16px;
+    display: inline-block;
+    color: var(--m3-sys-color-primary);
+    text-decoration: none;
+}
+
+.asp-info {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid var(--m3-sys-color-outline-variant);
+    border-radius: 8px;
+    font-size: var(--body-small-size);
+    background-color: var(--m3-sys-color-surface-container-low);
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+.asp-info strong,
+.asp-info a {
+    color: var(--m3-sys-color-primary);
+}
+
+.asp-info ul {
+    padding-left: 20px;
+    margin-top: 4px;
+}
+
+.form-field-error {
+    color: var(--m3-sys-color-error);
+    font-size: var(--body-small-size);
+    margin-top: 4px;
+    text-align: left;
+}
+
+/* Logout Success Card */
+body.logout-success {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    text-align: center;
+}
+
+.message-card {
+    max-width: 450px;
+    width: 90%;
+    padding: 32px;
+}
+
+.message-icon {
+    font-size: 48px;
+    color: var(--m3-sys-color-primary);
+    margin-bottom: 16px;
+}
+
+.redirect-info {
+    margin-top: 20px;
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-outline);
+}
+
+.redirect-info a {
+    color: var(--m3-sys-color-primary);
+}
+
+/* --- Notification History Styles --- */
+#notifications-history-list .notification-item {
+    display: flex;
+    padding: 16px;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+    gap: 16px;
+    transition: background-color 0.2s;
+    border-radius: 12px;
+    margin: 8px 0;
+}
+
+#notifications-history-list .notification-item:last-child {
+    border-bottom: none;
+}
+
+#notifications-history-list .notification-item.unread {
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary) 8%, transparent);
+    /* Subtle highlight */
+}
+
+#notifications-history-list .notification-item.unread .notification-title {
+    font-weight: var(--title-medium-weight);
+    /* Make unread titles bolder */
+}
+
+
+#notifications-history-list .notification-icon {
+    flex-shrink: 0;
+    width: 32px;
+    /* Slightly smaller icon */
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* background-color: var(--m3-sys-color-surface-container-highest); /* Circle background */
+    /* border-radius: 50%; */
+    color: var(--m3-sys-color-secondary);
+    /* Default icon color */
+}
+
+#notifications-history-list .notification-icon .material-icons {
+    font-size: 28px;
+}
+
+/* Specific icon colors */
+#notifications-history-list .notification-item[data-type="geofence"] .notification-icon {
+    color: var(--m3-sys-color-tertiary);
+}
+
+#notifications-history-list .notification-item[data-type="battery"] .notification-icon {
+    color: var(--m3-sys-color-error);
+}
+
+#notifications-history-list .notification-item[data-type="welcome"] .notification-icon,
+#notifications-history-list .notification-item[data-type="test"] .notification-icon {
+    color: var(--m3-sys-color-primary);
+}
+
+#notifications-history-list .notification-content {
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+#notifications-history-list .notification-title {
+    font-size: var(--body-large-size);
+    color: var(--m3-sys-color-on-surface);
+    margin-bottom: 4px;
+}
+
+#notifications-history-list .notification-body {
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+#notifications-history-list .notification-timestamp {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-outline);
+}
+
+#notifications-history-list .notification-actions {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: space-between;
+    /* Space out buttons */
+    gap: 8px;
+    /* Add gap */
+}
+
+#notifications-history-list .notification-actions button {
+    padding: 4px;
+    /* Smaller padding */
+    min-width: auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--m3-sys-color-on-surface-variant);
+    opacity: 0.7;
+    border-radius: 50%;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+#notifications-history-list .notification-actions button:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 8%, transparent);
+    opacity: 1;
+}
+
+#notifications-history-list .notification-actions button .material-icons {
+    font-size: 20px;
+    /* Smaller icons */
+    display: block;
+    /* Ensure icon takes space */
+}
+
+#notifications-history-list .notification-actions .delete-notification-button {
+    color: var(--m3-sys-color-error);
+}
+
+.leaflet-popup-content-wrapper {
+    background: var(--m3-sys-color-surface-container-high);
+    color: var(--m3-sys-color-on-surface);
+    box-shadow: 0 1px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+    border-radius: 8px;
+}
+
+
+.leaflet-popup-tip{
+    background: var(--m3-sys-color-surface-container-high);
+    color: var(--m3-sys-color-on-surface);
+    box-shadow: 0 1px 4px rgba(var(--m3-sys-color-shadow), 0.15);
+    border-radius: 2px;
+}
+
+
+/* --- START: Share Styles --- */
+
+/* Share Indicator Icon in Device List */
+.share-indicator {
+    font-size: 16px;
+    vertical-align: middle;
+    margin-left: 4px;
+    opacity: 0.7;
+    color: var(--m3-sys-color-secondary);
+    /* Or choose another suitable color */
+    transition: color 0.3s, opacity 0.3s;
+}
+
+/* Share Device Dialog - Specific styles if needed */
+
+#share-device-dialog .dialog-search-input,
+/* Reuse style */
+#edit-share-dialog .dialog-search-input,
+#edit-share-dialog select#edit-share-duration-select {
+    /* Style select like input */
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px;
+    margin-bottom: 0;
+    border: 1px solid var(--m3-sys-color-outline);
+    border-radius: 8px;
+    font-size: var(--body-medium-size);
+    color: var(--m3-sys-color-on-surface);
+    background-color: var(--m3-sys-color-surface);
+    outline: none;
+    transition: border-color 0.3s, box-shadow 0.3s, background-color 0.3s, color 0.3s;
+    font-family: var(--font-family);
+}
+
+#share-device-dialog .dialog-search-input:focus-visible,
+#edit-share-dialog .dialog-search-input:focus-visible,
+#edit-share-dialog select#edit-share-duration-select:focus-visible {
+    border-color: var(--m3-sys-color-primary);
+    box-shadow: 0 0 0 1px var(--m3-sys-color-primary);
+}
+
+#edit-share-dialog p[style*="opacity: 0.7"] {
+    /* Target sub-description text */
+    margin-top: 4px;
+}
+
+
+
+/* Share Link Dialog */
+#share-link-textarea {
+    width: 100%;
+    min-height: 60px;
+    margin-top: 16px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    box-sizing: border-box;
+    border: 1px solid var(--m3-sys-color-outline-variant);
+    border-radius: 8px;
+    background-color: var(--m3-sys-color-surface-container);
+    color: var(--m3-sys-color-on-surface);
+    resize: none;
+    outline: none;
+}
+
+#share-link-textarea:focus-visible {
+    border-color: var(--m3-sys-color-primary);
+    box-shadow: 0 0 0 1px var(--m3-sys-color-primary);
+}
+
+#share-link-expiry-info {
+    font-size: var(--body-small-size);
+    opacity: 0.7;
+    margin-top: 4px;
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+#copy-share-link-button .material-icons {
+    font-size: 18px;
+    vertical-align: bottom;
+    margin-right: 4px;
+}
+
+/* Active Shares List in Settings */
+#settings-shares .settings-item.share-item {
+    align-items: flex-start;
+    border-bottom: 1px solid var(--m3-sys-color-outline-variant);
+    padding: 16px 12px;
+    /* Adjust padding */
+    margin-bottom: 0;
+    border-radius: 0;
+    background-color: transparent;
+    /* Make it blend more */
+    box-shadow: none;
+}
+
+
+#settings-shares .settings-item .settings-item-text {
+    margin-right: 8px;
+}
+
+#settings-shares .settings-item.share-item:last-child {
+    border-bottom: none;
+}
+
+
+#settings-shares .share-details {
+    font-size: 0.8rem;
+}
+
+#settings-shares .share-expiry.inactive {
+    color: var(--m3-sys-color-outline);
+    font-style: italic;
+}
+
+#settings-shares .share-expiry.expired {
+    color: var(--m3-sys-color-error);
+    font-weight: 500;
+}
+
+#settings-shares .share-link-display {
+    margin-top: 4px;
+    font-size: 0.8rem;
+    word-break: break-all;
+}
+
+#settings-shares .share-link-display a {
+    color: var(--m3-sys-color-primary);
+    text-decoration: none;
+}
+
+.share-link-display a {
+    color: var(--m3-sys-color-primary);
+}
+
+#settings-shares .share-link-display a:hover {
+    text-decoration: underline;
+}
+
+#settings-shares .share-note {
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--m3-sys-color-on-surface-variant);
+    margin-top: 4px;
+}
+
+#settings-shares .revoke-share-button {
+    margin-left: auto;
+    color: var(--m3-sys-color-error);
+    padding: 6px;
+    /* Make tap target reasonable */
+    min-width: auto;
+    /* Override text-button min-width */
+    flex-shrink: 0;
+    /* Prevent shrinking */
+    opacity: 0.7;
+}
+
+#settings-shares .share-status-icon {
+    /* Icon indicating status */
+    margin-right: 16px;
+    opacity: 0.7;
+    color: var(--m3-sys-color-secondary);
+    /* Default greyish */
+}
+
+#settings-shares .share-status-icon.inactive {
+    color: var(--m3-sys-color-outline);
+    /* More muted for inactive */
+    opacity: 0.5;
+}
+
+#settings-shares .share-status-icon.expired {
+    color: var(--m3-sys-color-error);
+    /* Error color for expired */
+    opacity: 0.6;
+}
+
+
+
+#settings-shares .revoke-share-button:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-error) 8%, transparent);
+    opacity: 1;
+}
+
+#settings-shares .revoke-share-button .material-icons {
+    font-size: 20px;
+    display: block;
+}
+
+
+#settings-shares .share-item-actions {
+    display: flex;
+    align-items: center;
+    /* Align buttons vertically */
+    gap: 0px;
+    /* Reduce gap */
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+#settings-shares .share-item-actions button {
+    padding: 6px;
+    /* Smaller tap target */
+    min-width: auto;
+    opacity: 0.7;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+#settings-shares .share-item-actions button:hover {
+    opacity: 1;
+    background-color: color-mix(in srgb, var(--m3-sys-color-on-surface) 8%, transparent);
+}
+
+#settings-shares .share-item-actions button.revoke-share-button {
+    color: var(--m3-sys-color-error);
+}
+
+#settings-shares .share-item-actions button.revoke-share-button:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-error) 8%, transparent);
+}
+
+#settings-shares .share-item-actions button.toggle-share-button.resume-share-button {
+    color: var(--m3-sys-color-primary);
+}
+
+/* Color for resume */
+#settings-shares .share-item-actions button.toggle-share-button.resume-share-button:hover {
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary) 8%, transparent);
+}
+
+#settings-shares .share-item-actions button.toggle-share-button.suspend-share-button {
+    color: var(--m3-sys-color-on-surface-variant);
+}
+
+/* Default color for suspend */
+
+#settings-shares .share-item-actions .material-icons {
+    font-size: 20px;
+    display: block;
+}
+
+/* Style inactive/expired items */
+#settings-shares .share-item.share-inactive .settings-item-title,
+#settings-shares .share-item.share-expired .settings-item-title,
+#settings-shares .share-item.share-inactive .share-details,
+#settings-shares .share-item.share-expired .share-details,
+#settings-shares .share-item.share-inactive .share-link-display a,
+#settings-shares .share-item.share-expired .share-link-display a {
+    text-decoration: line-through;
+    opacity: 0.6;
+    color: var(--m3-sys-color-outline);
+}
+
+#settings-shares .share-item.share-inactive .share-link-display button,
+#settings-shares .share-item.share-expired .share-link-display button {
+    display: none;
+    /* Hide copy button for inactive/expired */
+}
+
+#settings-shares .share-item.share-expired .edit-share-button,
+#settings-shares .share-item.share-expired .toggle-share-button {
+    display: none;
+    /* Hide edit/toggle for expired */
+}
+
+/* Copy button in list */
+.copy-share-button-list {
+    padding: 2px 4px !important;
+    /* Smaller */
+    margin-left: 4px !important;
+    min-width: auto !important;
+    vertical-align: middle;
+    opacity: 0.6;
+}
+
+.copy-share-button-list:hover {
+    opacity: 1;
+}
+
+/* Share Device/Edit Share Dialogs */
+#share-device-dialog .settings-item,
+#edit-share-dialog .settings-item {
+    padding: 12px 0;
+    margin-bottom: 8px;
+    background: none;
+    box-shadow: none;
+}
+
+
+#share-device-dialog .settings-section-title,
+#edit-share-dialog .settings-section-title {
+    padding: 0;
+    margin-bottom: 8px;
+}
+
+/* --- END: Share Styles --- */

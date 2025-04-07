@@ -1,0 +1,45 @@
+# docker-compose.yml (Modified for Portainer Stack Editor)
+
+services:
+  findmyapp:
+    # Use the image you built and pushed (or built locally)
+    # Make sure this image exists locally or on Docker Hub
+    image: ghd182/findmy-app:latest
+    container_name: findmyapp
+    restart: unless-stopped
+    ports:
+      - "5000:5000" # Host:Container
+    volumes:
+      # --- USE ABSOLUTE HOST PATHS ---
+      # /absolute_path_to_findmy_app_folder/data:/app/data 
+      - /home/username/findmy-app/data:/app/data
+    environment:
+      FLASK_ENV: production
+      # Override if needed
+      LOG_LEVEL: DEBUG
+      # Set your timezone
+      TZ: Europe/Amsterdam
+      # Override if needed
+      WAITRESS_THREADS: 8
+
+      # --- Key Generation Seeds (KEEP THESE SECRET!) ---
+      SECRET_SEED: "your-very-long-random-secret-phrase-for-sessions-portainer"
+      FERNET_SEED: "another-different-long-random-secret-phrase-for-encryption-portainer"
+      VAPID_SEED: "a-third-unique-long-random-phrase-for-push-keys-portainer"
+      VAPID_CLAIMS_EMAIL: "mailto:user@email.com"
+      
+      # User default is 10 mins
+      DEFAULT_FETCH_INTERVAL_MINUTES: 15
+      # Master job runs every 2 mins
+      SCHEDULER_MASTER_JOB_INTERVAL_MINUTES: 2
+      # Override fetch interval
+      FETCH_INTERVAL_MINUTES: 15
+      # Override battery threshold
+      LOW_BATTERY_THRESHOLD: 20
+      # Override notification cooldown (10 minutes)
+      NOTIFICATION_COOLDOWN_SECONDS: 600
+      # Override history retention
+      NOTIFICATION_HISTORY_DAYS: 60
+      # Override location history fetch duration     
+      HISTORY_DURATION_DAYS: 14
+      # ANISETTE_SERVERS: "https://anisette.example.com,http://localhost:6969"

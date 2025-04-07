@@ -1,0 +1,117 @@
+<!-- templates/login.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title or 'Login' }} - Find My Location</title> {# Use title variable #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .login-card {
+            max-width: 400px;
+            width: 90%;
+            padding: 32px;
+            text-align: center;
+        }
+
+        .login-card input[type="text"],
+        .login-card input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 16px;
+            border: 1px solid var(--outline-variant-color);
+            border-radius: 8px;
+            font-size: var(--body-medium-size);
+        }
+
+        .login-card .button {
+            width: 100%;
+            margin-top: 16px;
+        }
+
+        .flash-messages {
+            margin-bottom: 16px;
+        }
+
+        .flash-messages .error {
+            color: var(--error-color);
+        }
+
+        .flash-messages .info {
+            color: var(--primary-color);
+        }
+
+        .remember-me {
+            display: block;
+            margin-top: 16px;
+            text-align: left;
+            font-size: var(--body-small-size);
+        }
+
+
+        .form-field-error {
+            color: var(--error-color);
+            font-size: var(--body-small-size);
+            margin-top: -12px;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card login-card">
+        <h1 class="card-title">{{ title or 'Login' }}</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <p class="{{ category }}">{{ message | safe }}</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('auth.login_route') }}" novalidate>
+            {{ form.hidden_tag() }} {# Renders CSRF token and hidden fields #}
+
+            <div>
+                {{ form.username.label(style="display:none;") }} {# Hide label if placeholder is enough #}
+                {{ form.username(placeholder="Username", autofocus=true, autocomplete="username") }}
+                {% for error in form.username.errors %}
+                <p class="form-field-error">{{ error }}</p>
+                {% endfor %}
+            </div>
+
+            <div>
+                {{ form.password.label(style="display:none;") }}
+                {{ form.password(placeholder="Password", autocomplete="current-password") }}
+                {% for error in form.password.errors %}
+                <p class="form-field-error">{{ error }}</p>
+                {% endfor %}
+            </div>
+
+            <label class="remember-me">
+                {{ form.remember() }} {{ form.remember.label }}
+            </label>
+
+            {{ form.submit(class="button") }}
+        </form>
+        <p class="login-link">Need an account? <a href="{{ url_for('auth.register_route') }}">Register here</a></p>
+    </div>
+
+    <script>
+        (function () { const theme = localStorage.getItem('theme') || 'system'; if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.body.classList.add('dark-theme'); } })();
+    </script>
+</body>
+
+</html>

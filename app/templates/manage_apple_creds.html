@@ -1,0 +1,180 @@
+<!-- templates/manage_apple_creds.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title or 'Manage Apple Credentials' }}</title> {# Use title variable #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <style>
+        .content {
+            padding-top: 24px;
+        }
+
+        .flash-messages {
+            margin-bottom: 16px;
+            padding: 0 16px;
+        }
+
+        .flash-messages .error {
+            color: var(--error-color);
+        }
+
+        .flash-messages .success {
+            color: var(--primary-color);
+        }
+
+        .flash-messages .warning {
+            color: var(--secondary-color);
+        }
+
+        .credential-info {
+            font-size: var(--body-small-size);
+            opacity: 0.7;
+            margin-bottom: 8px;
+        }
+
+        .back-link {
+            margin-left: 16px;
+            margin-bottom: 16px;
+            display: inline-block;
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        body.dark-theme .back-link {
+            color: var(--dark-primary-color);
+        }
+
+        .asp-info {
+            margin-top: 12px;
+            padding: 12px;
+            border: 1px solid var(--m3-sys-color-tertiary);
+            /* Use tertiary color for emphasis */
+            background-color: color-mix(in srgb, var(--m3-sys-color-tertiary-container) 40%, transparent);
+            color: var(--m3-sys-color-on-tertiary-container);
+            margin-top: 20px;
+            /* More space */
+            margin-bottom: 20px;
+        }
+
+        body.dark-theme .asp-info {
+            border-color: var(--dark-outline-variant-color);
+            background-color: var(--dark-surface-variant-color);
+            color: var(--dark-on-surface-color);
+        }
+
+        .asp-info strong {
+            color: var(--m3-sys-color-tertiary);
+            /* Match border */
+        }
+
+        body.dark-theme .asp-info strong {
+            color: var(--dark-primary-color);
+        }
+
+        .asp-info a {
+            color: var(--m3-sys-color-tertiary);
+            /* Match border */
+            font-weight: 500;
+        }
+
+        body.dark-theme .asp-info a {
+            color: var(--dark-primary-color);
+        }
+
+        .form-field-error {
+            color: var(--error-color);
+            font-size: var(--body-small-size);
+            margin-top: 4px;
+        }
+
+        .flash-messages .login-failed-2fa {
+            /* Add specific class */
+            color: var(--m3-sys-color-error);
+            font-weight: 500;
+            border: 1px solid var(--m3-sys-color-error);
+            padding: 8px;
+            border-radius: 8px;
+            background-color: color-mix(in srgb, var(--m3-sys-color-error-container) 50%, transparent);
+            margin-top: 16px;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- App Bar -->
+    <header class="app-bar">
+        <a href="{{ url_for('main.index_route') }}" style="text-decoration: none; color: inherit;">
+            <span class="material-icons menu-icon">arrow_back</span>
+        </a>
+        <h1>{{ title or 'Manage Apple Credentials' }}</h1>
+    </header>
+
+    <main class="content">
+        <div class="flash-messages">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            {% for category, message in messages %}
+            {# Add special styling for 2FA errors #}
+            {% if 'Two-Factor Authentication required' in message %}
+            <p class="login-failed-2fa">{{ message | safe }}</p>
+            {% else %}
+            <p class="{{ category }}">{{ message | safe }}</p>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+            {% endwith %}
+        </div>
+
+        <div class="card">
+            <div class="card-title">Set Apple ID</div>
+            <p class="credential-info">These credentials are used by the background service</p>
+            <!-- ASP Info Box -->
+            <div class="asp-info">
+                <strong><span class="material-icons"
+                        style="font-size: 1.2em; vertical-align: bottom; margin-right: 4px;">warning</span> Important:
+                    A 2FA-Enabled Apple is Account Required!</strong><br>
+                Using an account without 2FA usually <strong>will fail</strong> to load the FindMy devices reports.
+            </div>
+            <!-- End ASP Info Box -->
+
+            <form method="POST" action="{{ url_for('main.manage_apple_creds_route') }}" novalidate>
+                {{ form.hidden_tag() }}
+
+                <div class="settings-item" style="flex-direction: column; align-items: stretch; margin-top: 16px;">
+                    <div class="settings-item-text">
+                        {{ form.apple_id.label(class="settings-item-title") }}
+                    </div>
+                    {{ form.apple_id(placeholder="you@example.com", autocomplete="username") }}
+                    {% for error in form.apple_id.errors %}
+                    <p class="form-field-error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="settings-item" style="flex-direction: column; align-items: stretch;">
+                    <div class="settings-item-text">
+                        {{ form.apple_password.label(class="settings-item-title") }}
+                    </div>
+                    {{ form.apple_password(placeholder="Password",
+                    autocomplete="current-password") }} {# Changed placeholder #}
+                    {% for error in form.apple_password.errors %}
+                    <p class="form-field-error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="button-row">
+                    {{ form.submit(class="button") }}
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script>
+        (function () { const theme = localStorage.getItem('theme') || 'system'; if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.body.classList.add('dark-theme'); const meta = document.createElement('meta'); meta.name = "theme-color"; meta.content = "#1E1B22"; document.head.appendChild(meta); } else { const meta = document.createElement('meta'); meta.name = "theme-color"; meta.content = "#6750A4"; document.head.appendChild(meta); } })();
+    </script>
+</body>
+
+</html>
