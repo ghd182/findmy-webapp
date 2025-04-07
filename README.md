@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![App Version](https://img.shields.io/badge/Version-2.2.1-blue.svg?style=flat-square)](https://github.com/Ghodmode/findmy-multiuser) <!-- Update version badge if needed -->
 
-A self-hosted, multi-user web application designed as an alternative to Apple's Find My service, focusing on tracking Apple devices (like AirTags, iPhones, MacBooks using `pyfindmy`) with a modern, responsive Material 3 interface.
+A self-hosted, multi-user web application designed as an alternative to Apple's Find My service, focusing on tracking Apple devices (like AirTags, iPhones, MacBooks using `[FindMy.py](https://github.com/malmeloo/FindMy.py)`) with a modern, responsive Material 3 interface.
 
 <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
     <img src="app/static/img/screenshot_map.png" alt="Map Tab" width="250"/>
@@ -23,12 +23,12 @@ A self-hosted, multi-user web application designed as an alternative to Apple's 
 
 ## Overview
 
-This project provides a web interface accessible from any device to locate your Apple accessories. It fetches location data periodically using the `pyfindmy` library and presents it on an interactive map (OpenStreetMap via Leaflet.js). Key features include multi-user support with secure login, geofencing with notifications, low battery alerts, location history display, device sharing via public links, dynamic Material 3 theming, and PWA support. It's designed to be easily deployable via Docker, especially suitable for home servers like a Raspberry Pi.
+This project provides a web interface accessible from any device to locate your Apple accessories. It fetches location data periodically using the `[malmeloo/FindMy.py](https://github.com/malmeloo/FindMy.py)` library and presents it on an interactive map (OpenStreetMap via Leaflet.js). Key features include multi-user support with secure login, geofencing with notifications, low battery alerts, location history display, device sharing via public links, dynamic Material 3 theming, and PWA support. It's designed to be easily deployable via Docker, especially suitable for home servers like a Raspberry Pi.
 
 ## Key Features
 
 *   **Multi-User Support:** Secure user registration and login. Each user manages their own Apple credentials and device data independently.
-*   **Apple Device Tracking:** Locates accessories linked to an Apple ID using the `pyfindmy` library. Supports devices using `.plist` or `.keys` files. Fetches historical location data.
+*   **Apple Device Tracking:** Locates accessories linked to an Apple ID using the `[FindMy.py](https://github.com/malmeloo/FindMy.py)` library. Supports devices using `.plist` or `.keys` files. Fetches historical location data.
 *   **Interactive Map:** Displays device locations on an OpenStreetMap base layer using Leaflet.js. Includes dynamic device icons (SVG), popups with details (address, battery, timestamp), and map controls (zoom, center, show all/history).
 *   **Location History:** View the recent location history trail for visible devices on the map, with a time filter slider.
 *   **Material 3 Design:** Modern, responsive interface adhering to Material 3 guidelines, including Light/Dark modes (system-following or manual override) and dynamic color theming based on user-selected accent color.
@@ -53,7 +53,7 @@ This project provides a web interface accessible from any device to locate your 
 ## Technology Stack
 
 *   **Backend:** Python 3.11+, Flask, Waitress (WSGI)
-*   **Device Interaction:** `pyfindmy` library
+*   **Device Interaction:** `[FindMy.py](https://github.com/malmeloo/FindMy.py)` library
 *   **Frontend:** Vanilla JavaScript (ES Modules), HTML5, CSS3
 *   **Mapping:** Leaflet.js
 *   **Styling:** Material 3 Design principles (CSS variables), Material Icons/Symbols, Material Color Utilities (JS library for dynamic theming)
@@ -70,7 +70,7 @@ This project provides a web interface accessible from any device to locate your 
 *   **Pip:** Python package installer.
 *   **Git:** For cloning the repository.
 *   **Docker & Docker Compose:** (Required for Docker/Portainer deployment) Install Docker Engine and Docker Compose V2.
-*   **(Optional) Anisette Server:** Required by `pyfindmy` for authentication. Public servers are configured by default (`ANISETTE_SERVERS` env var), but running your own instance is more reliable. See [Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server).
+*   **(Optional) Anisette Server:** Required by `[FindMy.py](https://github.com/malmeloo/FindMy.py)` for authentication. Public servers are configured by default (`ANISETTE_SERVERS` env var), but running your own instance is more reliable. See [Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server).
 *   **Apple ID:** You will need an Apple ID.
     *   **2FA Accounts (Recommended):** Using accounts *without* 2FA may work but is **strongly discouraged** for security reasons and may fail unpredictably with Apple's API changes.
 *   **Device Files:** `.plist` or `.keys` files for the Apple devices you want to track (e.g., AirTags). Generated using tools like [OpenHaystack](https://github.com/seemoo-lab/openhaystack).
@@ -260,7 +260,7 @@ This project is licensed under the MIT License - see the `LICENSE` file for deta
 
 ## Credits & Acknowledgements
 
-*   **pyfindmy:** Core library for Find My interaction ([malmeloo/FindMy.py](https://github.com/malmeloo/FindMy.py)).
+*   **FindMy.py:** Core library for Find My interaction ([malmeloo/FindMy.py](https://github.com/malmeloo/FindMy.py)).
 *   **Anisette Server:** Authentication helper ([Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server)).
 *   **Flask:** Web framework ([pallets/flask](https://github.com/pallets/flask)).
 *   **Leaflet:** Mapping library ([Leaflet/Leaflet](https://github.com/Leaflet/Leaflet)).
