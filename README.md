@@ -72,8 +72,7 @@ This project provides a web interface accessible from any device to locate your 
 *   **Docker & Docker Compose:** (Required for Docker/Portainer deployment) Install Docker Engine and Docker Compose V2.
 *   **(Optional) Anisette Server:** Required by `pyfindmy` for authentication. Public servers are configured by default (`ANISETTE_SERVERS` env var), but running your own instance is more reliable. See [Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server).
 *   **Apple ID:** You will need an Apple ID.
-    *   **2FA Accounts (Recommended):** If 2FA is enabled, you **must** generate and use an **App-Specific Password (ASP)**. Your regular Apple ID password will *not* work due to 2FA prompts. Generate via [appleid.apple.com](https://appleid.apple.com) ➔ Sign-In and Security ➔ App-Specific Passwords.
-    *   **Non-2FA Accounts:** Using accounts *without* 2FA may work but is **strongly discouraged** for security reasons and may fail unpredictably with Apple's API changes.
+    *   **2FA Accounts (Recommended):** Using accounts *without* 2FA may work but is **strongly discouraged** for security reasons and may fail unpredictably with Apple's API changes.
 *   **Device Files:** `.plist` or `.keys` files for the Apple devices you want to track (e.g., AirTags). Generated using tools like [OpenHaystack](https://github.com/seemoo-lab/openhaystack).
 
 ### Configuration (Environment Variables & Seeds)
@@ -213,8 +212,6 @@ This application relies on environment variables for configuration, especially s
 
 ## Troubleshooting / FAQ
 
-*   **Login Failed / Background Fetch Errors / 2FA Required:**
-    *   **Most Common Cause:** You are likely using your regular Apple ID password instead of an **App-Specific Password (ASP)**. If your Apple ID has 2FA enabled, you *must* generate an ASP via `appleid.apple.com` ➔ Sign-In and Security ➔ App-Specific Passwords and use that ASP here.
 *   **No Devices Showing:**
     *   Check Apple Credentials (ASP!).
     *   Check if `.plist`/`.keys` files were uploaded correctly.
