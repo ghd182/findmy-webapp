@@ -6,8 +6,8 @@
 FROM --platform=linux/arm64/v8 python:3.11-slim-bookworm
 
 # Set environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=run.py
 ENV FLASK_ENV=production
 # Default Waitress threads (can be overridden in docker-compose or .env)
@@ -27,7 +27,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libffi-dev \
-    # libbluetooth-dev \ # Uncomment if Bluetooth features cause issues
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
@@ -35,7 +34,7 @@ COPY requirements.txt /app/requirements.txt
 
 # Install Python dependencies
 # Using --no-cache-dir makes the image smaller
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip wheel setuptools && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container

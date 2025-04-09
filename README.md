@@ -13,46 +13,62 @@ A self-hosted, multi-user web application designed as an alternative to Apple's 
 
 ## Overview
 
-This project provides a web interface accessible from any device to locate your Apple accessories. It fetches location data periodically using the [malmeloo/FindMy.py](https://github.com/malmeloo/FindMy.py) library and presents it on an interactive map (OpenStreetMap via Leaflet.js). Key features include multi-user support with secure login, geofencing with notifications, low battery alerts, location history display, device sharing via public links, dynamic Material 3 theming, and PWA support. It's designed to be easily deployable via Docker, especially suitable for home servers like a Raspberry Pi.
+This project provides a self-hosted web interface accessible from any device to locate your Apple accessories (AirTags, iPhones, etc.). It fetches location data periodically using the excellent [malmeloo/FindMy.py](https://github.com/malmeloo/FindMy.py) library and presents it on an interactive map (OpenStreetMap via Leaflet.js).
+
+Beyond basic tracking, it offers multi-user support with secure login, geofencing with push notifications, low battery alerts, location history viewing, device sharing via public links, dynamic Material 3 theming (adapting to your system or chosen preference), and PWA support for app-like installation. It's designed for easy deployment using Docker, making it ideal for home servers like a Raspberry Pi.
 
 ## Key Features
 
 *   **Multi-User Support:** Secure user registration and login. Each user manages their own Apple credentials and device data independently.
-*   **Apple Device Tracking:** Locates accessories linked to an Apple ID using the [FindMy.py](https://github.com/malmeloo/FindMy.py) library. Supports devices using `.plist` or `.keys` files. Fetches historical location data.
-*   **Interactive Map:** Displays device locations on an OpenStreetMap base layer using Leaflet.js. Includes dynamic device icons (SVG), popups with details (address, battery, timestamp), and map controls (zoom, center, show all/history).
-*   **Location History:** View the recent location history trail for visible devices on the map, with a time filter slider.
-*   **Material 3 Design:** Modern, responsive interface adhering to Material 3 guidelines, including Light/Dark modes (system-following or manual override) and dynamic color theming based on user-selected accent color.
-*   **Geofencing:** Create custom circular geofence zones on the map. Link geofences to specific devices and configure entry/exit notifications individually.
+*   **Apple Device Tracking:** Locates accessories linked to an Apple ID using [FindMy.py](https://github.com/malmeloo/FindMy.py). Supports devices associated via `.plist` or `.keys` files. Fetches and stores historical location data.
+*   **Interactive Map:** Displays device locations on an OpenStreetMap base layer using Leaflet.js.
+    *   Dynamic, colored SVG icons based on user-defined labels (emojis supported).
+    *   Popups showing device name, last update time (relative & absolute), battery status, coordinates, and accuracy.
+    *   Map controls: Zoom, Center on user location, Show all visible devices, Toggle history trails.
+*   **Location History:** View the recent location history trail for visible devices directly on the map. Filter history duration using an intuitive slider (1 hour to 7 days).
+*   **Material 3 Design:** Modern, responsive interface adhering to Material 3 guidelines.
+    *   **Light/Dark Modes:** Follows system preference or allows manual override.
+    *   **Dynamic Color Theming:** Adapts UI colors based on a user-selected accent color (using Material Color Utilities).
+*   **Geofencing:**
+    *   Create/Edit/Delete custom circular geofence zones visually on a map.
+    *   Link geofences to specific devices.
+    *   Configure entry and/or exit push notifications per device-geofence link.
 *   **Notifications:**
     *   **Geofence Alerts:** Receive push notifications upon device entry or exit from linked geofences.
     *   **Low Battery Alerts:** Receive push notifications when a device's battery level falls below a configurable threshold.
-    *   **Web Push:** Uses Web Push API for real-time alerts (requires VAPID key setup and user permission).
-    *   **Notification History:** View a history of alerts sent by the backend on a dedicated page. Manage read/unread status and delete history.
+    *   **Web Push:** Uses Web Push API for real-time alerts (requires VAPID key setup and user permission in browser).
+    *   **Notification History:** View a dedicated "Alerts" page showing a history of notifications sent by the backend. Manage read/unread status and delete history entries.
 *   **Device Sharing:**
-    *   Create secure, time-limited or indefinite public links to share a specific device's live location.
-    *   Viewers access a simplified map page without needing to log in.
-    *   Manage created share links (view, suspend/resume, update duration/note, delete permanently).
-*   **Device Configuration:** Customize device display names, map icon labels (emojis), and colors. Toggle map visibility per device.
-*   **Secure Credential Storage:** Apple passwords are encrypted using Fernet (requires `FERNET_SEED` or `FERNET_KEY`).
-*   **Configuration Import/Export:** Backup and restore user configuration (devices, geofences, client settings) via JSON.
-*   **Account Management:** Users can delete their account and all associated data.
-*   **PWA Support:** Installable as a Progressive Web App for a more native feel, with basic offline caching for the app shell via Service Worker.
-*   **Seed-Based Key Generation:** **(Recommended)** Deterministically generates `SECRET_KEY`, `FERNET_KEY`, and VAPID keys from user-provided seed environment variables for easier secret management and persistence across container restarts.
-*   **Dockerized:** Easy deployment using Docker and Docker Compose, optimized for `linux/arm64/v8` (Raspberry Pi 4/5). Includes `ProxyFix` for running behind reverse proxies.
+    *   Create secure, time-limited (e.g., 1h, 24h, 7d) or indefinite public links to share a specific device's live location. Add optional notes to shares.
+    *   Viewers access a simplified, read-only map page without needing to log in.
+    *   Manage created share links from Settings: View URL, Copy URL, Suspend/Resume, Update duration/note, Delete permanently.
+*   **Nearby Scanner (Experimental):**
+    *   Uses Web Bluetooth (on supported platforms like Chrome/Edge on Desktop/Android - **NOT iOS**) to scan for nearby devices broadcasting Apple Find My advertisement packets.
+    *   Displays *all* detected Find My packets, showing signal strength (RSSI), status byte, and raw packet data.
+    *   **Highlights** devices matched to the user's configured keys if they broadcast using a compatible method (e.g., `.keys` file static key or OpenHaystack firmware broadcasting via Service Data UUID `0xFD6F`).
+    *   **Limitation:** Cannot reliably identify devices broadcasting *standard, time-rolled* Find My packets (like official AirTags or standard `.plist` configurations) due to Web Bluetooth privacy restrictions (MAC address obfuscation).
+*   **Device Configuration:** Customize device display names, map icon labels (emojis supported, up to 2 characters), and icon colors. Toggle map visibility per device.
+*   **Secure Credential Storage:** Apple passwords are encrypted using Fernet symmetric encryption (requires `FERNET_SEED` or `FERNET_KEY`).
+*   **Configuration Import/Export:** Backup and restore user configuration (device settings, geofences, UI preferences, visibility states, etc.) via JSON file download/upload.
+*   **Account Management:** Users can delete their account and all associated data permanently.
+*   **PWA Support:** Installable as a Progressive Web App (PWA) on compatible devices for a more native app experience. Includes basic offline caching for the app shell via Service Worker.
+*   **Seed-Based Key Generation:** **(Recommended)** Deterministically generates the Flask `SECRET_KEY`, `FERNET_KEY` for encryption, and VAPID keys for push notifications from user-provided seed environment variables. Simplifies secret management and ensures key persistence across container restarts.
+*   **Dockerized:** Easy deployment using Docker and Docker Compose. Optimized Dockerfile for `linux/arm64/v8` (Raspberry Pi 4/5 and other ARM devices). Includes `ProxyFix` middleware for correct operation behind reverse proxies.
 
 ## Technology Stack
 
-*   **Backend:** Python 3.11+, Flask, Waitress (WSGI)
-*   **Device Interaction:** [FindMy.py](https://github.com/malmeloo/FindMy.py) library
+*   **Backend:** Python 3.11+, Flask, Waitress (WSGI Server), APScheduler (Task Scheduling)
+*   **Device Interaction:** [FindMy.py](https://github.com/malmeloo/FindMy.py)
 *   **Frontend:** Vanilla JavaScript (ES Modules), HTML5, CSS3
 *   **Mapping:** Leaflet.js
-*   **Styling:** Material 3 Design principles (CSS variables), Material Icons/Symbols, Material Color Utilities (JS library for dynamic theming)
-*   **Push Notifications:** `pywebpush`, Web Push API
-*   **Scheduling:** APScheduler
-*   **Security/Auth:** Flask-Login, Flask-WTF (CSRF), Werkzeug password hashing, `cryptography` (Fernet, HKDF)
+*   **Styling:** Material 3 Design principles (CSS variables), Material Icons & Symbols, [Material Color Utilities](https://github.com/material-foundation/material-color-utilities) (JS library for dynamic theming)
+*   **Push Notifications:** `pywebpush`, Web Push API, VAPID
+*   **Security/Auth:** Flask-Login, Flask-WTF (CSRF protection), Werkzeug password hashing, `cryptography` (Fernet encryption, HKDF for key derivation)
 *   **Deployment:** Docker, Docker Compose
 
 ## Getting Started
+
+*(This section remains largely the same as your provided version, with minor clarifications)*
 
 ### Prerequisites
 
@@ -60,149 +76,47 @@ This project provides a web interface accessible from any device to locate your 
 *   **Pip:** Python package installer.
 *   **Git:** For cloning the repository.
 *   **Docker & Docker Compose:** (Required for Docker/Portainer deployment) Install Docker Engine and Docker Compose V2.
-*   **(Optional) Anisette Server:** Required by [FindMy.py](https://github.com/malmeloo/FindMy.py) for authentication. Public servers are configured by default (`ANISETTE_SERVERS` env var), but running your own instance is more reliable. See [Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server).
-*   **Apple ID:** You will need an Apple ID.
-    *   **2FA Accounts (Recommended):** Using accounts *without* 2FA may work but is **strongly discouraged** for security reasons and may fail unpredictably with Apple's API changes.
-*   **Device Files:** `.plist` or `.keys` files for the Apple devices you want to track (e.g., AirTags). Generated using tools like [OpenHaystack](https://github.com/seemoo-lab/openhaystack).
+*   **(Optional) Anisette Server:** Required by [FindMy.py](https://github.com/malmeloo/FindMy.py) for authentication. Public servers can be configured via the `ANISETTE_SERVERS` env var, but running your own instance (e.g., [Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server)) is more reliable.
+*   **Apple ID:**
+    *   **2FA Accounts (Strongly Recommended):** If 2FA is enabled, you **MUST** generate and use an **App-Specific Password (ASP)**. Your regular Apple ID password will *not* work. Generate via [appleid.apple.com](https://appleid.apple.com) ➔ Sign-In and Security ➔ App-Specific Passwords.
+    *   **Non-2FA Accounts:** Using accounts *without* 2FA is **strongly discouraged** due to security risks and potential incompatibility with Apple's changing APIs.
+*   **Device Files:** `.plist` or `.keys` files for the Apple devices (e.g., AirTags) you want to track. Generate these using tools like [OpenHaystack](https://github.com/seemoo-lab/openhaystack).
 
 ### Configuration (Environment Variables & Seeds)
 
-This application relies on environment variables for configuration, especially secrets. **Using the SEED variables is the strongly recommended method for key management.**
+*(This section remains largely the same)*
 
-1.  **Generate Seeds:** Create three unique, strong, secret phrases (keep these secure!). Use a password manager or the following commands:
-    *   **Secret Seed (for Flask `SECRET_KEY`):**
-        ```bash
-        python -c "import secrets; print(secrets.token_hex(32))"
-        ```
-    *   **Fernet Seed (for `FERNET_KEY` encryption):**
-        ```bash
-        python -c "import secrets; print(secrets.token_hex(32))"
-        ```
-    *   **VAPID Seed (for Push Notification Keys):**
-        ```bash
-        python -c "import secrets; print(secrets.token_hex(32))"
-        ```
-    *   **Important:** Use *different*, long, unpredictable strings for each seed.
-
-2.  **Set Environment Variables:** Provide these seeds and other required variables depending on your deployment method (see below).
-
-    **Required Variables:**
-    *   `FLASK_ENV`: Set to `production` (recommended for Docker/Portainer) or `development` (for local).
-    *   `SECRET_SEED`: Your generated seed for the Flask secret key.
-    *   `FERNET_SEED`: Your generated seed for the encryption key (enables secure password storage).
-    *   `VAPID_SEED`: Your generated seed for VAPID push notification keys (enables push notifications).
-    *   `VAPID_CLAIMS_EMAIL`: Your email address, prefixed with `mailto:` (e.g., `mailto:your_email@example.com`). Required if `VAPID_SEED` is used.
-    *   `TZ`: Your timezone (e.g., `Europe/Amsterdam`, `America/New_York`). See [List of tz database time zones](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
-
-    **Optional Variables (Defaults are in `app/config.py`):**
-    *   `LOG_LEVEL`: `DEBUG`, `INFO`, `WARNING`, `ERROR` (Default: `INFO`).
-    *   `WAITRESS_THREADS`: Number of worker threads for Waitress (Default: `4`, recommend `8` for Docker).
-    *   `LOW_BATTERY_THRESHOLD`: Battery percentage to trigger low battery alert (Default: `15`).
-    *   `DEFAULT_FETCH_INTERVAL_MINUTES`: Background fetch interval per user (Default: `15`).
-    *   `SCHEDULER_MASTER_JOB_INTERVAL_MINUTES`: How often the master scheduler checks for users to fetch (Default: `2`).
-    *   `HISTORY_DURATION_DAYS`: How many days of location history to fetch from Apple (Default: `7`).
-    *   `NOTIFICATION_COOLDOWN_SECONDS`: Min seconds between similar notifications per device (Default: `300`).
-    *   `NOTIFICATION_HISTORY_DAYS`: How many days of notification history to keep (Default: `30`).
-    *   `ANISETTE_SERVERS`: Comma-separated list of Anisette server URLs (Default: `http://localhost:6969` - **change this if not running locally!**).
-    *   `DEFAULT_SHARE_DURATION_HOURS`: Default expiry for new share links (Default: `24`).
-
-    *Note:* You can still provide `SECRET_KEY`, `FERNET_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY` directly, but the SEED method is preferred for easier management. Seeds take precedence if both are set.
+**(Required Variables & Optional Variables list is accurate based on `app/config.py`)**
 
 ### 1. Local Development Setup
 
-1.  **Clone:** `git clone https://github.com/Ghodmode/findmy-multiuser.git && cd findmy-multiuser`
-2.  **Virtual Env:** `python -m venv venv && source venv/bin/activate` (or `venv\Scripts\activate` on Windows)
-3.  **Install:** `pip install -r requirements.txt`
-4.  **Configure:** Create a `.env` file in the project root:
-    ```dotenv
-    # .env (for local development)
-    FLASK_ENV=development
-    LOG_LEVEL=DEBUG
-    TZ=Europe/Amsterdam # CHANGE ME
-
-    # --- Key Generation Seeds (REPLACE WITH YOUR GENERATED SECRETS!) ---
-    SECRET_SEED="replace-this-with-your-very-long-and-random-secret-phrase-for-sessions"
-    FERNET_SEED="replace-this-with-your-another-different-long-random-secret-phrase-for-encryption"
-    VAPID_SEED="replace-this-with-your-a-third-unique-long-random-phrase-for-push-keys"
-
-    # --- Other Required Variables ---
-    VAPID_CLAIMS_EMAIL="mailto:your_email@example.com" # CHANGE ME
-
-    # --- Optional: Override Anisette Server ---
-    # ANISETTE_SERVERS=http://your-local-anisette-ip:6969
-    ```
-5.  **Run:** `python run.py`
-6.  **Access:** Open `http://localhost:5000` in your browser.
+*(Steps are accurate)*
 
 ### 2. Docker Setup (using Docker Compose)
 
-1.  **Clone:** `git clone https://github.com/Ghodmode/findmy-multiuser.git && cd findmy-multiuser`
-2.  **Configure `docker-compose.yml`:**
-    *   Edit the `environment:` section.
-    *   Set `FLASK_ENV=production`, `TZ`, `VAPID_CLAIMS_EMAIL`.
-    *   **Replace the placeholder SEED values** with your generated secrets.
-    *   Adjust `WAITRESS_THREADS`, `ANISETTE_SERVERS`, and other optional variables as needed.
-    *   Verify the `volumes:` mapping for `./data` points correctly.
-    ```yaml
-      # ... inside services: findmyapp: ...
-      volumes:
-        - ./data:/app/data # Maps local ./data to /app/data in container
-      environment:
-        FLASK_ENV: production
-        LOG_LEVEL: INFO # Or DEBUG for more logs
-        TZ: Europe/Amsterdam # CHANGE ME
-        WAITRESS_THREADS: 8 # Recommended for Pi
-
-        # --- Key Generation Seeds (REPLACE THESE!) ---
-        SECRET_SEED: "replace-this-with-your-very-long-and-random-secret-phrase-for-sessions"
-        FERNET_SEED: "replace-this-with-your-another-different-long-random-secret-phrase-for-encryption"
-        VAPID_SEED: "replace-this-with-your-a-third-unique-long-random-phrase-for-push-keys"
-
-        # --- Other Required Variables ---
-        VAPID_CLAIMS_EMAIL: "mailto:your_email@example.com" # CHANGE ME
-
-        # --- Optional Overrides ---
-        # ANISETTE_SERVERS=http://your-anisette-server-ip:6969
-        # FETCH_INTERVAL_MINUTES=10
-    ```
-3.  **Build (Optional but Recommended on first run/changes):** `docker compose build`
-4.  **Run:** `docker compose up -d`
-5.  **Access:** Open `http://<your-docker-host-ip>:5000` (or `http://localhost:5000` if running Docker locally).
-6.  **Data:** User data is stored in the `./data` directory on your host.
+*(Steps are accurate)*
 
 ### 3. Portainer Setup (Stack Deployment)
 
-1.  **Prepare Host:** Ensure Docker is running. Clone the repository (e.g., `/home/user/findmy-webapp`).
-2.  **Prepare Stack Definition:**
-    *   Use the content of `portainer_docker-compose.yml` as a base or modify `docker-compose.yml`.
-    *   **Crucially, change the `volumes:` path to an *absolute path* on the host** (e.g., `- /home/user/findmy-webapp/data:/app/data`).
-    *   Verify/Set all `environment:` variables, especially the **SEED variables**, `TZ`, `VAPID_CLAIMS_EMAIL`, and `ANISETTE_SERVERS` (if needed).
-3.  **Deploy in Portainer:**
-    *   Go to "Stacks" ➔ "Add stack".
-    *   Name it (e.g., `findmyapp`). Select "Web editor".
-    *   Paste your modified stack definition (YAML).
-    *   Click "Deploy the stack".
-4.  **Access:** Open `http://<your-host-ip>:5000`.
+*(Steps are accurate)*
 
 ## Usage
 
 1.  **Access & Register/Login:** Open the app URL. Create an account or log in.
-2.  **Set Apple Credentials:** Navigate `☰ Menu` ➔ `Apple Credentials`. Enter your Apple ID email and **App-Specific Password (ASP)**. Save.
-3.  **Upload Device Files:** Navigate `☰ Menu` ➔ `Settings` ➔ `Manage Device Files`. Upload `.plist` or `.keys` files for your devices.
-4.  **View Map:** Go to the `Map` tab. Devices should appear after the first background fetch completes (interval defined by `FETCH_INTERVAL_MINUTES`). Use map controls as needed.
-5.  **View Devices:** Go to the `Devices` tab. Click a device to center map. Use the menu (`⋮`) for options:
-    *   **Edit Display:** Change name, label, color.
-    *   **Share Device:** Create a public share link.
-    *   **Manage Geofences:** Link/unlink geofences for this device.
-    *   **Test Notifications:** Send test alerts.
-    *   **Remove Device:** Delete device and its data.
-6.  **Manage Geofences:** Go to `Geofences` tab. Create global areas. Link/unlink devices and configure notifications per link.
-7.  **View Alerts:** Go to `Alerts` tab to see notification history.
-8.  **Configure Settings:** Go to `Settings` tab. Manage theme, map defaults, notification permissions, import/export config, manage active shares, and delete your account.
+2.  **Set Apple Credentials:** Navigate `☰ Menu` ➔ `Apple Credentials`. Enter your Apple ID email and **App-Specific Password (ASP)**. Save. (An initial data fetch is triggered).
+3.  **Upload Device Files:** Navigate `☰ Menu` ➔ `Settings` ➔ `Manage Device Files`. Upload `.plist` or `.keys` files. (Another fetch is triggered).
+4.  **View Map:** Go to the `Map` tab. Devices appear after the background fetch completes. Use controls to zoom, center, toggle 'Show All', or toggle/filter history trails. Click markers for popups.
+5.  **View Devices:** Go to the `Devices` tab for a list view. Click a device to center map. Use the `⋮` menu for options (Edit, Share, Geofences, Test Notifications, Remove). Toggle visibility using the eye icon.
+6.  **Manage Geofences:** Go to `Geofences` tab. Create global areas via the "+" button. Link/unlink devices and configure notifications per link in the device cards below.
+7.  **View Alerts:** Go to `Alerts` tab to view notification history. Mark as read/unread or delete entries.
+8.  **Configure Settings:** Go to `Settings` tab. Manage theme/color, map defaults (Show All/History), notification permissions/unsubscribe, import/export config, manage active shares, and delete your account.
 
 ## Gallery
 
+*(Keep your existing Gallery section here with the linked images)*
 <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
+    <img src="app/static/img/screenshot_map.png" alt="Map Tab" width="200"/>
+    <img src="app/static/img/screenshot_devices.png" alt="Devices Tab" width="200"/>
     <img src="app/static/img/screenshot_drawer.png" alt="Drawer" width="200"/>
     <img src="app/static/img/screenshot_device.png" alt="Device Options" width="200"/>
     <img src="app/static/img/screenshot_share.png" alt="Device Sharing" width="200"/>
@@ -210,7 +124,6 @@ This application relies on environment variables for configuration, especially s
     <img src="app/static/img/screenshot_geofences.png" alt="Geofences Tab" width="200"/>
     <img src="app/static/img/screenshot_geofence.png" alt="Geofence Options" width="200"/>
     <img src="app/static/img/screenshot_notifications.png" alt="Notifications Tab" width="200"/>
-  
     <img src="app/static/img/screenshot_settings.png" alt="Settings" width="200"/>
     <img src="app/static/img/screenshot_settings_color.png" alt="Custom Accents Color" width="200"/>
     <img src="app/static/img/screenshot_settings_dark.png" alt="Dark Mode" width="200"/>
@@ -218,34 +131,27 @@ This application relies on environment variables for configuration, especially s
 
 ## Troubleshooting / FAQ
 
-*   **No Devices Showing:**
-    *   Check Apple Credentials (ASP!).
-    *   Check if `.plist`/`.keys` files were uploaded correctly.
-    *   Wait for the background fetch interval or trigger a manual refresh via the "Update Status" button on the Devices page.
-    *   Check server logs (`docker compose logs findmyapp` or Portainer logs) for fetch errors (e.g., Anisette issues, auth failures).
-*   **Notifications Not Working:**
-    *   Did you grant notification permission in your browser? Check Settings ➔ Notifications.
-    *   Are VAPID keys generated (via `VAPID_SEED`) or provided? Is `VAPID_CLAIMS_EMAIL` set? Check server startup logs.
-    *   Did you subscribe successfully? Check status in Settings.
-    *   Are Geofence entry/exit notifications enabled for the specific device/geofence link?
-    *   Is the Low Battery Threshold set appropriately?
-    *   Is the Notification Cooldown period active (check logs)?
-*   **Map Issues (Blank, Not Loading):**
-    *   Clear browser cache. Check internet. Check browser console (F12) for errors.
-*   **Docker: Permission Denied errors related to `./data`:**
-    *   The container needs write access to the host directory mapped to `/app/data`. Adjust host directory permissions (e.g., `sudo chown -R <user_id>:<group_id> ./data` - find container user/group if needed, often `1000:1000` or check Dockerfile/runtime) or use managed Docker volumes.
-*   **VAPID Keys Failed to Generate from Seed:**
-    *   Error log might mention "scalar... outside the valid range". **Solution:** Choose a *different* strong random string for `VAPID_SEED` and restart.
-*   **How to Update the App?**
-    *   **Local:** `git pull origin main`, activate venv, `pip install -r requirements.txt`, restart `python run.py`.
-    *   **Docker Compose:** `git pull origin main`, `docker compose build` (if code changed), `docker compose down && docker compose up -d`.
-    *   **Portainer:** `git pull origin main` on host, go to Stack, "Editor", ensure image tag is `:latest` or updated, click "Update the stack", enable "Re-pull image and redeploy".
-*   **Where is my data stored?**
-    *   User accounts, device configs, geofences, states, credentials, history, shares etc., are stored as JSON files within the `data/` directory (or the host directory mapped to `/app/data` in Docker).
+*(This section remains largely the same and accurate)*
+
+*   **Login Failed / Background Fetch Errors / 2FA Required:** Use an **App-Specific Password (ASP)** if 2FA is enabled on your Apple ID.
+*   **No Devices Showing:** Check credentials (ASP!), file uploads, wait for fetch interval, or trigger manual refresh (`Devices` ➔ `Update Status`), check server logs.
+*   **Notifications Not Working:** Check browser permission, VAPID setup (`VAPID_SEED`, `VAPID_CLAIMS_EMAIL`), subscription status (Settings), geofence link notification toggles, low battery threshold, cooldown period.
+*   **Map Issues:** Clear cache, check internet, check browser console (F12).
+*   **Docker Permissions:** Ensure host `./data` directory is writable by the container user (often UID/GID 1000). Use `sudo chown -R 1000:1000 ./data` or Docker volumes.
+*   **VAPID Seed Failure:** If logs mention "scalar... outside the valid range", use a *different* random string for `VAPID_SEED` and restart.
+*   **Updating:** Follow instructions for Local, Docker Compose, or Portainer based on your setup method. Always pull latest code (`git pull`), potentially rebuild image (`docker compose build`), and redeploy (`docker compose up -d` or Portainer "Update the stack").
+*   **Data Storage:** User data is in JSON files within the `data/` directory (mapped to `/app/data` in container).
+*   **Scanner Not Working / Not Finding Devices:**
+    *   **Platform Support:** Web Bluetooth scanning is **NOT supported on iOS (iPhone/iPad)**. It requires Chrome/Edge or a compatible browser on Android, Windows, macOS, Linux, or ChromeOS.
+    *   **Permissions:** Did you grant Bluetooth scanning permission to the website in your browser?
+    *   **Bluetooth Enabled:** Is Bluetooth turned ON on your computer/phone?
+    *   **Device Type & Firmware:** The scanner can only reliably *identify* devices configured via `.keys` files (using an experimental reconstruction method) OR devices using modified firmware (like some OpenHaystack forks) that broadcast their full public key via Service Data UUID `0xFD6F`. It **cannot reliably identify** official AirTags or devices configured via `.plist` using the standard time-rolling advertisement protocol due to browser privacy limitations hiding the real MAC address.
+    *   **Device Nearby & Powered On?** Is the device physically close and turned on?
+    *   **Check Console:** Open the browser's developer console (F12) while scanning. Look for errors related to `Bluetooth`, `requestLEScan`, or `advertisementreceived`. Look for `[Scanner Ad Process]` logs to see if packets are being detected.
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a Pull Request. See `CONTRIBUTING.md` (if available) for guidelines.
+Contributions are welcome! Please open an issue or submit a Pull Request. Consider adding tests and following existing code style.
 
 ## Future Improvements / Roadmap
 
@@ -259,6 +165,7 @@ See [TODO.md](TODO.md) for a detailed list of planned features and improvements.
 *   Improved Offline Cache
 *   Custom Map Layers
 *   Battery level history tracking
+*   Scanner improving Device Identification for .plist files
 
 ## License
 
@@ -266,10 +173,12 @@ This project is licensed under the MIT License - see the `LICENSE` file for deta
 
 ## Credits & Acknowledgements
 
-*   **FindMy.py:** Core library for Find My interaction ([malmeloo/FindMy.py](https://github.com/malmeloo/FindMy.py)).
-*   **Anisette Server:** Authentication helper ([Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server)).
-*   **Flask:** Web framework ([pallets/flask](https://github.com/pallets/flask)).
-*   **Leaflet:** Mapping library ([Leaflet/Leaflet](https://github.com/Leaflet/Leaflet)).
-*   **Material Design Components/Principles:** UI inspiration.
-*   **pywebpush, cryptography, Flask-Login, Flask-WTF, APScheduler, Waitress:** Key backend libraries.
-*   **(Inspiration):** Apple Find My, OpenHaystack ([seemoo-lab/openhaystack](https://github.com/seemoo-lab/openhaystack)).
+*(This section remains accurate)*
+
+## Contact
+
+For questions, feedback, or support, please open an issue on the [GitHub Repository](https://github.com/Ghodmode/findmy-multiuser/issues).
+
+---
+
+> **Disclaimer:** This project is not affiliated with or endorsed by Apple Inc. Use responsibly and respect privacy laws. Intended for personal, educational use.

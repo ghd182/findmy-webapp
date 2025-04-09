@@ -1648,7 +1648,8 @@ input:checked+.toggle-slider:before {
     visibility: visible;
     transform: scale(1);
     transition: opacity 0.15s ease-out, transform 0.15s ease-out, visibility 0s linear 0s;
-    pointer-events: auto; /* Allow interaction when shown */
+    pointer-events: auto;
+    /* Allow interaction when shown */
 }
 
 #more-menu-dialog .dialog-content {
@@ -2622,7 +2623,7 @@ body.logout-success {
 }
 
 
-.leaflet-popup-tip{
+.leaflet-popup-tip {
     background: var(--m3-sys-color-surface-container-high);
     color: var(--m3-sys-color-on-surface);
     box-shadow: 0 1px 4px rgba(var(--m3-sys-color-shadow), 0.15);
@@ -2927,3 +2928,174 @@ body.logout-success {
 }
 
 /* --- END: Share Styles --- */
+
+
+/* --- Scanner Page Styles (Add Key Display Style) --- */
+#scanner-results-list {
+    margin-top: 16px;
+}
+
+.scanner-result-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: var(--m3-sys-color-surface-container);
+    border-radius: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(var(--m3-sys-color-shadow), 0.05);
+    transition: background-color 0.3s;
+    flex-wrap: wrap;
+    /* Allow details to wrap below */
+    position: relative;
+    /* For absolute positioning if needed, not currently used */
+}
+
+.scanner-result-info {
+    flex-grow: 1;
+    margin-left: 16px;
+    /* Adjust if not using device-icon class */
+    overflow: hidden;
+    flex-basis: 60%;
+}
+
+.scanner-result-name {
+    font-size: var(--body-large-size);
+    font-weight: 500;
+    color: var(--m3-sys-color-on-surface);
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.scanner-result-details {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    opacity: 0.8;
+}
+
+/* --- NEW Style for Key --- */
+
+.scanner-result-key {
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    opacity: 0.70;
+    margin-top: 4px;
+    word-break: break-all;
+    font-family: monospace;
+    cursor: help;
+}
+
+/* --- ----------------- --- */
+
+.scanner-rssi {
+    flex-shrink: 0;
+    margin-left: 16px;
+    text-align: right;
+    font-weight: 500;
+    font-size: var(--body-medium-size);
+    flex-basis: 20%;
+}
+
+.scanner-rssi div {
+    /* For distance indicator */
+    font-size: var(--label-small-size);
+    font-weight: 400;
+    opacity: 0.7;
+}
+
+#scanner-no-support {
+    color: var(--m3-sys-color-error);
+    /* Make no support message stand out */
+    background-color: var(--m3-sys-color-error-container);
+    padding: 8px;
+    border-radius: 8px;
+}
+
+/* --- Scanner Page Styles (Additions) --- */
+
+
+
+
+/* Style for Browser ID display */
+.scanner-result-details[style*="font-size: 0.75em"] {
+    margin-top: 2px;
+}
+
+/* Ensure spinner is centered in button */
+#start-scan-button .spinner,
+#stop-scan-button .spinner {
+    /* Add if you add spinner to stop */
+    margin: 0 !important;
+    /* Override default margins */
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 5px !important;
+    /* Add space */
+}
+
+
+
+.scanner-details-toggle {
+    flex-basis: 10%;
+    /* Space for the toggle button */
+    margin-left: auto;
+    /* Push to the right */
+    padding: 4px !important;
+    /* Smaller padding */
+    min-width: auto !important;
+    align-self: center;
+    /* Align vertically */
+}
+
+.scanner-result-extra-details {
+    width: 100%;
+    /* Take full width */
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--m3-sys-color-outline-variant);
+    font-size: var(--body-small-size);
+    color: var(--m3-sys-color-on-surface-variant);
+    display: none;
+    /* Hidden by default */
+    line-height: 1.5;
+    word-break: break-all;
+    /* Allow long hex strings to wrap */
+    background-color: color-mix(in srgb, var(--m3-sys-color-surface) 50%, transparent);
+    /* Slightly different background */
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.scanner-result-extra-details .detail-row {
+    margin-bottom: 4px;
+}
+
+.scanner-result-extra-details .detail-row strong {
+    color: var(--m3-sys-color-on-surface);
+    /* Make labels slightly darker */
+    margin-right: 4px;
+    font-weight: 500;
+}
+
+.scanner-result-extra-details .detail-row pre {
+    display: inline;
+    /* Keep service data map somewhat inline */
+    font-family: monospace;
+    font-size: 0.9em;
+    margin: 0;
+    white-space: pre-wrap;
+    /* Allow wrapping */
+}
+
+.scanner-result-extra-details .detail-row.matched strong {
+    color: var(--m3-sys-color-primary);
+    /* Highlight matched label */
+}
+
+
+/* Highlight matched devices */
+.scanner-result-item.matched-device {
+    border-left: 4px solid var(--m3-sys-color-primary);
+    background-color: color-mix(in srgb, var(--m3-sys-color-primary-container) 30%, transparent);
+}

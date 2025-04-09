@@ -10,9 +10,16 @@ import uuid  # Added for share IDs
 from pathlib import Path
 from werkzeug.utils import secure_filename
 import json
+
+from typing import List
 from datetime import datetime, timezone, timedelta  # Ensure timedelta is imported
 from app.scheduler.tasks import run_fetch_for_user_task
-from app.utils.json_utils import save_json_atomic, load_json_file  # Import JSON helpers
+from app.utils.json_utils import save_json_atomic, load_json_file 
+from app.utils.helpers import get_potential_mac_from_public_key
+
+from findmy.accessory import FindMyAccessory      # Import FindMyAccessory
+from findmy.keys import KeyPair                 # Import KeyPair
+import base64                                   # Import base64
 
 from flask import (
     Blueprint,
@@ -28,9 +35,12 @@ from flask import (
 from flask_login import login_required, current_user  # Import logout_user
 
 # Import Services
+# Import UserDataService to load keys file content (if helper isn't sufficient)
 from app.services.user_data_service import UserDataService
 from app.services.notification_service import NotificationService
+# Import AppleDataService ONLY if we need its internal key loading helper
 from app.services.apple_data_service import AppleDataService  # Needs AppleDataService
+
 
 # Import necessary utils
 from app.utils.helpers import (
@@ -57,6 +67,123 @@ def allowed_file(filename, allowed_set=ALLOWED_EXTENSIONS):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_set
 
 
+
+
+@bp.route("/user/current_advertisement_keys", methods=["GET"])
+@login_required
+def get_current_advertisement_keys():
+    user_id = current_user.id
+    log.info(f"API GET /user/current_advertisement_keys requested by '{user_id}'")
+    uds = UserDataService(current_app.config)
+    expected_keys_and_macs = []
+    processed_device_ids = set()
+
+    try:
+        user_data_dir = uds._get_user_data_dir(user_id)
+        if not user_data_dir: return jsonify({"error": "User data directory not found."}), 500
+        devices_config = uds.load_devices_config(user_id)
+        now = datetime.now(timezone.utc)
+
+        # 1. Process .plist files
+        log.debug(f"[API Keys] Processing .plist files for user '{user_id}'...")
+        for plist_file in user_data_dir.glob("*.plist"):
+            device_id = plist_file.stem
+            if not device_id or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem: continue
+            if device_id in processed_device_ids: continue
+            log.debug(f"[API Keys] -- Found plist: {plist_file.name} (Device ID: {device_id})")
+
+            try:
+                with plist_file.open("rb") as f: accessory = FindMyAccessory.from_plist(f)
+                # --- Get keys for a slightly wider window for robustness ---
+                # reconstruct all the 7 days interval for .plist devices
+                time_window_past = now - 7*24*4*accessory.interval # Go back one interval
+                time_window_future = now + accessory.interval # Go forward one interval
+                current_keys: set[KeyPair] = accessory.keys_between(time_window_past, time_window_future) # Use keys_between
+                # current_keys: set[KeyPair] = accessory.keys_at(now) # Original line
+                # --- ---------------------------------------------------- ---
+
+                device_display_name = devices_config.get(device_id, {}).get("name", device_id)
+                log.debug(f"[API Keys] -- Generated {len(current_keys)} potential keys for '{device_id}' around {now.isoformat()}")
+
+                for key_pair in current_keys:
+                    adv_key_bytes = key_pair.adv_key_bytes
+                    adv_key_b64 = base64.urlsafe_b64encode(adv_key_bytes).decode('ascii').rstrip('=')
+                    potential_mac = get_potential_mac_from_public_key(adv_key_bytes)
+
+                    # --- *** ADD DETAILED LOG for plist keys/macs *** ---
+                    log.debug(f"[API Keys] ---- Device: {device_id} | Type: {key_pair.key_type.name} | KeyB64: {adv_key_b64} | MAC: {potential_mac}")
+                    # --- ******************************************** ---
+
+                    expected_keys_and_macs.append({
+                        "device_id": device_id, "name": device_display_name,
+                        "adv_key_b64": adv_key_b64, "key_type": key_pair.key_type.name,
+                        "potential_mac": potential_mac
+                    })
+                processed_device_ids.add(device_id)
+            except Exception as e:
+                log.warning(f"User '{user_id}': Error processing plist {plist_file.name} for keys: {e}", exc_info=True) # Add exc_info
+
+        # 2. Process .keys files (keep existing logic)
+        log.debug(f"[API Keys] Processing .keys files for user '{user_id}'...")
+        def _load_private_keys_from_keys_file(keys_file_path: Path) -> List[str]: # ... same helper ...
+             private_keys = []
+             if not keys_file_path.exists(): return []
+             try:
+                 with keys_file_path.open("r", encoding="utf-8") as f:
+                     for line_num, line in enumerate(f, 1):
+                         line = line.strip();
+                         if not line or line.startswith("#"): continue
+                         parts = line.split(":", 1)
+                         if len(parts) == 2 and parts[0].strip().lower() == "private key":
+                             key_data = parts[1].strip()
+                             try:
+                                 if len(key_data) > 20 and len(key_data) % 4 == 0:
+                                     base64.b64decode(key_data, validate=True)
+                                     private_keys.append(key_data)
+                                 else: log.warning(f"Skipping potential invalid key data in {keys_file_path.name} (L{line_num})")
+                             except Exception: log.warning(f"Skipping invalid base64 data in {keys_file_path.name} (L{line_num})")
+             except Exception as e: log.error(f"Error reading keys file {keys_file_path}: {e}")
+             return private_keys
+
+        for keys_file in user_data_dir.glob("*.keys"):
+            device_id = keys_file.stem
+            if not device_id or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem: continue
+            if device_id in processed_device_ids: continue
+            log.debug(f"[API Keys] -- Found keys file: {keys_file.name} (Device ID: {device_id})")
+
+            try:
+                private_keys_b64 = _load_private_keys_from_keys_file(keys_file)
+                if not private_keys_b64: continue
+                device_display_name = devices_config.get(device_id, {}).get("name", device_id)
+                keys_added_count = 0
+                for key_b64_string in private_keys_b64:
+                    try:
+                        key_pair = KeyPair.from_b64(key_b64_string)
+                        adv_key_bytes = key_pair.adv_key_bytes
+                        adv_key_b64_urlsafe = base64.urlsafe_b64encode(adv_key_bytes).decode('ascii').rstrip('=')
+                        potential_mac = get_potential_mac_from_public_key(adv_key_bytes)
+
+                        # --- *** ADD DETAILED LOG for keys file keys/macs *** ---
+                        log.debug(f"[API Keys] ---- Device: {device_id} | Type: STATIC_KEYS_FILE | KeyB64: {adv_key_b64_urlsafe} | MAC: {potential_mac}")
+                        # --- ********************************************** ---
+
+                        expected_keys_and_macs.append({
+                            "device_id": device_id, "name": device_display_name,
+                            "adv_key_b64": adv_key_b64_urlsafe, "key_type": "STATIC_KEYS_FILE",
+                            "potential_mac": potential_mac
+                        })
+                        keys_added_count += 1
+                    except Exception as kp_err: log.warning(f"User '{user_id}': Failed to process private key from {keys_file.name}: {kp_err}")
+                if keys_added_count > 0: processed_device_ids.add(device_id)
+            except Exception as e: log.warning(f"User '{user_id}': Error processing keys file {keys_file.name} for scanner: {e}")
+
+        log.info(f"User '{user_id}': Providing {len(expected_keys_and_macs)} potential keys/MACs.")
+        return jsonify({"keys_and_macs": expected_keys_and_macs})
+
+    except Exception as e:
+        log.exception(f"Error fetching current keys/MACs for user '{user_id}'")
+        return jsonify({"error": "Server error fetching expected keys."}), 500
+    
 @bp.route("/files/upload", methods=["POST"])
 @login_required
 def upload_device_file():

@@ -922,7 +922,7 @@ window.AppActions = {
         console.log("Performing search for:", query); let results = []; const lowerQuery = query.toLowerCase();
         const appActions = [
             { type: 'action', target: 'settings', name: 'Settings', keywords: ['settings', 'theme', 'history', 'map defaults', 'config'], icon: 'settings' },
-            { type: 'action', target: 'geofences', name: 'Geofences', keywords: ['geofence', 'fence', 'area', 'zone', 'boundary'], icon: 'radar' },
+            { type: 'action', target: 'geofences', name: 'Geofences', keywords: ['geofence', 'fence', 'area', 'zone', 'boundary'], icon: 'location_searching' },
             { type: 'action', target: 'shared', name: 'Devices', keywords: ['device', 'item', 'accessory', 'shared', 'list'], icon: 'devices' },
             { type: 'action', target: 'places', name: 'Saved Places', keywords: ['place', 'saved', 'favorite', 'star'], icon: 'star_outline' },
             { type: 'action', target: 'history', name: 'Location History', keywords: ['history', 'timeline', 'past'], icon: 'history' },
@@ -938,7 +938,7 @@ window.AppActions = {
         appActions.forEach(action => { if (action.name.toLowerCase().includes(lowerQuery) || action.keywords.some(k => k.includes(lowerQuery))) { results.push({ ...action, description: action.description || `Go to ${action.name}` }); } });
         AppState.getCurrentDeviceData().forEach(device => { const displayInfo = AppState.getDeviceDisplayInfo(device.id); if (displayInfo.name.toLowerCase().includes(lowerQuery) || device.id.toLowerCase().includes(lowerQuery)) { results.push({ type: 'device', id: device.id, name: displayInfo.name, description: displayInfo.status || 'Device', icon: 'devices', svg_icon: displayInfo.svg_icon }); } });
         AppState.savedPlaces.forEach((place, index) => { if (place.name.toLowerCase().includes(lowerQuery) || (place.description && place.description.toLowerCase().includes(lowerQuery))) { results.push({ type: 'place', placeIndex: index, name: place.name, description: place.description || 'Saved Place', icon: 'star' }); } });
-        AppState.getGlobalGeofences().forEach(gf => { if (gf.name.toLowerCase().includes(lowerQuery)) { results.push({ type: 'geofence', id: gf.id, name: gf.name, description: `Radius: ${gf.radius}m`, icon: 'radar' }); } });
+        AppState.getGlobalGeofences().forEach(gf => { if (gf.name.toLowerCase().includes(lowerQuery)) { results.push({ type: 'geofence', id: gf.id, name: gf.name, description: `Radius: ${gf.radius}m`, icon: 'location_searching' }); } });
         try {
             const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=4`;
             // Use AppConfig if available, otherwise default
@@ -1345,7 +1345,19 @@ async function initializeApp() {
     try { const prefs = await AppApi.fetchUserPreferences(); AppState.setCurrentUserPreferences(prefs); } catch (error) { console.error("Failed to fetch user preferences:", error); }
     if (window.AppTheme && typeof window.AppTheme.initializeTheme === 'function') { AppTheme.initializeTheme(); } else { console.error("AppTheme init error."); const isDarkFallback = (AppState.currentTheme === 'dark' || (AppState.currentTheme === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)); document.documentElement.classList.add(isDarkFallback ? 'dark-theme' : 'light-theme'); } // Apply to HTML
     AppUI.setupSettingsPage(); AppActions.initDebouncedSearch();
-    try { const urlParams = new URLSearchParams(window.location.search); const pageParam = urlParams.get('page'); if (pageParam) { const validPages = ['index', 'shared', 'places', 'history', 'geofences', 'settings', 'notifications-history']; if (validPages.includes(pageParam)) AppUI.changePage(pageParam); else AppUI.navigateToInitialPage(); } else { AppUI.navigateToInitialPage(); } } catch (e) { console.error("[Init] Error handling initial page navigation:", e); AppUI.navigateToInitialPage(); }
+
+    try { const urlParams = new URLSearchParams(window.location.search); const pageParam = urlParams.get('page'); if (pageParam) { const validPages = ['index', 'shared', 'scanner', 'geofences', 'settings', 'notifications-history']; if (validPages.includes(pageParam)) AppUI.changePage(pageParam); else AppUI.navigateToInitialPage(); } else { AppUI.navigateToInitialPage(); } } catch (e) { console.error("[Init] Error handling initial page navigation:", e); AppUI.navigateToInitialPage(); }
+    if (AppState.getLastActivePageId() === 'index') { // Only init map if starting on map page
+        if (window.AppMap && typeof window.AppMap.initMap === 'function') {
+            AppMap.initMap();
+        } else {
+            console.error("AppMap or AppMap.initMap not found!");
+            if (window.AppUI) AppUI.showErrorDialog("Map Error", "Could not load map component.");
+        }
+    } else {
+        console.log("Skipping initial map load as not starting on map page.");
+    }
+
     if (window.AppMap && typeof window.AppMap.initMap === 'function') { AppMap.initMap(); } else { console.error("AppMap init error!"); if (window.AppUI) AppUI.showErrorDialog("Map Error", "Could not load map component."); }
     if (window.AppNotifications) { AppNotifications.registerServiceWorker().then(() => console.log("SW reg sequence complete.")).catch(error => console.error("SW reg failed:", error)); } else { console.error("AppNotifications not found!"); }
     AppActions.fetchInitialData().catch(err => console.error("Initial data fetch error:", err));

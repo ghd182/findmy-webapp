@@ -197,7 +197,7 @@ window.AppUI = {
 
         menuItems.push({ label: "Share Device", icon: "share", action: () => this.openShareDeviceDialog(device.id, displayInfo.name) });
         menuItems.push({ label: "Edit Display", icon: "edit", action: () => this.openEditDeviceDialog(device.id) });
-        menuItems.push({ label: "Manage Geofences", icon: "radar", action: () => this.navigateToGeofenceDeviceCard(device.id) });
+        menuItems.push({ label: "Manage Geofences", icon: "location_searching", action: () => this.navigateToGeofenceDeviceCard(device.id) });
 
         // --- START: Ensure Test Buttons are Present ---
         menuItems.push({ type: 'divider' }); // Optional divider before tests
@@ -660,7 +660,7 @@ window.AppUI = {
 
                     let icon = 'notifications';
                     switch (item.data?.type) {
-                        case 'geofence': icon = 'radar'; break;
+                        case 'geofence': icon = 'location_searching'; break;
                         case 'battery': icon = 'battery_alert'; break;
                         case 'welcome': icon = 'celebration'; break;
                         case 'test': icon = 'science'; break;
@@ -946,28 +946,23 @@ window.AppUI = {
     // --- Page Navigation ---
     changePage: function (pageId, sectionId = null) {
         console.log(`[UI Debug] changePage called with pageId: "${pageId}" (type: ${typeof pageId})`);
-
-        // --- FIX: Define mainContent HERE ---
         const mainContent = document.getElementById('main-content');
-        // --- ---------------------------- ---
+        const pages = ['index', 'shared', 'places', 'history', 'geofences', 'settings', 'notifications-history', 'scanner']; // <-- ADD 'scanner'
 
-        const pages = ['index', 'shared', 'places', 'history', 'geofences', 'settings', 'notifications-history'];
+        // --- Stop Scanner if navigating away ---
+        if (AppState.lastActivePageId === 'scanner' && pageId !== 'scanner' && window.Scanner) {
+            Scanner.stopScan("Navigated away from Scanner tab.");
+        }
+        // --- --------------------------------- ---
 
-        // Save State (Only save if pageId is valid)
         if (pages.includes(pageId)) {
             AppState.saveLastActivePageId(pageId);
         } else {
             console.warn(`[UI] Attempted to navigate to invalid page ID: ${pageId}. Not saving state. Defaulting to index.`);
-            pageId = 'index'; // Fallback
+            pageId = 'index';
         }
 
-        // Hide other pages
-        pages.forEach(id => {
-            const pageElement = document.getElementById(id + '-page');
-            if (pageElement) pageElement.style.display = 'none';
-        });
-
-        // Update nav highlight
+        pages.forEach(id => { const pageElement = document.getElementById(id + '-page'); if (pageElement) pageElement.style.display = 'none'; });
         document.querySelectorAll('.nav-link').forEach(l => {
             l.classList.remove('active');
             if (l.getAttribute('data-page') === pageId) {
@@ -978,42 +973,35 @@ window.AppUI = {
         const targetPage = document.getElementById(pageId + '-page');
         if (targetPage) {
             targetPage.style.display = 'block';
-            // Scroll to top (using the defined variable)
-            if (mainContent) { // Check if element exists before scrolling
-                mainContent.scrollTop = 0;
-            } else {
-                console.warn("main-content element not found for scrolling.");
-            }
-
+            if (mainContent) { mainContent.scrollTop = 0; }
+            else { console.warn("main-content element not found for scrolling."); }
 
             // Handle page-specific actions
             if (pageId === 'index') {
-                if (AppState.getMap() && AppState.mapReady) {
-                    AppMap.invalidateMapSize();
-                    AppMap.updateMapView();
-                } else if (!AppState.getMap()) {
-                    // Let initializeApp handle initial map creation
-                    // This branch might be hit if navigating back later
-                    AppMap.initMap();
-                }
+                if (AppState.getMap() && AppState.mapReady) { AppMap.invalidateMapSize(); AppMap.updateMapView(); }
+                else if (!AppState.getMap()) { AppMap.initMap(); }
             }
-            else if (pageId === 'shared') { this.renderDevicesList(AppState.getCurrentDeviceData()); this.renderActiveSharesList(); AppActions.refreshDevices(); } // Added renderActiveSharesList here too
-            else if (pageId === 'places') { this.renderSavedPlacesList(); }
-            else if (pageId === 'history') { this.renderLocationHistory(); }
+            else if (pageId === 'shared') { this.renderDevicesList(AppState.getCurrentDeviceData()); AppActions.refreshDevices(); this.renderActiveSharesList(); } // Also render shares here now
+            // else if (pageId === 'places') { this.renderSavedPlacesList(); }
+            // else if (pageId === 'history') { this.renderLocationHistory(); }
             else if (pageId === 'settings') { this.setupSettingsPage(); this.renderActiveSharesList(); if (sectionId) { setTimeout(() => this.scrollToSection(sectionId), 100); } } // Call renderActiveSharesList here
             else if (pageId === 'geofences') { this.renderGlobalGeofences(); this.renderDeviceGeofenceLinks(); AppActions.refreshGeofencesAndDevices(); }
             else if (pageId === 'notifications-history') { this.renderNotificationHistory(); }
-
+            // --- ADD Scanner Init ---
+            else if (pageId === 'scanner') {
+                if (window.Scanner) Scanner.initScannerPage();
+                else console.error("Scanner object not found when changing to scanner page.");
+            }
+            // --- END Scanner Init ---
+            // Removed places/history specific logic as they are gone from nav
         } else {
             console.error("[UI] Target page not found:", pageId + '-page');
-            this.changePage('index'); // Fallback safely
+            this.changePage('index');
         }
 
-        // FAB visibility
+        // FAB visibility (keep hidden as places page is gone)
         const fab = document.getElementById('add-place-button');
-        if (fab) {
-            fab.style.display = (pageId === 'places') ? 'flex' : 'none';
-        }
+        if (fab) fab.style.display = 'none';
     },
 
     // --- NEW Helper for Initial Navigation ---
@@ -1199,7 +1187,7 @@ window.AppUI = {
 
         geofences.forEach(gf => {
             const item = document.createElement('div'); item.className = 'settings-item geofence-list-item'; item.setAttribute('tabindex', '0'); item.setAttribute('role', 'button'); item.setAttribute('aria-label', `Geofence: ${gf.name}, click to edit`); item.dataset.geofenceId = gf.id;
-            item.innerHTML = `<span class="material-icons drawer-item-icon" style="margin-right: 16px;">radar</span> <div class="settings-item-text"> <div class="settings-item-title">${gf.name}</div> <div class="settings-item-description"> Radius: ${gf.radius}m | Center: ${gf.lat.toFixed(4)}°, ${gf.lng.toFixed(4)}° </div> </div> <span class="material-icons geofence-edit" title="Edit Geofence" data-geofence-id="${gf.id}" style="margin-left: auto; cursor: pointer; opacity: 0.6;" tabindex="0" role="button" aria-label="Edit ${gf.name}">edit</span> <span class="material-icons geofence-remove" title="Remove Geofence" data-geofence-id="${gf.id}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--error-color);" tabindex="0" role="button" aria-label="Remove ${gf.name}">delete_outline</span>`;
+            item.innerHTML = `<span class="material-icons drawer-item-icon" style="margin-right: 16px;">location_searching</span> <div class="settings-item-text"> <div class="settings-item-title">${gf.name}</div> <div class="settings-item-description"> Radius: ${gf.radius}m | Center: ${gf.lat.toFixed(4)}°, ${gf.lng.toFixed(4)}° </div> </div> <span class="material-icons geofence-edit" title="Edit Geofence" data-geofence-id="${gf.id}" style="margin-left: auto; cursor: pointer; opacity: 0.6;" tabindex="0" role="button" aria-label="Edit ${gf.name}">edit</span> <span class="material-icons geofence-remove" title="Remove Geofence" data-geofence-id="${gf.id}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--error-color);" tabindex="0" role="button" aria-label="Remove ${gf.name}">delete_outline</span>`;
             listContainer.appendChild(item);
         });
     },

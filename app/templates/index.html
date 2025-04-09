@@ -102,7 +102,7 @@
                 <span class="drawer-item-text">My Devices</span>
             </div>
             <div class="drawer-item" tabindex="0" data-page="geofences">
-                <span class="material-icons drawer-item-icon">radar</span>
+                <span class="material-icons drawer-item-icon">location_searching</span>
                 <span class="drawer-item-text">Geofences</span>
             </div>
             <!-- Removed Places and History from Drawer -->
@@ -736,7 +736,39 @@
                     History disabled in settings. </p>
             </div>
         </div>
-
+        <!-- Scanner Page -->
+        <div id="scanner-page" style="display: none;">
+            <div class="card">
+                <div class="card-title">Nearby Scanner</div>
+                <p>Scan for your nearby Find My devices using Web Bluetooth.</p>
+                <p id="scanner-no-support" class="form-field-error" style="display: none; margin-top: 8px;">
+                    <strong>Web Bluetooth Scanning is not supported by this browser or platform.</strong><br>
+                    This feature works best in Chrome/Edge on Android, Mac, Windows, Linux, ChromeOS.<br>
+                    <strong>It is NOT supported on iOS (iPhone/iPad).</strong><br>
+                    Ensure you are using HTTPS.
+                </p>
+                <p id="scanner-status" style="margin-top: 12px; font-style: italic; min-height: 1.2em;">Idle</p>
+                <div class="button-row">
+                    <button class="button" id="start-scan-button">
+                        <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">bluetooth_searching</span>
+                        Start Scan
+                    </button>
+                    <button class="button" id="stop-scan-button"
+                        style="display: none; background-color: var(--m3-sys-color-error); color: var(--m3-sys-color-on-error);">
+                        <span class="material-icons"
+                            style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">cancel</span>
+                        Stop Scan
+                    </button>
+                </div>
+            </div>
+            <div id="scanner-results-list-container" style="margin-top: 16px;">
+                <h4 class="settings-section-title">Detected Devices</h4>
+                <div id="scanner-results-list">
+                    <p class="no-devices-message">Scan results will appear here.</p>
+                </div>
+            </div>
+        </div>
         <!-- Settings Screen -->
         <div id="settings-page" style="display: none;">
             <div class="card">
@@ -943,8 +975,13 @@
             <span class="material-icons nav-icon">devices</span>
             <span class="nav-label">Devices</span>
         </a>
-        <a href="#" class="nav-item nav-link" data-page="geofences">
+        <!-- Scanner Nav Item -->
+        <a href="#" class="nav-item nav-link" data-page="scanner">
             <span class="material-icons nav-icon">radar</span>
+            <span class="nav-label">Scanner</span>
+        </a>
+        <a href="#" class="nav-item nav-link" data-page="geofences">
+            <span class="material-icons nav-icon">location_searching</span> <!-- Changed icon -->
             <span class="nav-label">Geofences</span>
         </a>
         <a href="#" class="nav-item nav-link" data-page="notifications-history"> <!-- Added -->
@@ -971,6 +1008,7 @@
     <script src="{{ url_for('static', filename='js/ui.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/notifications.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/scanner.js') }}" defer></script>
     <!-- Load Material Color Utilities (Keep as before) -->
     <script type="module">
         import("{{ url_for('static', filename='libs/material-color/material-color-utilities.esm.js') }}")

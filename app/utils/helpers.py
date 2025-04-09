@@ -1,5 +1,6 @@
 # app/utils/helpers.py
 import math
+from typing import Optional
 import uuid
 import base64
 import logging
@@ -295,3 +296,28 @@ def decrypt_password(encrypted_password: str, config) -> str:
         except Exception as e:
             log.error(f"Base64 decryption failed: {e}")
             return ""
+
+
+def get_potential_mac_from_public_key(adv_key_bytes: bytes) -> Optional[str]:
+    """
+    Calculates the potential Locally Administered MAC Address
+    associated with a 28-byte public advertisement key.
+
+    Args:
+        adv_key_bytes: The 28-byte public advertisement key.
+
+    Returns:
+        The potential MAC address as a string (e.g., "XX:XX:XX:XX:XX:XX")
+        or None if the key is invalid.
+    """
+    if not isinstance(adv_key_bytes, bytes) or len(adv_key_bytes) != 28:
+        log.warning(f"Invalid public key bytes provided for MAC calculation (length {len(adv_key_bytes)}).")
+        return None
+    try:
+        # Apply the standard modification to the first byte
+        mac_bytes = bytes([adv_key_bytes[0] | 0b11000000]) + adv_key_bytes[1:6]
+        # Format as colon-separated hex string
+        return ':'.join(f'{byte:02X}' for byte in mac_bytes)
+    except Exception as e:
+        log.error(f"Error calculating potential MAC from public key: {e}")
+        return None
