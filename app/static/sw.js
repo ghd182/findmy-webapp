@@ -1,7 +1,7 @@
 // app/static/sw.js
 
 // Keep existing constants and install/activate listeners...
-const CACHE_NAME = 'findmy-cache-v10'; // Increment if significant changes
+const CACHE_NAME = 'findmy-cache-v11'; // Increment if significant changes
 const urlsToCache = [
   // Core App Shell
   '/', // Explicitly cache the root

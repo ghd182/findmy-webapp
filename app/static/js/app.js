@@ -1150,64 +1150,119 @@ window.AppActions = {
         if (selectedParts.length === 0) { statusMessage.textContent = "Please select at least one part to import."; statusMessage.style.color = 'var(--m3-sys-color-error)'; return; }
         if (!importedData) { statusMessage.textContent = "Import data not found. Please select file again."; statusMessage.style.color = 'var(--m3-sys-color-error)'; AppUI.resetImportDialog(); return; }
 
-        confirmButton.disabled = true; confirmButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Importing...`; statusMessage.textContent = `Checking for potential overwrites...`; statusMessage.style.color = 'inherit';
+        confirmButton.disabled = true; // Disable button immediately
+        confirmButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Checking...`;
+        statusMessage.textContent = `Checking for potential overwrites...`; statusMessage.style.color = 'inherit';
 
         let needsOverwriteConfirm = false; let overwriteItems = [];
         const getPartName = (partKey) => ({ devices: 'Device configurations', geofences: 'Geofences', savedPlaces: 'Saved Places', locationHistory: 'Location History', clientSettings: 'UI/Map/Theme settings', deviceVisibility: 'Device visibility' }[partKey] || partKey);
         const hasExisting = (partKey) => { switch (partKey) { case 'devices': return AppState.currentDeviceData.length > 0; case 'geofences': return AppState.globalGeofenceData.length > 0; case 'savedPlaces': return AppState.savedPlaces.length > 0; case 'locationHistory': return AppState.locationHistory.length > 0; case 'clientSettings': return true; case 'deviceVisibility': return Object.keys(AppState.deviceVisibility).length > 0; default: return false; } };
 
-        selectedParts.forEach(partKey => { const dataToCheck = partKey.startsWith('client') ? importedData.client?.[partKey] : importedData.server?.[partKey]; if (dataToCheck !== undefined && hasExisting(partKey)) { const partName = getPartName(partKey); if (!overwriteItems.includes(partName)) { needsOverwriteConfirm = true; overwriteItems.push(partName); } } });
+        selectedParts.forEach(partKey => {
+            const dataToCheck = partKey.startsWith('client') ? importedData.client?.[partKey] : importedData.server?.[partKey];
+            // Check if the part exists in the import data AND there's existing data for that part locally
+            if (dataToCheck !== undefined && dataToCheck !== null && hasExisting(partKey)) {
+                const partName = getPartName(partKey);
+                if (!overwriteItems.includes(partName)) {
+                    needsOverwriteConfirm = true;
+                    overwriteItems.push(partName);
+                }
+            }
+        });
+
+        // --- Restore button if only checking and no overwrite needed immediately ---
+        if (!needsOverwriteConfirm) {
+            confirmButton.disabled = false;
+            confirmButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Import Selected`;
+        }
+        // --- --------------------------------------------------------------- ---
 
         if (needsOverwriteConfirm) {
             const confirmationMessage = `Importing selected parts (${overwriteItems.join(', ')}) will <strong>completely replace</strong> existing data for those parts. Continue?`;
+            console.log("[Action] Showing overwrite confirmation.");
+            // Show overwrite confirmation
             AppUI.showConfirmationDialog("Confirm Overwrite", confirmationMessage,
-                () => { console.log("[Action] Overwrite confirmed."); AppActions._proceedWithImport(selectedParts, importedData); }, // Confirm -> Proceed
-                () => { // Cancel -> Reset dialog
+                () => { // onConfirm: User agreed to overwrite
+                    console.log("[Action] Overwrite confirmed.");
+                    confirmButton.disabled = true; // Disable again before proceeding
+                    confirmButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Importing...`;
+                    statusMessage.textContent = 'Proceeding with import...';
+                    // Use setTimeout to allow UI update before blocking with _proceedWithImport
+                    setTimeout(() => AppActions._proceedWithImport(selectedParts, importedData), 50);
+                },
+                () => { // onCancel: User cancelled overwrite
                     console.log("[Action] Overwrite cancelled.");
                     statusMessage.textContent = "Import cancelled.";
-                    // Reset only the confirm button, leave selections
-                    confirmButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Import Selected`;
+                    // Re-enable the button in the import dialog
                     confirmButton.disabled = false;
+                    confirmButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Import Selected`;
                 }
             );
         } else {
-            console.log("[Action] No overwrite needed. Proceeding.");
-            AppActions._proceedWithImport(selectedParts, importedData);
+            console.log("[Action] No overwrite needed. Proceeding directly.");
+            confirmButton.disabled = true; // Disable before proceeding
+            confirmButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Importing...`;
+            statusMessage.textContent = 'Proceeding with import...';
+            // Use setTimeout to allow UI update
+            setTimeout(() => AppActions._proceedWithImport(selectedParts, importedData), 50);
         }
     }, // End handleImportConfirm
 
     _proceedWithImport: async function (selectedParts, importedData) {
-        console.log("[Action] Proceeding with import for parts:", selectedParts);
-        // Target DIALOG elements
+        console.log("[Action] Proceeding with import processing for parts:", selectedParts);
+        let clientImported = false; let serverImported = false;
+        const serverPartsPayload = {}; const clientErrors = []; const serverErrors = [];
+        // Target DIALOG status message initially
         const statusMessage = document.getElementById('dialog-import-status-message');
-        const confirmButton = document.getElementById('dialog-confirm-import-button');
 
-        let clientImported = false; let serverImported = false; const serverPartsPayload = {}; const clientErrors = []; const serverErrors = [];
-
-        statusMessage.textContent = `Importing selected parts (${selectedParts.join(', ')})...`; statusMessage.style.color = 'inherit';
-        if (confirmButton) confirmButton.disabled = true; // Ensure button is disabled
+        if (statusMessage) statusMessage.textContent = `Importing selected parts (${selectedParts.join(', ')})...`;
 
         // --- Process Client Parts (Keep existing logic) ---
         console.log("[Action] Processing client parts...");
         try {
             if (selectedParts.includes('clientSettings') && importedData.client?.clientSettings) {
-                console.log("[Action] Importing client settings..."); const settings = importedData.client.clientSettings;
+                console.log("[Action] Importing client settings...");
+                const settings = importedData.client.clientSettings;
+                // Apply settings to AppState and call save functions
                 if (settings.theme_mode !== undefined) AppState.currentTheme = settings.theme_mode;
                 if (settings.theme_color !== undefined) AppState.userColor = settings.theme_color;
-                if (window.AppTheme && typeof window.AppTheme.applyTheme === 'function') { AppTheme.applyTheme(AppState.userColor, AppState.currentTheme); }
+                if (window.AppTheme && typeof window.AppTheme.applyTheme === 'function') {
+                    AppTheme.applyTheme(AppState.userColor, AppState.currentTheme); // Apply visually
+                }
                 if (settings.isShowingAllDevices !== undefined) AppState.isShowingAllDevices = settings.isShowingAllDevices;
                 if (settings.showDeviceHistory !== undefined) AppState.showDeviceHistory = settings.showDeviceHistory;
                 if (settings.historyTimeFilterHours !== undefined) AppState.historyTimeFilterHours = parseInt(settings.historyTimeFilterHours, 10) || AppState.historyTimeFilterHours;
                 if (settings.locationHistoryEnabled !== undefined) AppState.locationHistoryEnabled = settings.locationHistoryEnabled;
-                AppState.saveMapToggles(); AppState.saveLocationHistoryEnabled(); AppState.saveTheme(); // Save theme mode
-                // Theme color is saved via AppTheme._debouncedSavePreferences implicitly
-                clientImported = true; console.log("[Action] Client settings imported.");
-            }
-            if (selectedParts.includes('savedPlaces') && importedData.client?.savedPlaces) { console.log("[Action] Importing saved places..."); AppState.savedPlaces = importedData.client.savedPlaces; AppState.saveSavedPlaces(); clientImported = true; }
-            if (selectedParts.includes('locationHistory') && importedData.client?.locationHistory) { console.log("[Action] Importing location history..."); AppState.locationHistory = importedData.client.locationHistory; AppState.saveLocationHistory(); clientImported = true; }
-            if (selectedParts.includes('deviceVisibility') && importedData.client?.deviceVisibility) { console.log("[Action] Importing device visibility..."); AppState.deviceVisibility = importedData.client.deviceVisibility; AppState.saveDeviceVisibilityState(); clientImported = true; }
-        } catch (e) { clientErrors.push(`Client settings import failed: ${e.message}`); console.error("[Action] Client import error:", e); }
 
+                // Save persistent client state
+                AppState.saveMapToggles();
+                AppState.saveLocationHistoryEnabled();
+                AppState.saveTheme(); // Save theme mode to localStorage
+
+                clientImported = true; console.log("[Action] Client settings imported and saved locally.");
+            }
+            if (selectedParts.includes('savedPlaces') && importedData.client?.savedPlaces) {
+                console.log("[Action] Importing saved places...");
+                AppState.savedPlaces = importedData.client.savedPlaces;
+                AppState.saveSavedPlaces();
+                clientImported = true;
+            }
+            if (selectedParts.includes('locationHistory') && importedData.client?.locationHistory) {
+                console.log("[Action] Importing location history...");
+                AppState.locationHistory = importedData.client.locationHistory;
+                AppState.saveLocationHistory();
+                clientImported = true;
+            }
+            if (selectedParts.includes('deviceVisibility') && importedData.client?.deviceVisibility) {
+                console.log("[Action] Importing device visibility...");
+                AppState.deviceVisibility = importedData.client.deviceVisibility;
+                AppState.saveDeviceVisibilityState();
+                clientImported = true;
+            }
+        } catch (e) {
+            clientErrors.push(`Client settings import failed: ${e.message}`);
+            console.error("[Action] Client import error:", e);
+        }
 
         // --- Prepare & Process Server Parts (Keep existing logic) ---
         console.log("[Action] Preparing server parts...");
@@ -1217,44 +1272,58 @@ window.AppActions = {
         const hasServerParts = Object.keys(serverPartsPayload).length > 0;
         if (hasServerParts) {
             console.log("[Action] Sending server config parts to backend:", Object.keys(serverPartsPayload));
-            try { const serverResult = await AppApi.applyImportedConfig(serverPartsPayload); serverImported = true; console.log("[Action] Server config import response:", serverResult); if (serverResult.details?.errors?.length > 0) serverErrors.push(...serverResult.details.errors); }
-            catch (e) { serverErrors.push(`Server config import API call failed: ${e.message}`); console.error("[Action] Server config import API error:", e); }
+            try {
+                const serverResult = await AppApi.applyImportedConfig(serverPartsPayload);
+                serverImported = true;
+                console.log("[Action] Server config import response:", serverResult);
+                if (serverResult.details?.errors?.length > 0) serverErrors.push(...serverResult.details.errors);
+            }
+            catch (e) {
+                serverErrors.push(`Server config import API call failed: ${e.message}`);
+                console.error("[Action] Server config import API error:", e);
+            }
         }
 
-        // Save theme prefs separately if client settings were chosen but no server parts
+        // Save theme prefs separately if client settings were chosen AND changed, and no other server parts sent
         const hasThemeParts = selectedParts.includes('clientSettings');
-        if (hasThemeParts && !hasServerParts && clientErrors.length === 0) { // Only save theme if client part succeeded
-            console.log("[Action] Saving only theme preferences to backend.");
+        if (hasThemeParts && !hasServerParts && clientErrors.length === 0) {
+            console.log("[Action] Saving theme preferences to backend.");
             try {
                 await AppApi.updateUserPreferences(AppState.currentTheme, AppState.userColor);
-                serverImported = true; // Mark as server interaction occurred
+                serverImported = true; // Mark server interaction
                 console.log("[Action] Theme preferences saved successfully.");
-            } catch (e) { serverErrors.push(`Failed to save theme preferences: ${e.message}`); console.error("[Action] Theme preferences save API error:", e); }
+            } catch (e) {
+                serverErrors.push(`Failed to save theme preferences: ${e.message}`);
+                console.error("[Action] Theme preferences save API error:", e);
+            }
         }
 
-        // --- Finalize and Report (Keep existing logic, uses dialog IDs) ---
-        let finalMessage = ""; let messageColor = 'inherit'; let needsRefresh = false;
-        if (clientImported || serverImported) { finalMessage = "Import complete."; needsRefresh = true; }
-        else if (clientErrors.length > 0 || serverErrors.length > 0) { finalMessage = "Import completed with errors."; }
-        else { finalMessage = "Import finished, but no changes were applied."; }
-
-        if (clientErrors.length > 0 || serverErrors.length > 0) {
-            finalMessage += " Errors: " + [...clientErrors, ...serverErrors].join('; ');
-            messageColor = 'var(--m3-sys-color-error)';
-            // Keep dialog open on error
-            if (confirmButton) {
-                confirmButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Import Selected`;
-                confirmButton.disabled = false;
+        // --- Determine final status ---
+        let finalMessage = "";
+        let isSuccess = false;
+        if (clientErrors.length === 0 && serverErrors.length === 0) {
+            if (clientImported || serverImported) {
+                finalMessage = "Import complete.";
+                isSuccess = true;
+            } else {
+                finalMessage = "Import finished, but no changes were selected or applied.";
+                isSuccess = true; // Not an error
             }
-        } else if (clientImported || serverImported) {
-            messageColor = 'var(--m3-sys-color-primary)';
-            // Close dialog automatically on success after a short delay
-            statusMessage.textContent = finalMessage;
-            statusMessage.style.color = messageColor;
-            setTimeout(() => {
-                AppUI.closeDialog('config-import-dialog');
-                if (needsRefresh) {
-                    console.log("[Action] Refreshing UI and data after successful import...");
+        } else {
+            finalMessage = "Import completed with errors: " + [...clientErrors, ...serverErrors].join('; ');
+            isSuccess = false;
+        }
+
+        // --- REVISED DIALOG HANDLING ---
+        // 1. Close the import dialog FIRST
+        AppUI.closeDialog('config-import-dialog'); // Ensure this uses the correct ID
+
+        // 2. Show the final status using appropriate dialog
+        if (isSuccess) {
+            AppUI.showConfirmationDialog("Import Result", finalMessage, () => {
+                // 3. Refresh AFTER user dismisses the success dialog
+                if (clientImported || serverImported) { // Only refresh if changes were made
+                    console.log("[Action] Refreshing UI and data after successful import confirmation...");
                     AppUI.setupSettingsPage(); // Update settings page UI elements
                     AppActions.refreshGeofencesAndDevices().then(() => { // Fetch latest server data
                         AppUI.renderSavedPlacesList();
@@ -1262,24 +1331,12 @@ window.AppActions = {
                         console.log("[Action] UI and data refresh complete post-import.");
                     });
                 }
-            }, 1500); // Delay closing dialog slightly
-            return; // Exit early to prevent button reset below
+            });
         } else {
-            // No changes applied, no errors
-            statusMessage.textContent = finalMessage;
-            messageColor = 'inherit'; // Neutral color
+            AppUI.showErrorDialog("Import Failed", finalMessage);
+            // No automatic refresh on error
         }
-
-        statusMessage.textContent = finalMessage;
-        statusMessage.style.color = messageColor;
-
-        // Reset button only if not closing automatically or on error
-        if (confirmButton && (clientErrors.length > 0 || serverErrors.length > 0 || (!clientImported && !serverImported))) {
-            confirmButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Import Selected`;
-            confirmButton.disabled = false;
-        }
-        // Don't reset the dialog fully here if errors occurred, allow user to see errors/retry.
-        // AppUI.resetImportDialog(); // Removed from here
+        // --- END REVISED DIALOG HANDLING ---
     }, // End _proceedWithImport
 
     handleDeleteAccount: async function () {
@@ -1291,48 +1348,32 @@ window.AppActions = {
         try {
             const result = await AppApi.deleteAccount();
             console.log("Account deletion successful on backend:", result);
-            // --- MODIFIED: Redirect based on API response ---
-            if (result && result.action === 'redirect_to_login') {
-                console.log("Account deleted. Redirecting to login...");
-                window.location.href = '/logout'; // Go via logout to clear session properly
-            } else {
-                console.log("Account deletion process initiated. Waiting for confirmation or further action.");
-                AppUI.closeDialog('confirmation-dialog'); // Close progress
-                // Show a success message, but don't redirect yet if backend doesn't say so
-                AppUI.showConfirmationDialog("Account Deletion", result.message || "Account deletion process completed.");
-            }
-            // --- END MODIFICATION ---
-        } catch (error) {
-            console.error("Account deletion failed:", error);
-            AppUI.closeDialog('confirmation-dialog'); // Close progress dialog
-            AppUI.showErrorDialog("Deletion Failed", `Could not delete account: ${error.message}`);
-        }
-    },
 
-    handleDeleteAccount: async function () {
-        // ... (keep existing account deletion logic - should be fine) ...
-        console.log("Account deletion confirmed by user. Calling API...");
-        AppUI.showConfirmationDialog("Deleting...", "Deleting your account and data...", null, null);
-        const progressDialog = document.getElementById('confirmation-dialog');
-        if (progressDialog) progressDialog.querySelector('.dialog-actions').style.display = 'none';
-
-        try {
-            const result = await AppApi.deleteAccount();
-            console.log("Account deletion successful on backend:", result);
-
-            // Frontend logout and redirect
+            // --- MODIFIED: Frontend logout and redirect ---
             console.log("Account deleted. Logging out and redirecting...");
-            // Optionally clear local storage? Depends on desired behavior after delete.
-            // localStorage.clear(); // Uncomment to clear all local storage
-            window.location.href = '/logout'; // Redirect to logout route which then redirects to login
+            // Clear specific relevant local storage items instead of everything
+            localStorage.removeItem('isShowingAllDevices');
+            localStorage.removeItem('showDeviceHistory');
+            localStorage.removeItem('historyTimeFilterHours');
+            localStorage.removeItem('deviceVisibility');
+            localStorage.removeItem('locationHistoryEnabled');
+            localStorage.removeItem('locationHistory');
+            localStorage.removeItem('savedPlaces');
+            localStorage.removeItem('theme'); // Keep theme? Maybe. Let's remove for clean slate.
+            localStorage.removeItem('userColor');
+            localStorage.removeItem('lastActivePageId');
+            console.log("Cleared user-specific localStorage items.");
+
+            // Redirect via logout route to ensure server session is also cleared
+            window.location.href = '/logout';
+            // --- END MODIFICATION ---
 
         } catch (error) {
             console.error("Account deletion failed:", error);
             AppUI.closeDialog('confirmation-dialog');
             AppUI.showErrorDialog("Deletion Failed", `Could not delete account: ${error.message}`);
         }
-    },
-    // --- End Handle Account Deletion ---
+    }, // --- End Handle Account Deletion ---
 };
 
 // --- Main Initialization Sequence ---

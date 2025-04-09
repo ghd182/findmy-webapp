@@ -1,7 +1,7 @@
 // app/static/js/scanner.js
 
 window.Scanner = {
-    // --- State (keep as before) ---
+    // --- State (Keep as before) ---
     isScanning: false,
     bluetoothSupported: false,
     permissionGranted: null,
@@ -10,7 +10,7 @@ window.Scanner = {
     scanInstance: null,
     allDetectedDevices: new Map(),
     scanTimer: null,
-    SCAN_DURATION_MS: 5 * 60 * 1000,
+    SCAN_DURATION_MS: 60000,
     expandedDetails: new Set(),
 
     // --- UI Elements ---
@@ -24,23 +24,31 @@ window.Scanner = {
     // --- Initialization ---
     initScannerPage: function () {
         console.log("[Scanner] Initializing Scanner Page...");
+        // --- Always attempt to cache elements when initializing ---
         this.cacheElements();
+        // --- ------------------------------------------------- ---
         this.checkSupport();
         this.attachListeners();
-        // --- Call resetUIForNewScan on initial page load ---
-        this.resetUIForNewScan();
-        // --- ------------------------------------------- ---
+        this.resetUIForNewScan(); // Reset data and UI for a fresh view
     },
 
-    cacheElements: function () { /* ... keep existing ... */
-        this.elements.status = document.getElementById('scanner-status');
-        this.elements.startButton = document.getElementById('start-scan-button');
-        this.elements.stopButton = document.getElementById('stop-scan-button');
-        this.elements.resultsList = document.getElementById('scanner-results-list');
-        this.elements.noSupportMessage = document.getElementById('scanner-no-support');
+    cacheElements: function () {
+        // Only cache if elements object is empty or missing key elements
+        if (!this.elements.status || !this.elements.resultsList) {
+            console.log("[Scanner] Caching UI elements...");
+            this.elements.status = document.getElementById('scanner-status');
+            this.elements.startButton = document.getElementById('start-scan-button');
+            this.elements.stopButton = document.getElementById('stop-scan-button');
+            this.elements.resultsList = document.getElementById('scanner-results-list');
+            this.elements.noSupportMessage = document.getElementById('scanner-no-support');
+            // Log if critical elements are still missing after query
+            if (!this.elements.status) console.error("[Scanner Cache] Failed to find #scanner-status");
+            if (!this.elements.resultsList) console.error("[Scanner Cache] Failed to find #scanner-results-list");
+        }
     },
 
     checkSupport: function () {
+        this.cacheElements(); // Ensure elements are cached before checking support
         if ('bluetooth' in navigator && typeof navigator.bluetooth.requestLEScan === 'function') {
             this.bluetoothSupported = true;
             console.log("[Scanner] Web Bluetooth Scanning API is supported.");
@@ -54,6 +62,7 @@ window.Scanner = {
         }
     },
     attachListeners: function () {
+        this.cacheElements(); // Ensure elements are cached before attaching
         const startButton = this.elements.startButton;
         const stopButton = this.elements.stopButton;
         const resultsList = this.elements.resultsList;
@@ -85,6 +94,7 @@ window.Scanner = {
 
     // --- RENAMED resetUI to resetUIForNewScan ---
     resetUIForNewScan: function () {
+        this.cacheElements(); // Ensure elements are cached
         // This function resets the UI for a *new* scan and clears data
         if (this.elements.status) this.elements.status.textContent = 'Idle. Press "Start Scan" to search for nearby Apple Find My signals.';
         if (this.elements.startButton) {
@@ -94,16 +104,16 @@ window.Scanner = {
         }
         if (this.elements.stopButton) this.elements.stopButton.style.display = 'none';
 
-        // Clear data storage for the new scan
         this.allDetectedDevices.clear();
         this.expandedDetails.clear();
 
-        // --- *** REMOVE this line that clears the display *** ---
-        // if (this.elements.resultsList) {
-        //     this.elements.resultsList.innerHTML = '<p class="no-devices-message">Scan results will appear here.</p>';
-        // }
-        // --- *********************************************** ---
-        // renderScanResults will handle showing the initial empty message when called by startScan
+        // --- Add check before setting innerHTML ---
+        if (this.elements.resultsList) {
+            this.elements.resultsList.innerHTML = '<p class="no-devices-message">Scan results will appear here.</p>';
+        } else {
+            console.warn("[Scanner Reset] Cannot clear results list - element not found.");
+        }
+        // --- ----------------------------------- ---
 
         console.log("[Scanner] UI reset and detected devices CLEARED for new scan.");
     },
@@ -111,6 +121,7 @@ window.Scanner = {
 
     // --- NEW Helper: Reset only buttons and status ---
     _resetButtonsAndStatusOnly: function (statusMessage = "Idle.") {
+        this.cacheElements(); // Ensure elements are cached
         if (this.elements.status) this.elements.status.textContent = statusMessage;
         if (this.elements.startButton) {
             this.elements.startButton.disabled = !this.bluetoothSupported;
@@ -189,6 +200,7 @@ window.Scanner = {
 
     // --- Scanning Logic ---
     startScan: async function () {
+        this.cacheElements(); // Ensure elements ready before scan start
         if (!this.bluetoothSupported || this.isScanning) return;
         console.log("[Scanner] Starting scan process (Iterative MAC Check)...");
         this.isScanning = true;
@@ -253,12 +265,11 @@ window.Scanner = {
     // --- REVISED stopScan with MORE LOGGING ---
     stopScan: function (completionMessage = "Scan stopped.") {
         console.log(`%c[Scanner] Entering stopScan. Message: "${completionMessage}"`, "color: orange; font-weight: bold;");
+        this.cacheElements(); // <<< Ensure elements are cached FIRST
         console.log("[Scanner Stop] Current allDetectedDevices size:", this.allDetectedDevices.size);
 
         if (this.scanTimer) clearTimeout(this.scanTimer); this.scanTimer = null;
-
         navigator.bluetooth.removeEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
-
         if (this.scanInstance && typeof this.scanInstance.stop === 'function') {
             try {
                 this.scanInstance.stop();
@@ -266,21 +277,25 @@ window.Scanner = {
             }
             catch (e) { console.warn("[Scanner Stop] Error stopping scan instance:", e); }
         }
-        this.scanInstance = null;
-        this.isScanning = false;
+        this.scanInstance = null; this.isScanning = false;
 
         let matchedCount = 0; this.allDetectedDevices.forEach(d => { if (d.isMatched) matchedCount++; });
         const finalStatusMessage = completionMessage + ` Displaying ${this.allDetectedDevices.size} total Apple FindMy packets (${matchedCount} matched).`;
 
         console.log("[Scanner Stop] Calling _resetButtonsAndStatusOnly...");
-        this._resetButtonsAndStatusOnly(finalStatusMessage); // Resets buttons/status BUT NOT list content
+        this._resetButtonsAndStatusOnly(finalStatusMessage);
 
-        console.log(`%c[Scanner Stop] BEFORE renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
-        console.log("[Scanner Stop] Data to render:", this.allDetectedDevices);
+        // --- Add guard BEFORE calling renderScanResults ---
+        if (!this.elements.resultsList) {
+            console.error("[Scanner Stop] Cannot render results because resultsList element is missing.");
+        } else {
+            console.log(`%c[Scanner Stop] BEFORE renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
+            console.log("[Scanner Stop] Data to render:", this.allDetectedDevices);
+            this.renderScanResults(); // Now safe to call
+            console.log(`%c[Scanner Stop] AFTER renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
+        }
+        // --- ----------------------------------------- ---
 
-        this.renderScanResults(); // Re-renders based on data *still in* allDetectedDevices
-
-        console.log(`%c[Scanner Stop] AFTER renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
         console.log("[Scanner Stop] Exiting stopScan.");
     },
 
@@ -294,6 +309,7 @@ window.Scanner = {
     },
 
     handleAdvertisement: function (event) {
+        this.cacheElements(); // Ensure elements ready before potential render call
         if (!this.isScanning || !event.device?.id) return;
 
         const browserDeviceId = event.device.id;
@@ -390,13 +406,17 @@ window.Scanner = {
 
     // --- REVISED renderScanResults to show more details ---
     renderScanResults: function () {
+        // --- Add guard at the beginning ---
         if (!this.elements.resultsList) {
-            console.error("[Render] Results list element not found!");
-            return;
+            console.error("[Render] Cannot render results because resultsList element is missing.");
+            // Attempt to cache again just in case it became available
+            this.cacheElements();
+            if (!this.elements.resultsList) return; // Exit if still not found
         }
-        console.log(`[Render] Rendering ${this.allDetectedDevices.size} devices. Expanded state:`, this.expandedDetails); // Log size and expansion state
+        // --- ---------------------------- ---
+        console.log(`[Render] Rendering ${this.allDetectedDevices.size} devices. Expanded state:`, this.expandedDetails);
 
-        const listContainer = this.elements.resultsList;
+        const listContainer = this.elements.resultsList; // Now we know it exists
         const resultsArray = Array.from(this.allDetectedDevices.entries());
         resultsArray.sort(([, a], [, b]) => b.lastSeen.getTime() - a.lastSeen.getTime());
 
