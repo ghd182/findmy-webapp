@@ -10,13 +10,15 @@ services:
     ports:
       - "5000:5000" # Host:Container
     volumes:
-      # --- USE ABSOLUTE HOST PATHS ---
-      # /absolute_path_to_findmy_app_folder/data:/app/data 
-      - /home/username/findmy-app/data:/app/data
+      # --- USE ABSOLUTE HOST PATHS for your app's data ---
+      # /absolute_path_to_findmy_app_folder/data:/app/data
+      - /home/username/findmy-app/data:/app/data # EXAMPLE: CHANGE /home/username
+      # - /home/username/findmy-app/.env:/app/.env # If using .env mount
     environment:
+      # --- Core Flask/App Settings ---
       FLASK_ENV: production
-      # Override if needed
-      LOG_LEVEL: DEBUG
+      # Override with DEBUG if needed
+      LOG_LEVEL: INFO
       # Set your timezone
       TZ: Europe/Amsterdam
       # Override if needed
@@ -26,12 +28,14 @@ services:
       SECRET_SEED: "your-very-long-random-secret-phrase-for-sessions-portainer"
       FERNET_SEED: "another-different-long-random-secret-phrase-for-encryption-portainer"
       VAPID_SEED: "a-third-unique-long-random-phrase-for-push-keys-portainer"
-      VAPID_CLAIMS_EMAIL: "mailto:user@email.com"
-      
-      # User default is 10 mins
+      VAPID_CLAIMS_EMAIL: "mailto:user@email.com" # CHANGE ME
+
+      # --- Anisette Server Configuration ---
+      # Point to the internal anisette service defined below
+      ANISETTE_SERVERS: "http://anisette:6969"
+
+      # --- Other App Config ---
       DEFAULT_FETCH_INTERVAL_MINUTES: 15
-      # Master job runs every 2 mins
-      SCHEDULER_MASTER_JOB_INTERVAL_MINUTES: 2
       # Override fetch interval
       FETCH_INTERVAL_MINUTES: 15
       # Override battery threshold
@@ -42,4 +46,16 @@ services:
       NOTIFICATION_HISTORY_DAYS: 60
       # Override location history fetch duration     
       HISTORY_DURATION_DAYS: 14
-      # ANISETTE_SERVERS: "https://anisette.example.com,http://localhost:6969"
+
+    # --- Add dependency on the anisette service ---
+    depends_on:
+      - anisette
+
+  # --- NEW Anisette Server Service ---
+  anisette:
+    image: dadoum/anisette-v3-server:latest # Official image
+    container_name: anisette-server
+    restart: unless-stopped
+    # No external ports needed. Communication is internal via service name 'anisette'.
+    # No volumes needed.
+    # No environment variables needed.

@@ -62,8 +62,6 @@ services:
       # Set timezone if needed by scheduler/logs
       # User default is 10 mins
       DEFAULT_FETCH_INTERVAL_MINUTES: 15
-      # Master job runs every 2 mins
-      SCHEDULER_MASTER_JOB_INTERVAL_MINUTES: 2
       # Override fetch interval
       FETCH_INTERVAL_MINUTES: 15
       # Override battery threshold
@@ -74,5 +72,19 @@ services:
       NOTIFICATION_HISTORY_DAYS: 60
       # Override location history fetch duration     
       HISTORY_DURATION_DAYS: 14
-      # Optionally set here
-      # ANISETTE_SERVERS: "https://anisette.example.com,http://localhost:6969"
+      # SCHEDULER_MASTER_JOB_INTERVAL_MINUTES: 2 # If needed
+
+    # --- Add dependency on the anisette service ---
+    depends_on:
+      - anisette
+
+  # --- NEW Anisette Server Service ---
+  anisette:
+    image: dadoum/anisette-v3-server:latest # Use the official image
+    container_name: anisette-server
+    restart: unless-stopped
+    # No ports needed here unless you want to access it directly from your host
+    # The findmyapp service will access it via the internal Docker network ('http://anisette:6969')
+    # platform: linux/arm64/v8 # Usually not needed, image is multi-arch
+    # No volumes needed for basic operation
+    # No environment variables needed for basic operation
