@@ -10,7 +10,7 @@ window.Scanner = {
     scanInstance: null,
     allDetectedDevices: new Map(),
     scanTimer: null,
-    SCAN_DURATION_MS: 5*60*1000,
+    SCAN_DURATION_MS: 5 * 60 * 1000,
     expandedDetails: new Set(),
 
     // --- UI Elements ---
@@ -250,30 +250,40 @@ window.Scanner = {
     },
 
     // --- REVISED stopScan ---
+    // --- REVISED stopScan with MORE LOGGING ---
     stopScan: function (completionMessage = "Scan stopped.") {
-        console.log("[Scanner] Stopping scan...");
+        console.log(`%c[Scanner] Entering stopScan. Message: "${completionMessage}"`, "color: orange; font-weight: bold;");
+        console.log("[Scanner Stop] Current allDetectedDevices size:", this.allDetectedDevices.size);
+
         if (this.scanTimer) clearTimeout(this.scanTimer); this.scanTimer = null;
 
         navigator.bluetooth.removeEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
 
         if (this.scanInstance && typeof this.scanInstance.stop === 'function') {
-            try { this.scanInstance.stop(); console.log("[Scanner] Scan instance stopped."); }
-            catch (e) { console.warn("[Scanner] Error stopping scan instance:", e); }
+            try {
+                this.scanInstance.stop();
+                console.log("[Scanner Stop] Scan instance stop() method called.");
+            }
+            catch (e) { console.warn("[Scanner Stop] Error stopping scan instance:", e); }
         }
         this.scanInstance = null;
         this.isScanning = false;
-        // --- DO NOT CLEAR DATA ---
-        // this.allDetectedDevices.clear(); // REMOVED
-        // this.expandedDetails.clear(); // REMOVED
-        // --- ------------------- ---
 
         let matchedCount = 0; this.allDetectedDevices.forEach(d => { if (d.isMatched) matchedCount++; });
         const finalStatusMessage = completionMessage + ` Displaying ${this.allDetectedDevices.size} total Apple FindMy packets (${matchedCount} matched).`;
 
-        // --- Call the helper to ONLY reset buttons/status ---
+        console.log("[Scanner Stop] Calling _resetButtonsAndStatusOnly...");
         this._resetButtonsAndStatusOnly(finalStatusMessage); // Resets buttons/status BUT NOT list content
+
+        console.log(`%c[Scanner Stop] BEFORE renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
+        console.log("[Scanner Stop] Data to render:", this.allDetectedDevices);
+
         this.renderScanResults(); // Re-renders based on data *still in* allDetectedDevices
+
+        console.log(`%c[Scanner Stop] AFTER renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
+        console.log("[Scanner Stop] Exiting stopScan.");
     },
+
     // --- End REVISED stopScan ---
 
     updateStatus: function (message, isError = false) {
@@ -380,37 +390,48 @@ window.Scanner = {
 
     // --- REVISED renderScanResults to show more details ---
     renderScanResults: function () {
-        if (!this.elements.resultsList) return;
+        if (!this.elements.resultsList) {
+            console.error("[Render] Results list element not found!");
+            return;
+        }
+        console.log(`[Render] Rendering ${this.allDetectedDevices.size} devices. Expanded state:`, this.expandedDetails); // Log size and expansion state
 
+        const listContainer = this.elements.resultsList;
         const resultsArray = Array.from(this.allDetectedDevices.entries());
         resultsArray.sort(([, a], [, b]) => b.lastSeen.getTime() - a.lastSeen.getTime());
 
+        // --- Only clear if the list should genuinely be empty ---
         if (resultsArray.length === 0) {
-            this.elements.resultsList.innerHTML = `<p class="no-devices-message">${this.isScanning ? 'Scanning for Apple Find My signals...' : 'No Find My packets detected during last scan.'}</p>`;
-            return;
+            console.log("[Render] No devices to render, setting empty message.");
+            listContainer.innerHTML = `<p class="no-devices-message">${this.isScanning ? 'Scanning for Apple Find My signals...' : 'No Find My packets detected during last scan.'}</p>`;
+            return; // Exit early
         }
+        // --- ---------------------------------------------------- ---
 
-        const listContainer = this.elements.resultsList;
         const existingItems = new Map();
         listContainer.querySelectorAll('.scanner-result-item[data-browser-id]').forEach(el => {
             existingItems.set(el.dataset.browserId, el);
         });
         const currentRenderedIds = new Set();
 
+        // If the container *looks* empty but shouldn't be, force clear (defensive)
+        if (listContainer.children.length === 1 && listContainer.firstElementChild.classList.contains('no-devices-message')) {
+            console.warn("[Render] List contained only 'no devices' message but data exists. Clearing before rendering.");
+            listContainer.innerHTML = '';
+        }
+
         resultsArray.forEach(([browserDeviceId, data]) => {
             currentRenderedIds.add(browserDeviceId);
             let item = existingItems.get(browserDeviceId);
 
-            // Determine name, icon, RSSI etc.
+            // Determine name, icon, RSSI etc. (as before)
             let displayName = data.matchedInfo?.name || data.eventData?.name || `Device (${browserDeviceId.substring(0, 8)}...)`;
             let iconHtml;
             if (data.isMatched && data.matchedInfo) {
                 const displayInfo = AppState.getDeviceDisplayInfo(data.matchedInfo.deviceId);
                 iconHtml = displayInfo.svg_icon || AppUtils.generateDeviceIconSVG(displayInfo.label, displayInfo.color);
                 displayName = displayInfo.name;
-            } else {
-                iconHtml = `<span class="material-icons" style="font-size: 36px; color: var(--m3-sys-color-outline);">bluetooth</span>`;
-            }
+            } else { iconHtml = `<span class="material-icons" style="font-size: 36px; color: var(--m3-sys-color-outline);">bluetooth</span>`; }
             const timeAgo = AppUtils.formatTimeRelative(data.lastSeen);
             const rssi = data.eventData?.rssi;
             let distanceIndicator = 'Unknown Range'; let rssiColor = 'var(--m3-sys-color-outline)';
@@ -421,8 +442,6 @@ window.Scanner = {
                 else { distanceIndicator = 'Far'; rssiColor = 'var(--m3-sys-color-outline)'; }
             }
             const rssiText = rssi !== null ? `${rssi} dBm` : 'N/A';
-            const keyToShow = data.reconstructedKeyB64 || 'N/A (No Match / Standard OF)'; // Clarify reason for N/A
-            const shortKey = keyToShow.length > 30 ? `${keyToShow.substring(0, 10)}...${keyToShow.substring(keyToShow.length - 10)}` : keyToShow;
             const isExpanded = this.expandedDetails.has(browserDeviceId);
             const serviceDataString = JSON.stringify(data.rawServiceDataHexMap || {}, null, 1).replace(/[{}" ]/g, '').replace(/,/g, '\n');
 
@@ -497,13 +516,13 @@ window.Scanner = {
             }
         });
 
-        // Remove stale items
+        // Remove stale items (keep existing logic)
         existingItems.forEach((element, id) => {
-            if (!currentRenderedIds.has(id)) {
-                element.remove();
-                this.expandedDetails.delete(id);
-            }
+            if (!currentRenderedIds.has(id)) { element.remove(); this.expandedDetails.delete(id); }
         });
+
+        // Log after attempting render
+        console.log(`[Render] Finished rendering. List children count: ${listContainer.children.length}`);
 
     }, // --- End Revised renderScanResults ---
 
