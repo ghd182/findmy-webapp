@@ -6,17 +6,11 @@
 
 A self-hosted, multi-user web application designed as an alternative to Apple's Find My service, focusing on tracking Apple devices (like AirTags, iPhones, MacBooks) using [FindMy.py](https://github.com/malmeloo/FindMy.py) with a modern, responsive Material 3 interface.
 
-<!-- App Screenshots -->
-<div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; margin: 40px 0;">
-    <div style="text-align: center;">
-        <img src="app/static/img/screenshot_map.png" alt="Map Tab Interface" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/>
-        <p style="margin-top: 10px; font-style: italic; color: #666;">Interactive Map View</p>
-    </div>
-    <div style="text-align: center;">
-        <img src="app/static/img/screenshot_devices.png" alt="Devices Management Interface" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/>
-        <p style="margin-top: 10px; font-style: italic; color: #666;">Device Management Dashboard</p>
-    </div>
-</div>
+
+|||
+|:--------:|:------------:|
+| <img src="app/static/img/screenshot_map.png" alt="Map Tab Interface" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> <p style="margin-top: 10px; font-style: italic; color: #666;">Interactive Map View</p> | <img src="app/static/img/screenshot_devices.png" alt="Devices Management Interface" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> <p style="margin-top: 10px; font-style: italic; color: #666;">Device Management Dashboard</p> |
+
 
 ## Overview
 
