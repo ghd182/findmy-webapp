@@ -195,7 +195,7 @@ window.SharePage = {
             if (data.battery_level !== null) { popupContent += `<div><span class="material-symbols-outlined">battery_std</span> ${data.battery_level.toFixed(0)}%${data.battery_status && data.battery_status !== 'Unknown' ? ` (${data.battery_status})` : ''}</div>`; }
             else if (data.battery_status && data.battery_status !== 'Unknown') { popupContent += `<div><span class="material-symbols-outlined">battery_unknown</span> ${data.battery_status}</div>`; }
             // Add coordinates and Google Maps link
-            popupContent += `<div><span class="material-symbols-outlined">pin_drop</span> ${data.lat.toFixed(5)}°, ${data.lng.toFixed(5)}</div>`;
+            popupContent += `<div><span class="material-symbols-outlined">pin_drop</span> ${data.lat.toFixed(5)}°, ${data.lng.toFixed(5)}°</div>`;
             popupContent += `<div><span class="material-symbols-outlined">map</span> <a href="https://www.google.com/maps?q=${data.lat},${data.lng}" target="_blank" rel="noopener noreferrer">View on Google Maps</a></div>`;
             // Add note
             if (data.share_note) { popupContent += `<hr><small><span class="material-symbols-outlined">info</span><i>Notes: ${this.escapeHtml(data.share_note)}</i></small>`; }

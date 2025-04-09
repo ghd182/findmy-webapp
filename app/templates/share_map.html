@@ -622,7 +622,7 @@
 
                     // Note info (keep as before)
                     if (data.share_note && this.elements.infoNoteContainer && this.elements.infoNote) {
-                        this.elements.infoNote.innerHTML = `<hr><div class="info-card-details-item"><span class="material-symbols-outlined">info</span>Note: ${SharePage.escapeHtml(data.share_note)}</div>`; this.elements.infoNoteContainer.style.display = 'block';
+                        this.elements.infoNote.innerHTML = `<div class="info-card-details-item"><span class="material-symbols-outlined">info</span>Note: ${SharePage.escapeHtml(data.share_note)}</div>`; this.elements.infoNoteContainer.style.display = 'block';
                     }
                     else if (this.elements.infoNoteContainer) { this.elements.infoNoteContainer.style.display = 'none'; }
                 },

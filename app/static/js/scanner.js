@@ -1,26 +1,24 @@
 // app/static/js/scanner.js
 
 window.Scanner = {
-    // --- State ---
+    // --- State (keep as before) ---
     isScanning: false,
     bluetoothSupported: false,
-    permissionGranted: null, // null, 'granted', 'denied'
-    expectedKeys: new Map(), // Map<string_b64_adv_key, {deviceId, name, keyType}> - Still needed for highlighting
-    potentialMacs: new Map(), // Map<potential_mac_string, Array<{adv_key_b64, deviceId, name, keyType}>> - For iterative check
+    permissionGranted: null,
+    expectedKeys: new Map(),
+    potentialMacs: new Map(),
     scanInstance: null,
-    // Stores ALL detected potential OF devices by their browser ID
-    allDetectedDevices: new Map(), // Map<browserDeviceId, { eventData, rawAppleDataHex?, rawServiceDataHexMap?, ofPayloadHex?, statusByte?, reconstructedKeyB64?, isMatched, matchedInfo?, lastSeen, rssi?, statusInterpreted?, appearanceInterpreted? }>
+    allDetectedDevices: new Map(),
     scanTimer: null,
-    SCAN_DURATION_MS: 60000, // Scan for 60 seconds
-    expandedDetails: new Set(), // Stores IDs of expanded items
+    SCAN_DURATION_MS: 5*60*1000,
+    expandedDetails: new Set(),
 
-    // --- UI Elements (Cached in init) ---
+    // --- UI Elements ---
     elements: {},
 
     // --- Appearance Mapping ---
     appearanceMap: {
-        0x0C41: "Tag", // Generic Tag
-        // Add more known values from Bluetooth SIG Assigned Numbers if needed
+        0x0C41: "Tag",
     },
 
     // --- Initialization ---
@@ -28,11 +26,13 @@ window.Scanner = {
         console.log("[Scanner] Initializing Scanner Page...");
         this.cacheElements();
         this.checkSupport();
-        this.attachListeners(); // Attach listeners AFTER caching elements
-        this.resetUI(); // Set initial UI state (clears data for new page load)
+        this.attachListeners();
+        // --- Call resetUIForNewScan on initial page load ---
+        this.resetUIForNewScan();
+        // --- ------------------------------------------- ---
     },
 
-    cacheElements: function () {
+    cacheElements: function () { /* ... keep existing ... */
         this.elements.status = document.getElementById('scanner-status');
         this.elements.startButton = document.getElementById('start-scan-button');
         this.elements.stopButton = document.getElementById('stop-scan-button');
@@ -53,7 +53,6 @@ window.Scanner = {
             if (this.elements.noSupportMessage) this.elements.noSupportMessage.style.display = 'block';
         }
     },
-
     attachListeners: function () {
         const startButton = this.elements.startButton;
         const stopButton = this.elements.stopButton;
@@ -71,20 +70,22 @@ window.Scanner = {
             console.log("[Scanner] Added stop button listener.");
         }
         if (resultsList && !resultsList._scannerClickListener) {
-             resultsList._scannerClickListener = this.handleResultItemClick.bind(this);
-             resultsList.addEventListener('click', resultsList._scannerClickListener);
-             resultsList.addEventListener('keypress', (e) => {
-                 if (e.key === 'Enter' || e.key === ' ') {
+            resultsList._scannerClickListener = this.handleResultItemClick.bind(this);
+            resultsList.addEventListener('click', resultsList._scannerClickListener);
+            resultsList.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
                     const toggle = e.target.closest('.scanner-details-toggle');
                     if (toggle) { e.preventDefault(); this.toggleDetails(toggle); }
-                 }
+                }
             });
             console.log("[Scanner] Added results list click/keypress listener for details toggle.");
         }
     },
 
-    resetUI: function () {
-        // This function resets the UI state *before* a scan starts or when the page loads
+
+    // --- RENAMED resetUI to resetUIForNewScan ---
+    resetUIForNewScan: function () {
+        // This function resets the UI for a *new* scan and clears data
         if (this.elements.status) this.elements.status.textContent = 'Idle. Press "Start Scan" to search for nearby Apple Find My signals.';
         if (this.elements.startButton) {
             this.elements.startButton.disabled = !this.bluetoothSupported;
@@ -93,16 +94,36 @@ window.Scanner = {
         }
         if (this.elements.stopButton) this.elements.stopButton.style.display = 'none';
 
-        // Clear data storage only when resetting before a new scan is intended
+        // Clear data storage for the new scan
         this.allDetectedDevices.clear();
         this.expandedDetails.clear();
 
-        if (this.elements.resultsList) {
-            this.elements.resultsList.innerHTML = '<p class="no-devices-message">Scan results will appear here.</p>';
-        }
-        console.log("[Scanner] UI and detected devices reset.");
-    },
+        // --- *** REMOVE this line that clears the display *** ---
+        // if (this.elements.resultsList) {
+        //     this.elements.resultsList.innerHTML = '<p class="no-devices-message">Scan results will appear here.</p>';
+        // }
+        // --- *********************************************** ---
+        // renderScanResults will handle showing the initial empty message when called by startScan
 
+        console.log("[Scanner] UI reset and detected devices CLEARED for new scan.");
+    },
+    // --- END RENAMED ---
+
+    // --- NEW Helper: Reset only buttons and status ---
+    _resetButtonsAndStatusOnly: function (statusMessage = "Idle.") {
+        if (this.elements.status) this.elements.status.textContent = statusMessage;
+        if (this.elements.startButton) {
+            this.elements.startButton.disabled = !this.bluetoothSupported;
+            this.elements.startButton.style.display = 'inline-flex';
+            // Restore original button text if stored
+            this.elements.startButton.innerHTML = this.elements.startButton.dataset.originalHtml || `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">bluetooth_searching</span> Start Scan`;
+        }
+        if (this.elements.stopButton) this.elements.stopButton.style.display = 'none';
+        console.log("[Scanner] Buttons and status reset only.");
+    },
+    // --- END NEW Helper ---
+
+    // --- Helper Functions (Keep _bufferToHex, _decodeMapOrSet, _interpretStatusByte) ---
     // --- Helper Functions ---
     _bufferToHex: function (buffer) {
         if (!buffer) return 'N/A';
@@ -111,7 +132,6 @@ window.Scanner = {
         if (!(buffer instanceof ArrayBuffer)) { console.warn("Invalid buffer type passed to _bufferToHex:", typeof buffer); return 'Invalid Buffer'; }
         return Array.prototype.map.call(new Uint8Array(buffer), x => ('00' + x.toString(16)).slice(-2)).join('');
     },
-
     _decodeMapOrSet: function (mapOrSet) {
         if (!mapOrSet) return {};
         if (typeof mapOrSet !== 'object' || typeof mapOrSet.forEach !== 'function') {
@@ -121,10 +141,10 @@ window.Scanner = {
                 try {
                     for (const key in mapOrSet) {
                         if (Object.hasOwnProperty.call(mapOrSet, key)) {
-                             const value = mapOrSet[key];
-                             simpleDecoded[key] = value instanceof ArrayBuffer || value instanceof DataView || value instanceof Uint8Array
-                                                ? this._bufferToHex(value)
-                                                : (typeof value === 'object' ? JSON.stringify(value) : value);
+                            const value = mapOrSet[key];
+                            simpleDecoded[key] = value instanceof ArrayBuffer || value instanceof DataView || value instanceof Uint8Array
+                                ? this._bufferToHex(value)
+                                : (typeof value === 'object' ? JSON.stringify(value) : value);
                         }
                     }
                     console.warn("[Scanner Decode] Attempted simple object decode.");
@@ -138,15 +158,15 @@ window.Scanner = {
             mapOrSet.forEach((value, key) => {
                 let decodedKey = key;
                 if (typeof key === 'string' && key.length === 36 && key.includes('-')) { decodedKey = `UUID(${key})`; }
-                 else if (typeof key === 'string' && key.startsWith('0x')) { decodedKey = key; }
-                 else if (typeof key === 'number') { decodedKey = `0x${key.toString(16).padStart(4, '0')}`; }
-                 else if (key instanceof ArrayBuffer) { decodedKey = this._bufferToHex(key); }
-                 else if (key && key.uuid) { decodedKey = key.uuid; }
+                else if (typeof key === 'string' && key.startsWith('0x')) { decodedKey = key; }
+                else if (typeof key === 'number') { decodedKey = `0x${key.toString(16).padStart(4, '0')}`; }
+                else if (key instanceof ArrayBuffer) { decodedKey = this._bufferToHex(key); }
+                else if (key && key.uuid) { decodedKey = key.uuid; }
                 let decodedValue = value;
                 try {
                     if (value instanceof ArrayBuffer || value instanceof DataView || value instanceof Uint8Array) {
-                         try { decodedValue = this._bufferToHex(value); }
-                         catch (hexError) { console.error(`[Scanner Decode FOR_EACH] _bufferToHex FAILED for key ${decodedKey}:`, hexError, value); decodedValue = "[Hex Conversion Error]"; }
+                        try { decodedValue = this._bufferToHex(value); }
+                        catch (hexError) { console.error(`[Scanner Decode FOR_EACH] _bufferToHex FAILED for key ${decodedKey}:`, hexError, value); decodedValue = "[Hex Conversion Error]"; }
                     } else { decodedValue = value; }
                 } catch (valueProcessingError) { console.error(`[Scanner Decode FOR_EACH] Error processing value for key ${decodedKey}:`, valueProcessingError, value); decodedValue = "[Value Processing Error]"; }
                 decoded[decodedKey] = decodedValue;
@@ -154,9 +174,7 @@ window.Scanner = {
         } catch (e) { console.error("Error during _decodeMapOrSet forEach iteration:", e, mapOrSet); return {}; }
         return decoded;
     },
-
-     // --- Helper to interpret status byte ---
-    _interpretStatusByte: function(statusByte) {
+    _interpretStatusByte: function (statusByte) {
         if (statusByte === null || statusByte === undefined) return "N/A";
         const batteryBits = (statusByte >> 6) & 0b11;
         let batteryStatus = "Unknown";
@@ -174,30 +192,24 @@ window.Scanner = {
         if (!this.bluetoothSupported || this.isScanning) return;
         console.log("[Scanner] Starting scan process (Iterative MAC Check)...");
         this.isScanning = true;
-        // --- Clear previous results ONLY when starting ---
-        this.allDetectedDevices.clear();
-        this.expandedDetails.clear();
+
+        // --- Call the FULL reset function when starting ---
+        this.resetUIForNewScan();
         // --- ------------------------------------------ ---
-        this.renderScanResults(); // Show initial "Scanning..." message
-        const startButton = this.elements.startButton;
-        if (startButton) {
-            startButton.disabled = true;
-            if (!startButton.dataset.originalHtml) {
-                 startButton.dataset.originalHtml = startButton.innerHTML;
-            }
-            startButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 5px;"></div> Starting...`;
+
+        if (this.elements.startButton) {
+            this.elements.startButton.disabled = true;
+            if (!this.elements.startButton.dataset.originalHtml) { this.elements.startButton.dataset.originalHtml = this.elements.startButton.innerHTML; }
+            this.elements.startButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 5px;"></div> Starting...`;
         }
         if (this.elements.stopButton) this.elements.stopButton.style.display = 'none';
         this.updateStatus('Fetching expected keys and potential MACs...');
 
         try {
-            // 1. Fetch keys AND potential MACs
             const data = await AppApi._fetch('/api/user/current_advertisement_keys');
             if (!data || !Array.isArray(data.keys_and_macs)) { throw new Error("Invalid key/MAC data received from server."); }
             const keysAndMacs = data.keys_and_macs;
-
-            this.expectedKeys.clear();
-            this.potentialMacs.clear();
+            this.expectedKeys.clear(); this.potentialMacs.clear();
             keysAndMacs.forEach(item => {
                 this.expectedKeys.set(item.adv_key_b64, { deviceId: item.device_id, name: item.name, keyType: item.key_type });
                 if (item.potential_mac) {
@@ -206,62 +218,61 @@ window.Scanner = {
                 }
             });
             console.log(`[Scanner] Fetched ${this.expectedKeys.size} potential keys and ${this.potentialMacs.size} potential MACs.`);
-
-            if (this.expectedKeys.size === 0 && this.potentialMacs.size === 0) {
-                this.updateStatus("No device keys/MACs found. Ensure devices are configured.", true);
-                this.isScanning = false; this.resetUI(); return;
-            }
+            if (this.expectedKeys.size === 0 && this.potentialMacs.size === 0) { this.updateStatus("No device keys/MACs found. Ensure devices are configured.", true); this.isScanning = false; this.resetUIForNewScan(); return; }
 
             this.updateStatus("Requesting Bluetooth scan permissions...");
-
-            // 2. Request Scan (AcceptAll)
             const options = { acceptAllAdvertisements: true };
             console.log("[Scanner] Requesting LE Scan with options:", JSON.stringify(options));
             this.scanInstance = await navigator.bluetooth.requestLEScan(options);
             console.log("[Scanner] LE Scan started successfully.");
-
             this.permissionGranted = true;
             this.updateStatus(`Scanning ALL Bluetooth devices for ${this.SCAN_DURATION_MS / 1000}s... Found OF Packets: 0 | Matched: 0`);
-            if (startButton) startButton.style.display = 'none';
+            if (this.elements.startButton) this.elements.startButton.style.display = 'none';
             if (this.elements.stopButton) this.elements.stopButton.style.display = 'inline-flex';
-
             navigator.bluetooth.removeEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
             navigator.bluetooth.addEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
-
             if (this.scanTimer) clearTimeout(this.scanTimer);
             this.scanTimer = setTimeout(() => { this.stopScan("Scan finished."); }, this.SCAN_DURATION_MS);
 
         } catch (error) {
-             console.error("[Scanner] Error starting scan or fetching keys:", error);
-             this.isScanning = false;
-             this.permissionGranted = (error.name === 'NotFoundError' || error.name === 'NotAllowedError') ? 'denied' : null;
-             let message = `Error: ${error.message}`;
-             if (error.name === 'NotFoundError') message = "Bluetooth permission denied or no devices found. Ensure Bluetooth is ON.";
-             if (error.name === 'NotAllowedError') message = "Bluetooth scanning permission denied by user.";
-             if (error instanceof DOMException && error.message.includes("Bluetooth adapter not available")) message = "Bluetooth adapter not found or is turned off.";
-             this.updateStatus(message, true);
-             this.resetUI();
+            console.error("[Scanner] Error starting scan or fetching keys:", error);
+            this.isScanning = false;
+            this.permissionGranted = (error.name === 'NotFoundError' || error.name === 'NotAllowedError') ? 'denied' : null;
+            let message = `Error: ${error.message}`;
+            if (error.name === 'NotFoundError') message = "Bluetooth permission denied or no devices found. Ensure Bluetooth is ON.";
+            if (error.name === 'NotAllowedError') message = "Bluetooth scanning permission denied by user.";
+            if (error instanceof DOMException && error.message.includes("Bluetooth adapter not available")) message = "Bluetooth adapter not found or is turned off.";
+            this.updateStatus(message, true);
+            // --- Call full reset on start error ---
+            this.resetUIForNewScan();
+            // --- -------------------------------- ---
         }
     },
 
     // --- REVISED stopScan ---
     stopScan: function (completionMessage = "Scan stopped.") {
-         console.log("[Scanner] Stopping scan...");
-         if (this.scanTimer) clearTimeout(this.scanTimer); this.scanTimer = null;
+        console.log("[Scanner] Stopping scan...");
+        if (this.scanTimer) clearTimeout(this.scanTimer); this.scanTimer = null;
 
-         navigator.bluetooth.removeEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
+        navigator.bluetooth.removeEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
 
-         if (this.scanInstance && typeof this.scanInstance.stop === 'function') {
-             try { this.scanInstance.stop(); console.log("[Scanner] Scan instance stopped."); }
-             catch (e) { console.warn("[Scanner] Error stopping scan instance:", e); }
-         }
-         this.scanInstance = null;
-         this.isScanning = false;
-         // --- DO NOT CLEAR allDetectedDevices or expandedDetails ---
-         let matchedCount = 0; this.allDetectedDevices.forEach(d => { if (d.isMatched) matchedCount++; });
-         this.updateStatus(completionMessage + ` Displaying ${this.allDetectedDevices.size} total Apple FindMy packets (${matchedCount} matched).`);
-         this.resetUI(); // Reset buttons, leaves results list content intact
-         this.renderScanResults(); // Render final list based on the existing allDetectedDevices
+        if (this.scanInstance && typeof this.scanInstance.stop === 'function') {
+            try { this.scanInstance.stop(); console.log("[Scanner] Scan instance stopped."); }
+            catch (e) { console.warn("[Scanner] Error stopping scan instance:", e); }
+        }
+        this.scanInstance = null;
+        this.isScanning = false;
+        // --- DO NOT CLEAR DATA ---
+        // this.allDetectedDevices.clear(); // REMOVED
+        // this.expandedDetails.clear(); // REMOVED
+        // --- ------------------- ---
+
+        let matchedCount = 0; this.allDetectedDevices.forEach(d => { if (d.isMatched) matchedCount++; });
+        const finalStatusMessage = completionMessage + ` Displaying ${this.allDetectedDevices.size} total Apple FindMy packets (${matchedCount} matched).`;
+
+        // --- Call the helper to ONLY reset buttons/status ---
+        this._resetButtonsAndStatusOnly(finalStatusMessage); // Resets buttons/status BUT NOT list content
+        this.renderScanResults(); // Re-renders based on data *still in* allDetectedDevices
     },
     // --- End REVISED stopScan ---
 
@@ -272,7 +283,6 @@ window.Scanner = {
         }
     },
 
-    // --- REVISED handleAdvertisement with iterative check ---
     handleAdvertisement: function (event) {
         if (!this.isScanning || !event.device?.id) return;
 
@@ -292,7 +302,7 @@ window.Scanner = {
             reconstructedKeyB64: null, isMatched: false, matchedInfo: null, lastSeen: timestamp,
         };
         if (event.appearance !== null) {
-             detectedDeviceData.appearanceInterpreted = this.appearanceMap[event.appearance] || `Unknown (0x${event.appearance.toString(16)})`;
+            detectedDeviceData.appearanceInterpreted = this.appearanceMap[event.appearance] || `Unknown (0x${event.appearance.toString(16)})`;
         }
         // Safely attempt to decode serviceData
         try { detectedDeviceData.rawServiceDataHexMap = this._decodeMapOrSet(event.serviceData || new Map()); }
@@ -317,7 +327,7 @@ window.Scanner = {
                 let matchFound = false;
                 detectedDeviceData.isMatched = false; // Reset for this packet
 
-                 // --- Iterative MAC Reconstruction Attempt ---
+                // --- Iterative MAC Reconstruction Attempt ---
                 try {
                     if (this.potentialMacs.size > 0) {
                         console.log(`[Scanner Reconstruct Attempt] BrowserID: ${browserDeviceId} - Trying ${this.potentialMacs.size} potential MACs...`);
@@ -339,31 +349,31 @@ window.Scanner = {
                             // console.log(`[Scanner Reconstruct Attempt] ---- MAC ${potentialMac} -> Key ${reconstructedKeyB64}`);
 
                             if (this.expectedKeys.has(reconstructedKeyB64)) {
-                                 const matchedDeviceDetails = this.expectedKeys.get(reconstructedKeyB64);
-                                 console.log(`%c[Scanner Reconstruct Attempt] +++ MATCH FOUND! +++\n  - Browser ID: ${browserDeviceId}\n  - Used Potential MAC: ${potentialMac}\n  - Reconstructed Key: ${reconstructedKeyB64}\n  - Matched Device: ${matchedDeviceDetails.deviceId} (${matchedDeviceDetails.name})`, "color: limegreen; font-weight: bold;");
-                                 detectedDeviceData.isMatched = true;
-                                 detectedDeviceData.matchedInfo = matchedDeviceDetails;
-                                 detectedDeviceData.reconstructedKeyB64 = reconstructedKeyB64;
-                                 matchFound = true;
-                                 break; // Found match for this packet
+                                const matchedDeviceDetails = this.expectedKeys.get(reconstructedKeyB64);
+                                console.log(`%c[Scanner Reconstruct Attempt] +++ MATCH FOUND! +++\n  - Browser ID: ${browserDeviceId}\n  - Used Potential MAC: ${potentialMac}\n  - Reconstructed Key: ${reconstructedKeyB64}\n  - Matched Device: ${matchedDeviceDetails.deviceId} (${matchedDeviceDetails.name})`, "color: limegreen; font-weight: bold;");
+                                detectedDeviceData.isMatched = true;
+                                detectedDeviceData.matchedInfo = matchedDeviceDetails;
+                                detectedDeviceData.reconstructedKeyB64 = reconstructedKeyB64;
+                                matchFound = true;
+                                break; // Found match for this packet
                             }
                         } // End MAC loop
-                         if (!matchFound) {
-                             console.log(`[Scanner Reconstruct Attempt] BrowserID: ${browserDeviceId} - No match found after trying all potential MACs.`);
-                         }
+                        if (!matchFound) {
+                            console.log(`[Scanner Reconstruct Attempt] BrowserID: ${browserDeviceId} - No match found after trying all potential MACs.`);
+                        }
                     } else {
-                         console.log("[Scanner Reconstruct Attempt] No potential MACs loaded.");
+                        console.log("[Scanner Reconstruct Attempt] No potential MACs loaded.");
                     }
                 } catch (e) { console.error("[Scanner] Error during iterative reconstruction:", e, event); }
                 // --- End Iterative Reconstruction ---
 
                 // Store or update the entry for this OF packet
-                 this.allDetectedDevices.set(browserDeviceId, detectedDeviceData);
-                 this.renderScanResults(); // Update UI
+                this.allDetectedDevices.set(browserDeviceId, detectedDeviceData);
+                this.renderScanResults(); // Update UI
 
-                 // Update status counter
-                 let totalMatched = 0; this.allDetectedDevices.forEach(d => { if (d.isMatched) totalMatched++; });
-                 this.updateStatus(`Scanning... Found OF Packets: ${this.allDetectedDevices.size} | Matched: ${totalMatched}`);
+                // Update status counter
+                let totalMatched = 0; this.allDetectedDevices.forEach(d => { if (d.isMatched) totalMatched++; });
+                this.updateStatus(`Scanning... Found OF Packets: ${this.allDetectedDevices.size} | Matched: ${totalMatched}`);
             }
         }
     }, // end handleAdvertisement
@@ -443,7 +453,7 @@ window.Scanner = {
                 const timeSpan = item.querySelector('.scanner-result-details.device-status span.relative-time');
                 if (timeSpan) { timeSpan.textContent = timeAgo; timeSpan.dataset.timestamp = data.lastSeen.toISOString(); }
                 const statusTextElement = item.querySelector('.scanner-result-details.device-status');
-                 if (statusTextElement) statusTextElement.childNodes[0].nodeValue = `Status: ${data.statusByte ?? 'N/A'} | Seen: `; // Update status part
+                if (statusTextElement) statusTextElement.childNodes[0].nodeValue = `Status: ${data.statusByte ?? 'N/A'} | Seen: `; // Update status part
                 const rssiElement = item.querySelector('.scanner-rssi');
                 if (rssiElement) { rssiElement.style.color = rssiColor; rssiElement.title = `Signal Strength: ${rssiText}`; rssiElement.innerHTML = `${rssiText}<div style="font-size: 0.8em; opacity: 0.7;">${distanceIndicator}</div>`; }
                 const detailsDiv = item.querySelector('.scanner-result-extra-details');
@@ -454,7 +464,7 @@ window.Scanner = {
                     toggleButton.setAttribute('aria-expanded', isExpanded);
                     toggleButton.title = isExpanded ? 'Hide Details' : 'Show Details';
                 }
-                if(detailsDiv) detailsDiv.style.display = isExpanded ? 'block' : 'none';
+                if (detailsDiv) detailsDiv.style.display = isExpanded ? 'block' : 'none';
 
             } else {
                 // Create New Item
@@ -487,18 +497,18 @@ window.Scanner = {
             }
         });
 
-         // Remove stale items
-         existingItems.forEach((element, id) => {
-              if (!currentRenderedIds.has(id)) {
-                  element.remove();
-                  this.expandedDetails.delete(id);
-              }
-         });
+        // Remove stale items
+        existingItems.forEach((element, id) => {
+            if (!currentRenderedIds.has(id)) {
+                element.remove();
+                this.expandedDetails.delete(id);
+            }
+        });
 
     }, // --- End Revised renderScanResults ---
 
     // --- Handle click on result item or toggle button ---
-    handleResultItemClick: function(event) {
+    handleResultItemClick: function (event) {
         const toggleButton = event.target.closest('.scanner-details-toggle');
         const itemElement = event.target.closest('.scanner-result-item');
 
@@ -509,13 +519,11 @@ window.Scanner = {
             // Allow clicking anywhere on the item to toggle details
             const buttonInside = itemElement.querySelector('.scanner-details-toggle');
             if (buttonInside) {
-                 this.toggleDetails(buttonInside);
+                this.toggleDetails(buttonInside);
             }
         }
     },
-
-    // --- Toggle details visibility AND store state ---
-    toggleDetails: function(button) {
+    toggleDetails: function (button) {
         const item = button.closest('.scanner-result-item');
         const details = item?.querySelector('.scanner-result-extra-details');
         const icon = button.querySelector('.material-icons');
