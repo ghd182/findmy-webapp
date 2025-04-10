@@ -1,9 +1,14 @@
 # Dockerfile
 
-# Use an official Python runtime as a parent image - choose ARM-compatible base
-# Bookworm is current Debian stable, often good for Raspberry Pi OS compatibility
-# Specify arm64 architecture explicitly for Pi 4
-FROM --platform=linux/arm64/v8 python:3.11-slim-bookworm
+# Use an official Python Alpine runtime as a parent image
+# Alpine is smaller and often has fewer vulnerabilities
+# Platform can be specified at build time
+ARG TARGETPLATFORM=linux/arm64/v8
+# Pinning to a digest ensures reproducibility - replace with the actual digest for your platform
+# Example: FROM python:3.13-alpine@sha256:18159b2be11db91f84b8f8f655cd860f805dbd9e49a583ddaac8ab39bf4fe1a7
+FROM python:3.13-alpine
+# If you know the digest, uncomment the line above and comment out the line below
+# FROM python:3.13-alpine
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -14,20 +19,21 @@ ENV FLASK_ENV=production
 ENV WAITRESS_THREADS=4
 # Default Port (can be overridden)
 ENV PORT=5000
-# Define timezone data path
-ENV TZDIR=/usr/share/zoneinfo
+# Alpine uses /usr/share/zoneinfo by default, TZDIR might not be strictly needed
+# ENV TZDIR=/usr/share/zoneinfo
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies that might be needed by Python packages
-# build-essential: For compiling C extensions (e.g., cryptography)
+# Install system dependencies needed by Python packages on Alpine
+# build-base: Equivalent to build-essential for compiling C extensions
 # libffi-dev: Foreign Function Interface library dev files
-# libbluetooth-dev: Might be needed by findmy library if it uses BLE directly (add if necessary)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libffi-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Add other Alpine packages here if needed (e.g., bluez-dev for bluetooth)
+RUN apk add --no-cache \
+    build-base \
+    libffi-dev
+    # Add any other required Alpine packages here, e.g.:
+    # bluez-dev
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt /app/requirements.txt

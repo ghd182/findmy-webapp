@@ -9,7 +9,7 @@ services:
     # Specify the target platform
     platform: linux/arm64/v8
     # Optional: Explicitly name the image built by compose
-    image: ghd182/findmy-app:latest
+    image: ghd182/findmy-webapp:latest
     # Sets a specific container name
     container_name: findmyapp
     # Restart policy
@@ -72,8 +72,7 @@ services:
       NOTIFICATION_HISTORY_DAYS: 60
       # Override location history fetch duration     
       HISTORY_DURATION_DAYS: 14
-      # SCHEDULER_MASTER_JOB_INTERVAL_MINUTES: 2 # If needed
-
+      
     # --- Add dependency on the anisette service ---
     depends_on:
       - anisette

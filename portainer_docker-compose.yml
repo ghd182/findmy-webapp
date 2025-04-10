@@ -4,7 +4,7 @@ services:
   findmyapp:
     # Use the image you built and pushed (or built locally)
     # Make sure this image exists locally or on Docker Hub
-    image: ghd182/findmy-app:latest
+    image: ghd182/findmy-webapp:latest
     container_name: findmyapp
     restart: unless-stopped
     ports:
