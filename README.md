@@ -1,8 +1,9 @@
 # FindMy WebApp - A Multi-User Find My Alternative
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/ghd182/findmy-multiuser/ci.yml?branch=main&style=flat-square)](https://github.com/ghd182/findmy-multiuser/actions)
+<!-- [![Build Status](https://img.shields.io/github/actions/workflow/status/ghd182/findmy-multiuser/ci.yml?branch=main&style=flat-square)](https://github.com/ghd182/findmy-multiuser/actions) -->
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
-[![App Version](https://img.shields.io/badge/Version-2.2.1-blue.svg?style=flat-square)](https://github.com/ghd182/findmy-multiuser) <!-- Ensure this matches config.py -->
+<!-- [![App Version](https://img.shields.io/badge/Version-2.2.1-blue.svg?style=flat-square)](https://github.com/ghd182/findmy-multiuser)  -->
+<!-- Ensure this matches config.py -->
 
 A self-hosted, multi-user web application designed as an alternative to Apple's Find My service, focusing on tracking Apple devices (like AirTags, iPhones, MacBooks) using [FindMy.py](https://github.com/malmeloo/FindMy.py) with a modern, responsive Material 3 interface.
 
