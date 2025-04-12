@@ -400,63 +400,50 @@ window.AppTheme = {
 window.AppActions = {
     _refreshPollingInterval: null, // Interval handle
     _refreshPollingTimeout: null,  // Timeout handle
-    _stopRefreshPolling: function () { // Helper to stop polling
-        if (this._refreshPollingInterval) {
-            clearInterval(this._refreshPollingInterval);
-            this._refreshPollingInterval = null;
-            console.log("[Action Refresh Poll] Polling stopped.");
-        }
-        if (this._refreshPollingTimeout) {
-            clearTimeout(this._refreshPollingTimeout);
-            this._refreshPollingTimeout = null;
-        }
-        // --- Ensure button is ALWAYS re-enabled when polling stops ---
+    _stopRefreshPolling: function () {
+        if (this._refreshPollingInterval) { clearInterval(this._refreshPollingInterval); this._refreshPollingInterval = null; console.log("[Action Refresh Poll] Polling stopped."); }
+        if (this._refreshPollingTimeout) { clearTimeout(this._refreshPollingTimeout); this._refreshPollingTimeout = null; }
         const button = document.getElementById('refresh-devices-button');
         if (button && button.disabled) {
             button.disabled = false;
-            if (button.dataset.originalHtml) {
-                button.innerHTML = button.dataset.originalHtml;
-            } else {
-                button.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 4px;">refresh</span> Update Status`;
-            }
+            if (button.dataset.originalHtml) { button.innerHTML = button.dataset.originalHtml; }
+            else { button.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 4px;">refresh</span> Update Status`; }
             console.log("[Action Refresh Poll] Button restored by _stopRefreshPolling.");
         }
-        // --- --------------------------------------------------- ---
     },
 
-    // --- Helper to update device list UI (keep this from previous step) ---
+    // --- _updateDeviceUI (Crucially, this function calls AppMap.updateMapView internally if map is ready/visible) ---
     _updateDeviceUI: function (data, lastUpdatedElement, listElement, noDevicesMessage, error = null) {
-        try {
-            const errorMessageElement = document.getElementById('devices-error-message'); // Get error element ref
+        // --- Define devicesPageVisible HERE, outside the try block ---
+        const devicesPageVisible = document.getElementById('shared-page')?.style.display !== 'none';
+        const listContainer = document.getElementById('shared-devices-list'); // Also get list container reference early
 
+        try {
+            const errorMessageElement = document.getElementById('devices-error-message');
             if (error) {
-                // --- Handle Error Display ---
                 console.error("Updating device UI with error:", error);
+                // Only show pop-up for non-auth/2FA errors
                 if (error.code !== 'NO_APPLE_CREDS' && error.status !== 401 && error.status !== 403 && !(error.message && error.message.includes("2FA Required"))) {
                     if (window.AppUI) AppUI.showErrorDialog("Device Refresh Error", `Could not get device status.<br>Details: ${error.message} (${error.code || 'N/A'})`);
                 }
-                if (errorMessageElement) {
-                    errorMessageElement.textContent = `Error: ${error.message}`;
-                    errorMessageElement.style.display = 'block';
-                }
-                if (lastUpdatedElement) {
-                    lastUpdatedElement.textContent = 'Update failed';
-                    // --- FIX: Remove relative time info on error ---
-                    lastUpdatedElement.classList.remove('relative-time');
-                    delete lastUpdatedElement.dataset.timestamp;
-                    // --- END FIX ---
-                }
-                if (listElement) AppUI.renderDevicesList([]); // Render empty list on error
+                if (errorMessageElement) { errorMessageElement.textContent = `Error: ${error.message}`; errorMessageElement.style.display = 'block'; }
+                if (lastUpdatedElement) { lastUpdatedElement.textContent = 'Update failed'; lastUpdatedElement.classList.remove('relative-time'); delete lastUpdatedElement.dataset.timestamp; }
+                // Render empty list ONLY if the shared page is visible
+                if (devicesPageVisible && listElement) AppUI.renderDevicesList([]);
 
             } else if (data) {
-                // --- Update based on successful data fetch ---
-                if (AppState.currentViewedDeviceId && !data.devices?.some(d => d.id === AppState.currentViewedDeviceId)) {
-                    AppState.currentViewedDeviceId = null;
-                }
-                AppState.setCurrentDeviceData(data.devices || []);
-                AppUI.renderDevicesList(AppState.getCurrentDeviceData()); // Re-render list
+                const previousTimestamp = AppState.lastDeviceUpdateTime ? AppState.lastDeviceUpdateTime.toISOString() : null;
+                const newTimestamp = data.last_updated || null;
 
-                // --- Update Status Text ---
+                if (AppState.currentViewedDeviceId && !data.devices?.some(d => d.id === AppState.currentViewedDeviceId)) { AppState.currentViewedDeviceId = null; }
+                AppState.setCurrentDeviceData(data.devices || []);
+
+                // Render device list only if the shared page is currently active
+                if (devicesPageVisible && listElement) {
+                    AppUI.renderDevicesList(AppState.getCurrentDeviceData());
+                }
+
+                // Update Status Text (logic remains the same)
                 let statusText = 'Last updated: Unknown';
                 if (data.code === 'NO_DEVICE_FILES') { statusText = 'No devices configured'; }
                 else if (data.code === 'NO_APPLE_CREDS') { statusText = 'Credentials needed'; }
@@ -465,208 +452,176 @@ window.AppActions = {
                 else if (data.last_updated) {
                     try {
                         const d = new Date(data.last_updated);
-                        const relativeTimeStr = AppUtils.formatTimeRelative(d); // Calculate relative time
-                        statusText = `Last updated: ${relativeTimeStr}`; // Set initial text
-
-                        // --- FIX: Add class and timestamp for auto-update ---
+                        const relativeTimeStr = AppUtils.formatTimeRelative(d);
+                        statusText = `Last updated: ${relativeTimeStr}`;
                         if (lastUpdatedElement) {
-                            lastUpdatedElement.dataset.timestamp = data.last_updated; // Store full ISO timestamp
-                            lastUpdatedElement.classList.add('relative-time');    // Add class for the interval timer
+                            lastUpdatedElement.dataset.timestamp = data.last_updated;
+                            lastUpdatedElement.classList.add('relative-time');
                         }
-                        // --- END FIX ---
                     } catch (e) {
                         statusText = `Last updated: ${data.last_updated}`;
-                        // Remove class/timestamp if date parsing failed
-                        if (lastUpdatedElement) {
-                            lastUpdatedElement.classList.remove('relative-time');
-                            delete lastUpdatedElement.dataset.timestamp;
-                        }
+                        if (lastUpdatedElement) { lastUpdatedElement.classList.remove('relative-time'); delete lastUpdatedElement.dataset.timestamp; }
                     }
                 } else if (data.fetch_errors) {
                     statusText = `Update Failed: ${data.fetch_errors}`;
-                    // Remove class/timestamp if there are fetch errors but no timestamp
-                    if (lastUpdatedElement) {
-                        lastUpdatedElement.classList.remove('relative-time');
-                        delete lastUpdatedElement.dataset.timestamp;
+                    if (lastUpdatedElement) { lastUpdatedElement.classList.remove('relative-time'); delete lastUpdatedElement.dataset.timestamp; }
+                }
+                if (lastUpdatedElement) { lastUpdatedElement.textContent = statusText; }
+
+
+                if (devicesPageVisible && noDevicesMessage) noDevicesMessage.style.display = (data.devices?.length === 0) ? 'block' : 'none';
+                if (errorMessageElement) errorMessageElement.style.display = 'none';
+
+                if (window.AppUI && typeof AppUI.updateRelativeTimes === 'function') { AppUI.updateRelativeTimes(); }
+
+                // Trigger Map Update (logic remains the same)
+                const mapPageVisible = document.getElementById('index-page')?.style.display !== 'none';
+                const shouldUpdateMap = AppState.mapReady && (mapPageVisible || AppState.isInitialLoad) && (newTimestamp !== previousTimestamp || AppState.isInitialLoad);
+
+                if (shouldUpdateMap) {
+                    console.log(`[UI Update] Triggering AppMap.updateMapView(). Map Visible: ${mapPageVisible}, Timestamp Changed: ${newTimestamp !== previousTimestamp}, Initial Load: ${AppState.isInitialLoad}`);
+                    if (window.AppMap && typeof AppMap.updateMapView === 'function') {
+                        AppMap.updateMapView(); // <<< THE KEY CALL TO UPDATE THE MAP
+                    } else {
+                        console.warn("[UI Update] AppMap.updateMapView function not found when trying to update map.");
                     }
+                } else {
+                    console.log(`[UI Update] Skipping map update. Map Visible: ${mapPageVisible}, Map Ready: ${AppState.mapReady}, Timestamp Changed: ${newTimestamp !== previousTimestamp}, Initial Load: ${AppState.isInitialLoad}`);
                 }
 
-                if (lastUpdatedElement) {
-                    lastUpdatedElement.textContent = statusText; // Set the text content
-                }
-                // --- END: Update Status Text ---
-
-                if (noDevicesMessage) noDevicesMessage.style.display = (data.devices?.length === 0) ? 'block' : 'none';
-                if (errorMessageElement) errorMessageElement.style.display = 'none'; // Hide error message on success
-
-                // Explicitly update relative times for the newly rendered list AND the status text
-                if (window.AppUI && typeof AppUI.updateRelativeTimes === 'function') {
-                    AppUI.updateRelativeTimes();
+                // Mark initial load as false after the first successful update
+                if (AppState.isInitialLoad && data && !error) {
+                    AppState.isInitialLoad = false;
                 }
 
-                // Update map if visible
-                if (document.getElementById('index-page')?.style.display === 'block' && window.AppMap && AppState.mapReady) {
-                    AppMap.updateMapView();
-                }
-            } else {
-                // Handle case where data is null but no error
-                if (lastUpdatedElement) {
-                    lastUpdatedElement.textContent = 'No data received.';
-                    lastUpdatedElement.classList.remove('relative-time');
-                    delete lastUpdatedElement.dataset.timestamp;
-                }
-                if (listElement) AppUI.renderDevicesList([]);
+            } else { // Handle case where data is null/undefined but no explicit error
+                if (lastUpdatedElement) { lastUpdatedElement.textContent = 'No data received.'; lastUpdatedElement.classList.remove('relative-time'); delete lastUpdatedElement.dataset.timestamp; }
+                if (devicesPageVisible && listElement) AppUI.renderDevicesList([]);
             }
         } catch (uiError) {
             console.error("Error updating device UI:", uiError);
+            // Optionally display a generic error message if specific elements aren't available
+            const errorMsgElem = document.getElementById('devices-error-message');
+            if (errorMsgElem) { errorMsgElem.textContent = `UI Error: ${uiError.message}`; errorMsgElem.style.display = 'block'; }
         } finally {
-            // Hide loading indicator if it's still visible
-            const loadingIndicator = document.getElementById('devices-loading-indicator');
-            if (loadingIndicator) loadingIndicator.style.display = 'none';
-            // Show list element if it has content after rendering
-            if (listElement) listElement.style.display = listElement.hasChildNodes() ? 'block' : 'none';
+            // Now 'devicesPageVisible' is guaranteed to be defined here
+            if (devicesPageVisible) {
+                const loadingIndicator = document.getElementById('devices-loading-indicator');
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+                // Check listElement directly, it was passed in
+                if (listElement) {
+                    // Ensure noDevicesMessage is also referenced correctly if needed
+                    const noDevMsg = document.getElementById('no-devices-message');
+                    listElement.style.display = (listElement.hasChildNodes() && (!noDevMsg || noDevMsg.style.display === 'none')) ? 'block' : 'none';
+                }
+            }
         }
-    },
-    // --- End UI Helper ---
+    }, // End _updateDeviceUI
+
 
     refreshDevices: async function (triggerBackgroundFetch = false) {
         console.log(`Action: Refresh Devices triggered. (Background Fetch: ${triggerBackgroundFetch})`);
         const button = document.getElementById('refresh-devices-button');
-        const listContainer = document.getElementById('shared-devices-list-container'); // Example, ensure correct ID
         const listElement = document.getElementById('shared-devices-list');
         const loadingIndicator = document.getElementById('devices-loading-indicator');
         const lastUpdatedElement = document.getElementById('devices-last-updated');
         const noDevicesMessage = document.getElementById('no-devices-message');
+        const devicesPageVisible = document.getElementById('shared-page')?.style.display !== 'none';
 
-        // --- Stop any previous polling ---
-        this._stopRefreshPolling(); // This now handles button reset too
+        this._stopRefreshPolling(); // Stop previous polling if any
 
-        // --- UI Loading State ---
-        if (button) {
-            console.log("[Action Refresh] Setting button to loading state."); // Log
-            button.disabled = true;
-            if (!button.dataset.originalHtml) button.dataset.originalHtml = button.innerHTML;
-            button.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Updating...`;
-        } else {
-            console.warn("[Action Refresh] Refresh button not found for setting loading state.");
+        // Show loading state ONLY if the devices page is visible
+        if (devicesPageVisible) {
+            if (button) {
+                button.disabled = true;
+                if (!button.dataset.originalHtml) button.dataset.originalHtml = button.innerHTML;
+                button.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Updating...`;
+            }
+            if (loadingIndicator) loadingIndicator.style.display = 'block';
+            if (lastUpdatedElement) lastUpdatedElement.textContent = 'Checking status...';
+            if (noDevicesMessage) noDevicesMessage.style.display = 'none';
+            if (listElement) listElement.style.display = 'none';
         }
-        if (loadingIndicator) loadingIndicator.style.display = 'block';
-        if (lastUpdatedElement) lastUpdatedElement.textContent = 'Checking status...';
-        if (noDevicesMessage) noDevicesMessage.style.display = 'none';
-        if (listElement) listElement.style.display = 'none'; // Hide list initially
-        // --- ---------------- ---
 
-        let initialTimestamp = null;
+        let initialTimestamp = AppState.lastDeviceUpdateTime ? AppState.lastDeviceUpdateTime.toISOString() : null;
 
         try {
             if (triggerBackgroundFetch) {
                 // --- Manual Refresh Flow ---
-                // 1. Get current status *first* to know the starting timestamp
-                let initialData = null;
-                try {
-                    initialData = await AppApi.fetchDevices();
-                    initialTimestamp = initialData?.last_updated || null;
-                    console.log("[Action Refresh] Stored initial timestamp:", initialTimestamp);
-                    // Update UI minimally just to show the "last updated" from before the refresh
-                    if (lastUpdatedElement && initialData?.last_updated) {
-                        try {
-                            lastUpdatedElement.textContent = `Last updated: ${AppUtils.formatTimeRelative(new Date(initialData.last_updated))}`;
-                        } catch (e) { /* ignore */ }
-                    }
-                } catch (initialFetchError) {
-                    console.warn("[Action Refresh] Could not fetch initial status before triggering:", initialFetchError);
-                    if (lastUpdatedElement) lastUpdatedElement.textContent = 'Could not get current status.';
-                    // Fallback: proceed without initial timestamp check
-                }
-
-                // 2. Trigger the background refresh
+                console.log("[Action Refresh] Manual trigger: Stored initial timestamp:", initialTimestamp);
                 console.log("Triggering background refresh via API...");
                 try {
                     await AppApi.triggerUserRefresh();
                     console.log("Background refresh trigger successful.");
-                    if (lastUpdatedElement) lastUpdatedElement.textContent = 'Refresh initiated, polling for updates...';
+                    if (devicesPageVisible && lastUpdatedElement) lastUpdatedElement.textContent = 'Refresh initiated, polling for updates...';
 
-                    // 3. Start Polling
-                    const pollStartTime = Date.now();
-                    const maxPollDuration = 90 * 1000;
-                    const pollInterval = 5 * 1000;
-
+                    // Start Polling (keep existing polling logic)
+                    const pollStartTime = Date.now(); const maxPollDuration = 90 * 1000; const pollInterval = 5 * 1000;
                     this._refreshPollingInterval = setInterval(async () => {
                         console.log("[Action Refresh Poll] Polling check...");
                         try {
-                            const pollData = await AppApi.fetchDevices();
-                            const currentTimestamp = pollData?.last_updated || null;
-                            // Check if timestamp exists and is different from the one *before* we triggered
+                            const pollData = await AppApi.fetchDevices(); const currentTimestamp = pollData?.last_updated || null;
                             if (currentTimestamp && currentTimestamp !== initialTimestamp) {
                                 console.log("[Action Refresh Poll] New timestamp detected! Update complete.");
-                                this._stopRefreshPolling(); // Stop polling, re-enables button
+                                this._stopRefreshPolling(); // Stops polling AND resets button
                                 this._updateDeviceUI(pollData, lastUpdatedElement, listElement, noDevicesMessage); // Update UI fully
-                            } else {
-                                console.log(`[Action Refresh Poll] Timestamp unchanged (${currentTimestamp} vs ${initialTimestamp}).`);
-                            }
-                        } catch (pollError) {
-                            console.error("[Action Refresh Poll] Error during poll fetch:", pollError);
-                            this._stopRefreshPolling(); // Stop polling on error, re-enables button
-                            this._updateDeviceUI(null, lastUpdatedElement, listElement, noDevicesMessage, pollError); // Show error
-                        }
+                            } else { console.log(`[Action Refresh Poll] Timestamp unchanged (${currentTimestamp} vs ${initialTimestamp}).`); }
+                        } catch (pollError) { console.error("[Action Refresh Poll] Error during poll fetch:", pollError); this._stopRefreshPolling(); this._updateDeviceUI(null, lastUpdatedElement, listElement, noDevicesMessage, pollError); }
                     }, pollInterval);
-
-                    // 4. Set Timeout for Polling
                     this._refreshPollingTimeout = setTimeout(() => {
-                        if (this._refreshPollingInterval) { // Check if still polling
-                            console.warn("[Action Refresh Poll] Polling timed out.");
-                            this._stopRefreshPolling(); // Stop polling, re-enables button
-                            if (lastUpdatedElement) lastUpdatedElement.textContent = 'Refresh timed out. Displaying last known status.';
-                            // Fetch one last time on timeout
-                            AppApi.fetchDevices()
+                        if (this._refreshPollingInterval) {
+                            console.warn("[Action Refresh Poll] Polling timed out."); this._stopRefreshPolling();
+                            if (devicesPageVisible && lastUpdatedElement) lastUpdatedElement.textContent = 'Refresh timed out. Displaying last known status.';
+                            AppApi.fetchDevices() // Fetch one last time
                                 .then(finalData => this._updateDeviceUI(finalData, lastUpdatedElement, listElement, noDevicesMessage))
                                 .catch(finalError => this._updateDeviceUI(null, lastUpdatedElement, listElement, noDevicesMessage, finalError));
                         }
                     }, maxPollDuration);
-
-                    // IMPORTANT: Do NOT proceed to the 'else' block or the finally block here if polling started
-                    return; // Exit refreshDevices function, let polling handle the rest
+                    return; // Exit function, let polling handle UI update and button reset
 
                 } catch (triggerError) {
                     console.error("Error triggering background refresh:", triggerError);
-                    if (lastUpdatedElement) lastUpdatedElement.textContent = 'Refresh trigger failed.';
+                    if (devicesPageVisible && lastUpdatedElement) lastUpdatedElement.textContent = 'Refresh trigger failed.';
                     this._updateDeviceUI(null, lastUpdatedElement, listElement, noDevicesMessage, triggerError);
-                    // Need to manually stop the loading state here if trigger fails
-                    this._stopRefreshPolling(); // Use the helper to reset the button
+                    this._stopRefreshPolling(); // Reset button on trigger error
                     return; // Stop execution
                 }
-
             } else {
                 // --- Automatic Interval Refresh Flow ---
                 console.log("Fetching current device status (interval)...");
                 const fetchStatusData = await AppApi.fetchDevices();
+                // --- CRITICAL: Call the UI update function ---
                 this._updateDeviceUI(fetchStatusData, lastUpdatedElement, listElement, noDevicesMessage);
+                // --- -------------------------------------- ---
             }
-
-        } catch (error) { // Catch errors from the initial fetch when trigger=false, or initial fetch before trigger=true
-            console.error("Error fetching device status:", error);
+        } catch (error) { // Catch errors from the fetchDevices call when trigger=false
+            console.error("Error fetching device status (interval):", error);
             this._updateDeviceUI(null, lastUpdatedElement, listElement, noDevicesMessage, error);
         } finally {
-            // --- REVISED Finally Block ---
-            // Only hide loading indicator here. Button reset is handled by _stopRefreshPolling
-            // or happens immediately if triggerBackgroundFetch is false or fails.
-            if (loadingIndicator) loadingIndicator.style.display = 'none';
-            if (listElement) listElement.style.display = listElement.hasChildNodes() ? 'block' : 'none';
+            // --- START: Revised Finally Block ---
+            if (devicesPageVisible) { // Still check if page was visible for loading indicator
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                    console.log("[Action Refresh Finally] Hid loading indicator.");
+                }
 
-            // If NOT polling (i.e., automatic refresh or failed trigger), reset button state here.
-            if (!this._refreshPollingInterval && button && button.disabled) {
-                console.log("[Action Refresh Finally] NOT Polling. Resetting button.");
-                button.disabled = false;
-                if (button.dataset.originalHtml) button.innerHTML = button.dataset.originalHtml;
-                else button.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 4px;">refresh</span> Update Status`;
-            } else if (this._refreshPollingInterval) {
-                console.log("[Action Refresh Finally] Polling is active. Button state managed by polling.");
+                // Reset button if NOT polling (automatic refresh or failed trigger)
+                if (!this._refreshPollingInterval && button && button.disabled) {
+                    console.log("[Action Refresh Finally] NOT Polling. Resetting button.");
+                    button.disabled = false;
+                    if (button.dataset.originalHtml) {
+                        button.innerHTML = button.dataset.originalHtml;
+                    } else {
+                        // Ensure consistent button text reset
+                        button.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 4px;">refresh</span> Update Status`;
+                    }
+                } else if (this._refreshPollingInterval) {
+                    console.log("[Action Refresh Finally] Polling is active. Button state managed by polling.");
+                }
             }
-            // --- END REVISED ---
+            // --- END: Revised Finally Block ---
         }
     }, // End refreshDevices
-
-    ///////////////////////////////////
 
     refreshGeofencesAndDevices: async function () {
         console.log("Action: Refreshing Geofences and Devices");
@@ -699,27 +654,53 @@ window.AppActions = {
     },
 
     fetchInitialData: async function () {
-        console.log("Action: Fetching initial data (devices & geofences)");
+        console.log("Action: Fetching initial data (devices, geofences, shares)"); // Updated log
+        const listElement = document.getElementById('shared-devices-list');
+        const loadingIndicator = document.getElementById('devices-loading-indicator');
+        const lastUpdatedElement = document.getElementById('devices-last-updated');
+        const noDevicesMessage = document.getElementById('no-devices-message');
+        const devicesPageVisible = document.getElementById('shared-page')?.style.display !== 'none';
+
         try {
-            const geoData = await AppApi.fetchGlobalGeofences();
+            // Fetch geofences, devices, AND shares (can run in parallel)
+            const [geoData, devicesData, sharesData] = await Promise.all([
+                AppApi.fetchGlobalGeofences().catch(e => { console.error("Failed initial geofence fetch", e); return []; }), // Handle potential errors
+                AppApi.fetchDevices().catch(e => { console.error("Failed initial device fetch", e); return null; }),      // Handle potential errors
+                AppApi.fetchUserShares().catch(e => { console.error("Failed initial shares fetch", e); return []; })        // Handle potential errors
+            ]);
+
+            // Set state AFTER all fetches complete
             AppState.setGlobalGeofences(geoData || []);
+            AppState.setUserActiveShares(sharesData || []); // <<< SET SHARES STATE
+
+            // Update device UI (this updates AppState.currentDeviceData)
+            this._updateDeviceUI(devicesData, lastUpdatedElement, listElement, noDevicesMessage, devicesData ? null : new Error("Failed to fetch device data"));
+
+            // Render static lists based on updated state
             AppUI.renderGlobalGeofences();
-
-            // Call refreshDevices WITHOUT triggering background fetch
-            await AppActions.refreshDevices(false); // <<< Pass false here
-
-            if (window.AppMap && AppState.mapReady) { // Check mapReady
-                AppMap.redrawGeofenceLayer();
-            }
             AppUI.renderDeviceGeofenceLinks();
+            AppUI.renderDevicePageSharesList(); // <<< RENDER SHARES on Devices page
+            AppUI.renderActiveSharesList();     // <<< Also render on Settings page
 
-        } catch (error) {
-            console.error("Initial data fetch failed:", error);
-            if (error.code !== 'NO_DEVICE_FILES' && error.code !== 'NO_APPLE_CREDS') {
+            // Update map AFTER state is set
+            if (window.AppMap && AppState.mapReady) {
+                AppMap.redrawGeofenceLayer();
+                AppMap.updateMapView(); // Ensure map reflects device visibility etc.
+            }
+
+        } catch (error) { // Catch errors from Promise.all or subsequent processing
+            console.error("Initial data fetch sequence failed:", error);
+            this._updateDeviceUI(null, lastUpdatedElement, listElement, noDevicesMessage, error);
+            if (error.code !== 'NO_DEVICE_FILES' && error.code !== 'NO_APPLE_CREDS' && error.status !== 401 && error.status !== 403 && !(error.message && error.message.includes("2FA Required"))) {
                 if (window.AppUI) AppUI.showErrorDialog("Initial Load Failed", `Could not load initial data.<br>Details: ${error.message} (${error.code || 'N/A'})`);
+            }
+        } finally {
+            if (devicesPageVisible && loadingIndicator) {
+                loadingIndicator.style.display = 'none';
             }
         }
     },
+
 
     handleRemoveDevice: async function (deviceId) {
         const device = AppState.getDeviceDisplayInfo(deviceId);
@@ -1382,15 +1363,50 @@ async function initializeApp() {
     function addLoadingClass() { if (document.body) { document.body.classList.add('app-loading'); } else { requestAnimationFrame(addLoadingClass); } } addLoadingClass();
     const m3UtilsLocalPath = '/static/libs/material-color/material-color-utilities.esm.js';
     try { await loadLocalModuleFallback(m3UtilsLocalPath, 'M3ColorUtils'); } catch (err) { console.error("Critical error loading Material Color Utilities.", err); }
-    AppState.loadInitialState();
-    try { const prefs = await AppApi.fetchUserPreferences(); AppState.setCurrentUserPreferences(prefs); } catch (error) { console.error("Failed to fetch user preferences:", error); }
-    if (window.AppTheme && typeof window.AppTheme.initializeTheme === 'function') { AppTheme.initializeTheme(); } else { console.error("AppTheme init error."); const isDarkFallback = (AppState.currentTheme === 'dark' || (AppState.currentTheme === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)); document.documentElement.classList.add(isDarkFallback ? 'dark-theme' : 'light-theme'); } // Apply to HTML
-    AppUI.setupSettingsPage(); AppActions.initDebouncedSearch();
 
-    try { const urlParams = new URLSearchParams(window.location.search); const pageParam = urlParams.get('page'); if (pageParam) { const validPages = ['index', 'shared', 'scanner', 'geofences', 'settings', 'notifications-history']; if (validPages.includes(pageParam)) AppUI.changePage(pageParam); else AppUI.navigateToInitialPage(); } else { AppUI.navigateToInitialPage(); } } catch (e) { console.error("[Init] Error handling initial page navigation:", e); AppUI.navigateToInitialPage(); }
-    if (AppState.getLastActivePageId() === 'index') { // Only init map if starting on map page
+    AppState.loadInitialState(); // Load theme prefs, toggles etc first
+
+    // Fetch user prefs early for themeing
+    try {
+        const prefs = await AppApi.fetchUserPreferences(); // Await prefs
+        AppState.setCurrentUserPreferences(prefs);
+    } catch (error) {
+        console.error("Failed to fetch user preferences:", error);
+        // Use defaults already set in AppState
+    }
+
+    // Initialize theme *after* loading preferences
+    if (window.AppTheme && typeof window.AppTheme.initializeTheme === 'function') {
+        AppTheme.initializeTheme();
+    } else {
+        console.error("AppTheme init error.");
+        // Apply basic fallback class based on AppState pref
+        const isDarkFallback = AppTheme.isDarkModeActive(AppState.currentTheme);
+        document.documentElement.classList.add(isDarkFallback ? 'dark-theme' : 'light-theme'); // Apply to HTML
+    }
+
+    // Setup basic UI listeners etc.
+    AppUI.setupSettingsPage();
+    AppActions.initDebouncedSearch();
+
+
+    // --- *** AWAIT Initial Data Fetch BEFORE Navigating *** ---
+    try {
+        console.log("[Init] Starting fetchInitialData...");
+        await AppActions.fetchInitialData(); // <<< ADD await HERE
+        console.log("[Init] fetchInitialData COMPLETED.");
+    } catch (err) {
+        console.error("[Init] Initial data fetch failed:", err);
+        // Error is already handled/shown by fetchInitialData/_updateDeviceUI
+    }
+    // --- *************************************************** ---
+
+    // --- Initialize Map AFTER potentially getting initial device data ---
+    // Check if the initially determined page is the map page
+    const initialPageId = AppState.getLastActivePageId();
+    if (initialPageId === 'index') {
         if (window.AppMap && typeof window.AppMap.initMap === 'function') {
-            AppMap.initMap();
+            AppMap.initMap(); // Initialize map if starting on map page
         } else {
             console.error("AppMap or AppMap.initMap not found!");
             if (window.AppUI) AppUI.showErrorDialog("Map Error", "Could not load map component.");
@@ -1398,15 +1414,61 @@ async function initializeApp() {
     } else {
         console.log("Skipping initial map load as not starting on map page.");
     }
+    // --- End Map Initialization ---
 
-    if (window.AppMap && typeof window.AppMap.initMap === 'function') { AppMap.initMap(); } else { console.error("AppMap init error!"); if (window.AppUI) AppUI.showErrorDialog("Map Error", "Could not load map component."); }
-    if (window.AppNotifications) { AppNotifications.registerServiceWorker().then(() => console.log("SW reg sequence complete.")).catch(error => console.error("SW reg failed:", error)); } else { console.error("AppNotifications not found!"); }
-    AppActions.fetchInitialData().catch(err => console.error("Initial data fetch error:", err));
-    if (document.body) { document.body.classList.remove('app-loading'); document.body.classList.add('app-loaded'); console.log("App marked as loaded."); } else { window.addEventListener('load', () => { if (document.body) { document.body.classList.remove('app-loading'); document.body.classList.add('app-loaded'); } }); }
+
+    // --- Navigate to Initial Page AFTER data fetch attempt ---
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const pageParam = urlParams.get('page');
+        if (pageParam) {
+            const validPages = ['index', 'shared', 'scanner', 'geofences', 'settings', 'notifications-history']; // Ensure 'scanner' is valid
+            if (validPages.includes(pageParam)) {
+                AppUI.changePage(pageParam); // Navigate to param if valid
+            } else {
+                console.warn(`[Init] Invalid page parameter '${pageParam}'. Navigating to default.`);
+                AppUI.navigateToInitialPage(); // Navigate based on localStorage or default
+            }
+        } else {
+            AppUI.navigateToInitialPage(); // Navigate based on localStorage or default
+        }
+    } catch (e) {
+        console.error("[Init] Error handling initial page navigation:", e);
+        AppUI.navigateToInitialPage(); // Fallback
+    }
+    // --- End Initial Navigation ---
+
+    // --- Service Worker Registration & Other Setup ---
+    if (window.AppNotifications) {
+        AppNotifications.registerServiceWorker().then(() => console.log("SW reg sequence complete.")).catch(error => console.error("SW reg failed:", error));
+    } else {
+        console.error("AppNotifications not found!");
+    }
+
+    // Mark app as loaded
+    if (document.body) { document.body.classList.remove('app-loading'); document.body.classList.add('app-loaded'); console.log("App marked as loaded."); }
+    else { window.addEventListener('load', () => { if (document.body) { document.body.classList.remove('app-loading'); document.body.classList.add('app-loaded'); } }); }
+
+    // Setup refresh button listener (ensure it's only added once)
     const refreshButton = document.getElementById('refresh-devices-button');
-    if (refreshButton) { const newRefreshButton = refreshButton.cloneNode(true); newRefreshButton.addEventListener('click', () => AppActions.refreshDevices(true)); refreshButton.parentNode.replaceChild(newRefreshButton, refreshButton); } else { console.warn("Refresh button not found."); }
-    if (window.AppUI && typeof AppUI.updateRelativeTimes === 'function') { setInterval(AppUI.updateRelativeTimes, 60 * 1000); console.log("Relative time updater started."); }
-    setInterval(() => AppActions.refreshDevices(false), AppConfig.FETCH_DEVICES_INTERVAL); console.log(`Automatic data refresh interval started (${AppConfig.FETCH_DEVICES_INTERVAL / 1000}s).`);
+    if (refreshButton && !refreshButton._clickListenerAttached) {
+        refreshButton.addEventListener('click', () => AppActions.refreshDevices(true));
+        refreshButton._clickListenerAttached = true; // Add flag
+    } else if (!refreshButton) {
+        console.warn("Refresh button not found during init.");
+    }
+
+    // Start periodic updates and listeners
+    if (window.AppUI && typeof AppUI.updateRelativeTimes === 'function') {
+        // Clear existing interval if re-initializing (though this shouldn't happen often)
+        if (window._relativeTimeUpdaterInterval) clearInterval(window._relativeTimeUpdaterInterval);
+        window._relativeTimeUpdaterInterval = setInterval(AppUI.updateRelativeTimes, 60 * 1000);
+        console.log("Relative time updater started.");
+    }
+    // Clear existing interval if re-initializing
+    if (window._deviceRefreshInterval) clearInterval(window._deviceRefreshInterval);
+    window._deviceRefreshInterval = setInterval(() => AppActions.refreshDevices(false), AppConfig.FETCH_DEVICES_INTERVAL);
+    console.log(`Automatic data refresh interval started (${AppConfig.FETCH_DEVICES_INTERVAL / 1000}s).`);
     const lastUpdatedEl = document.getElementById('last-updated-text');
     if (lastUpdatedEl) { const handleLastUpdatedClick = (e) => { AppUI.changePage('history'); }; lastUpdatedEl.addEventListener('click', handleLastUpdatedClick); lastUpdatedEl.addEventListener('keypress', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleLastUpdatedClick(e); } }); } else { console.warn("last-updated-text not found."); }
 

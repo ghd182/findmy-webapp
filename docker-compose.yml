@@ -72,7 +72,7 @@ services:
       NOTIFICATION_HISTORY_DAYS: 60
       # Override location history fetch duration     
       HISTORY_DURATION_DAYS: 14
-      
+
     # --- Add dependency on the anisette service ---
     depends_on:
       - anisette

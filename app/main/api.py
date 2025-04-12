@@ -11,15 +11,15 @@ from pathlib import Path
 from werkzeug.utils import secure_filename
 import json
 
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta  # Ensure timedelta is imported
 from app.scheduler.tasks import run_fetch_for_user_task
-from app.utils.json_utils import save_json_atomic, load_json_file 
+from app.utils.json_utils import save_json_atomic, load_json_file
 from app.utils.helpers import get_potential_mac_from_public_key
 
-from findmy.accessory import FindMyAccessory      # Import FindMyAccessory
-from findmy.keys import KeyPair                 # Import KeyPair
-import base64                                   # Import base64
+from findmy.accessory import FindMyAccessory  # Import FindMyAccessory
+from findmy.keys import KeyPair  # Import KeyPair
+import base64  # Import base64
 
 from flask import (
     Blueprint,
@@ -29,17 +29,27 @@ from flask import (
     abort,
     Response,
     send_file,
-    session,  # Import session for logout
-    url_for,  # Added for generating share URLs
+    session,
+    url_for,
 )
-from flask_login import login_required, current_user  # Import logout_user
+from flask_login import login_required, current_user
 
 # Import Services
 # Import UserDataService to load keys file content (if helper isn't sufficient)
 from app.services.user_data_service import UserDataService
 from app.services.notification_service import NotificationService
+
 # Import AppleDataService ONLY if we need its internal key loading helper
 from app.services.apple_data_service import AppleDataService  # Needs AppleDataService
+
+
+from findmy.reports import (
+    AppleAccount,
+    LoginState,
+    RemoteAnisetteProvider,
+    SmsSecondFactorMethod,
+    TrustedDeviceSecondFactorMethod,
+)
 
 
 # Import necessary utils
@@ -47,7 +57,10 @@ from app.utils.helpers import (
     generate_geofence_id,
     getDefaultColorForId,
     generate_device_icon_svg,
+    get_available_anisette_server,
+    encrypt_password,
 )
+
 
 from app.utils.data_formatting import (
     format_latest_report_for_api,
@@ -67,8 +80,6 @@ def allowed_file(filename, allowed_set=ALLOWED_EXTENSIONS):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_set
 
 
-
-
 @bp.route("/user/current_advertisement_keys", methods=["GET"])
 @login_required
 def get_current_advertisement_keys():
@@ -80,7 +91,8 @@ def get_current_advertisement_keys():
 
     try:
         user_data_dir = uds._get_user_data_dir(user_id)
-        if not user_data_dir: return jsonify({"error": "User data directory not found."}), 500
+        if not user_data_dir:
+            return jsonify({"error": "User data directory not found."}), 500
         devices_config = uds.load_devices_config(user_id)
         now = datetime.now(timezone.utc)
 
@@ -88,102 +100,176 @@ def get_current_advertisement_keys():
         log.debug(f"[API Keys] Processing .plist files for user '{user_id}'...")
         for plist_file in user_data_dir.glob("*.plist"):
             device_id = plist_file.stem
-            if not device_id or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem: continue
-            if device_id in processed_device_ids: continue
-            log.debug(f"[API Keys] -- Found plist: {plist_file.name} (Device ID: {device_id})")
+            if (
+                not device_id
+                or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem
+            ):
+                continue
+            if device_id in processed_device_ids:
+                continue
+            log.debug(
+                f"[API Keys] -- Found plist: {plist_file.name} (Device ID: {device_id})"
+            )
 
             try:
-                with plist_file.open("rb") as f: accessory = FindMyAccessory.from_plist(f)
+                with plist_file.open("rb") as f:
+                    accessory = FindMyAccessory.from_plist(f)
                 # --- Get keys for a slightly wider window for robustness ---
                 # reconstruct all the 7 days interval for .plist devices
-                time_window_past = now - 7*24*4*accessory.interval # Go back one interval
-                time_window_future = now + accessory.interval # Go forward one interval
-                current_keys: set[KeyPair] = accessory.keys_between(time_window_past, time_window_future) # Use keys_between
+                time_window_past = (
+                    now - 7 * 24 * 4 * accessory.interval
+                )  # Go back one interval
+                time_window_future = now + accessory.interval  # Go forward one interval
+                current_keys: set[KeyPair] = accessory.keys_between(
+                    time_window_past, time_window_future
+                )  # Use keys_between
                 # current_keys: set[KeyPair] = accessory.keys_at(now) # Original line
                 # --- ---------------------------------------------------- ---
 
-                device_display_name = devices_config.get(device_id, {}).get("name", device_id)
-                log.debug(f"[API Keys] -- Generated {len(current_keys)} potential keys for '{device_id}' around {now.isoformat()}")
+                device_display_name = devices_config.get(device_id, {}).get(
+                    "name", device_id
+                )
+                log.debug(
+                    f"[API Keys] -- Generated {len(current_keys)} potential keys for '{device_id}' around {now.isoformat()}"
+                )
 
                 for key_pair in current_keys:
                     adv_key_bytes = key_pair.adv_key_bytes
-                    adv_key_b64 = base64.urlsafe_b64encode(adv_key_bytes).decode('ascii').rstrip('=')
+                    adv_key_b64 = (
+                        base64.urlsafe_b64encode(adv_key_bytes)
+                        .decode("ascii")
+                        .rstrip("=")
+                    )
                     potential_mac = get_potential_mac_from_public_key(adv_key_bytes)
 
                     # --- *** ADD DETAILED LOG for plist keys/macs *** ---
-                    log.debug(f"[API Keys] ---- Device: {device_id} | Type: {key_pair.key_type.name} | KeyB64: {adv_key_b64} | MAC: {potential_mac}")
+                    log.debug(
+                        f"[API Keys] ---- Device: {device_id} | Type: {key_pair.key_type.name} | KeyB64: {adv_key_b64} | MAC: {potential_mac}"
+                    )
                     # --- ******************************************** ---
 
-                    expected_keys_and_macs.append({
-                        "device_id": device_id, "name": device_display_name,
-                        "adv_key_b64": adv_key_b64, "key_type": key_pair.key_type.name,
-                        "potential_mac": potential_mac
-                    })
+                    expected_keys_and_macs.append(
+                        {
+                            "device_id": device_id,
+                            "name": device_display_name,
+                            "adv_key_b64": adv_key_b64,
+                            "key_type": key_pair.key_type.name,
+                            "potential_mac": potential_mac,
+                        }
+                    )
                 processed_device_ids.add(device_id)
             except Exception as e:
-                log.warning(f"User '{user_id}': Error processing plist {plist_file.name} for keys: {e}", exc_info=True) # Add exc_info
+                log.warning(
+                    f"User '{user_id}': Error processing plist {plist_file.name} for keys: {e}",
+                    exc_info=True,
+                )  # Add exc_info
 
         # 2. Process .keys files (keep existing logic)
         log.debug(f"[API Keys] Processing .keys files for user '{user_id}'...")
-        def _load_private_keys_from_keys_file(keys_file_path: Path) -> List[str]: # ... same helper ...
-             private_keys = []
-             if not keys_file_path.exists(): return []
-             try:
-                 with keys_file_path.open("r", encoding="utf-8") as f:
-                     for line_num, line in enumerate(f, 1):
-                         line = line.strip();
-                         if not line or line.startswith("#"): continue
-                         parts = line.split(":", 1)
-                         if len(parts) == 2 and parts[0].strip().lower() == "private key":
-                             key_data = parts[1].strip()
-                             try:
-                                 if len(key_data) > 20 and len(key_data) % 4 == 0:
-                                     base64.b64decode(key_data, validate=True)
-                                     private_keys.append(key_data)
-                                 else: log.warning(f"Skipping potential invalid key data in {keys_file_path.name} (L{line_num})")
-                             except Exception: log.warning(f"Skipping invalid base64 data in {keys_file_path.name} (L{line_num})")
-             except Exception as e: log.error(f"Error reading keys file {keys_file_path}: {e}")
-             return private_keys
+
+        def _load_private_keys_from_keys_file(
+            keys_file_path: Path,
+        ) -> List[str]:  # ... same helper ...
+            private_keys = []
+            if not keys_file_path.exists():
+                return []
+            try:
+                with keys_file_path.open("r", encoding="utf-8") as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split(":", 1)
+                        if (
+                            len(parts) == 2
+                            and parts[0].strip().lower() == "private key"
+                        ):
+                            key_data = parts[1].strip()
+                            try:
+                                if len(key_data) > 20 and len(key_data) % 4 == 0:
+                                    base64.b64decode(key_data, validate=True)
+                                    private_keys.append(key_data)
+                                else:
+                                    log.warning(
+                                        f"Skipping potential invalid key data in {keys_file_path.name} (L{line_num})"
+                                    )
+                            except Exception:
+                                log.warning(
+                                    f"Skipping invalid base64 data in {keys_file_path.name} (L{line_num})"
+                                )
+            except Exception as e:
+                log.error(f"Error reading keys file {keys_file_path}: {e}")
+            return private_keys
 
         for keys_file in user_data_dir.glob("*.keys"):
             device_id = keys_file.stem
-            if not device_id or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem: continue
-            if device_id in processed_device_ids: continue
-            log.debug(f"[API Keys] -- Found keys file: {keys_file.name} (Device ID: {device_id})")
+            if (
+                not device_id
+                or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem
+            ):
+                continue
+            if device_id in processed_device_ids:
+                continue
+            log.debug(
+                f"[API Keys] -- Found keys file: {keys_file.name} (Device ID: {device_id})"
+            )
 
             try:
                 private_keys_b64 = _load_private_keys_from_keys_file(keys_file)
-                if not private_keys_b64: continue
-                device_display_name = devices_config.get(device_id, {}).get("name", device_id)
+                if not private_keys_b64:
+                    continue
+                device_display_name = devices_config.get(device_id, {}).get(
+                    "name", device_id
+                )
                 keys_added_count = 0
                 for key_b64_string in private_keys_b64:
                     try:
                         key_pair = KeyPair.from_b64(key_b64_string)
                         adv_key_bytes = key_pair.adv_key_bytes
-                        adv_key_b64_urlsafe = base64.urlsafe_b64encode(adv_key_bytes).decode('ascii').rstrip('=')
+                        adv_key_b64_urlsafe = (
+                            base64.urlsafe_b64encode(adv_key_bytes)
+                            .decode("ascii")
+                            .rstrip("=")
+                        )
                         potential_mac = get_potential_mac_from_public_key(adv_key_bytes)
 
                         # --- *** ADD DETAILED LOG for keys file keys/macs *** ---
-                        log.debug(f"[API Keys] ---- Device: {device_id} | Type: STATIC_KEYS_FILE | KeyB64: {adv_key_b64_urlsafe} | MAC: {potential_mac}")
+                        log.debug(
+                            f"[API Keys] ---- Device: {device_id} | Type: STATIC_KEYS_FILE | KeyB64: {adv_key_b64_urlsafe} | MAC: {potential_mac}"
+                        )
                         # --- ********************************************** ---
 
-                        expected_keys_and_macs.append({
-                            "device_id": device_id, "name": device_display_name,
-                            "adv_key_b64": adv_key_b64_urlsafe, "key_type": "STATIC_KEYS_FILE",
-                            "potential_mac": potential_mac
-                        })
+                        expected_keys_and_macs.append(
+                            {
+                                "device_id": device_id,
+                                "name": device_display_name,
+                                "adv_key_b64": adv_key_b64_urlsafe,
+                                "key_type": "STATIC_KEYS_FILE",
+                                "potential_mac": potential_mac,
+                            }
+                        )
                         keys_added_count += 1
-                    except Exception as kp_err: log.warning(f"User '{user_id}': Failed to process private key from {keys_file.name}: {kp_err}")
-                if keys_added_count > 0: processed_device_ids.add(device_id)
-            except Exception as e: log.warning(f"User '{user_id}': Error processing keys file {keys_file.name} for scanner: {e}")
+                    except Exception as kp_err:
+                        log.warning(
+                            f"User '{user_id}': Failed to process private key from {keys_file.name}: {kp_err}"
+                        )
+                if keys_added_count > 0:
+                    processed_device_ids.add(device_id)
+            except Exception as e:
+                log.warning(
+                    f"User '{user_id}': Error processing keys file {keys_file.name} for scanner: {e}"
+                )
 
-        log.info(f"User '{user_id}': Providing {len(expected_keys_and_macs)} potential keys/MACs.")
+        log.info(
+            f"User '{user_id}': Providing {len(expected_keys_and_macs)} potential keys/MACs."
+        )
         return jsonify({"keys_and_macs": expected_keys_and_macs})
 
     except Exception as e:
         log.exception(f"Error fetching current keys/MACs for user '{user_id}'")
         return jsonify({"error": "Server error fetching expected keys."}), 500
-    
+
+
 @bp.route("/files/upload", methods=["POST"])
 @login_required
 def upload_device_file():
@@ -327,7 +413,12 @@ def upload_device_file():
 def get_devices():
     user_id = current_user.id
     uds = UserDataService(current_app.config)
-    response_data = {"devices": [], "last_updated": None, "fetch_errors": None, "code": "UNKNOWN"}
+    response_data = {
+        "devices": [],
+        "last_updated": None,
+        "fetch_errors": None,
+        "code": "UNKNOWN",
+    }
     status_code = 200
     try:
         current_user_devices_config = uds.load_devices_config(user_id)
@@ -337,19 +428,42 @@ def get_devices():
         active_shared_device_ids = uds.get_active_shared_device_ids_for_user(user_id)
         # --- --------------------------- ---
 
-        if not user_cache or "data" not in user_cache or not isinstance(user_cache.get("data"), dict):
-            error_detail = user_cache.get("error", "Cache is empty or invalid.") if user_cache else "Cache file not found or empty."
-            log.warning(f"User '{user_id}' /api/devices: Cache empty/invalid. Error: {error_detail}")
-            response_data["error"] = "Device data not available yet. Waiting for next background fetch."
+        if (
+            not user_cache
+            or "data" not in user_cache
+            or not isinstance(user_cache.get("data"), dict)
+        ):
+            error_detail = (
+                user_cache.get("error", "Cache is empty or invalid.")
+                if user_cache
+                else "Cache file not found or empty."
+            )
+            log.warning(
+                f"User '{user_id}' /api/devices: Cache empty/invalid. Error: {error_detail}"
+            )
+            response_data["error"] = (
+                "Device data not available yet. Waiting for next background fetch."
+            )
             response_data["code"] = "CACHE_EMPTY"
-            response_data["last_updated"] = user_cache.get("timestamp") if user_cache else None
+            response_data["last_updated"] = (
+                user_cache.get("timestamp") if user_cache else None
+            )
             response_data["fetch_errors"] = error_detail
             for device_id, config_from_file in current_user_devices_config.items():
-                formatted_device = format_latest_report_for_api(user_id, device_id, None, config_from_file, all_user_geofences, current_app.config["LOW_BATTERY_THRESHOLD"])
+                formatted_device = format_latest_report_for_api(
+                    user_id,
+                    device_id,
+                    None,
+                    config_from_file,
+                    all_user_geofences,
+                    current_app.config["LOW_BATTERY_THRESHOLD"],
+                )
                 formatted_device["is_shared"] = device_id in active_shared_device_ids
                 formatted_device["reports"] = []
                 response_data["devices"].append(formatted_device)
-            response_data["devices"].sort(key=lambda d: d.get("name", d.get("id", "")).lower())
+            response_data["devices"].sort(
+                key=lambda d: d.get("name", d.get("id", "")).lower()
+            )
             response_data["code"] = "CACHE_EMPTY_CONFIG_RETURNED"
             return jsonify(response_data), 200
 
@@ -363,15 +477,31 @@ def get_devices():
             processed_ids_from_cache.add(device_id)
             fresh_config = current_user_devices_config.get(device_id)
             all_reports_for_device = device_info_from_cache.get("reports", [])
-            latest_report = all_reports_for_device[0] if all_reports_for_device else None
-            formatted_device = format_latest_report_for_api(user_id, device_id, latest_report, fresh_config, all_user_geofences, current_app.config["LOW_BATTERY_THRESHOLD"])
+            latest_report = (
+                all_reports_for_device[0] if all_reports_for_device else None
+            )
+            formatted_device = format_latest_report_for_api(
+                user_id,
+                device_id,
+                latest_report,
+                fresh_config,
+                all_user_geofences,
+                current_app.config["LOW_BATTERY_THRESHOLD"],
+            )
             formatted_device["is_shared"] = device_id in active_shared_device_ids
             formatted_device["reports"] = all_reports_for_device
             devices_list.append(formatted_device)
 
         for device_id, config_from_file in current_user_devices_config.items():
             if device_id not in processed_ids_from_cache:
-                formatted_device = format_latest_report_for_api(user_id, device_id, None, config_from_file, all_user_geofences, current_app.config["LOW_BATTERY_THRESHOLD"])
+                formatted_device = format_latest_report_for_api(
+                    user_id,
+                    device_id,
+                    None,
+                    config_from_file,
+                    all_user_geofences,
+                    current_app.config["LOW_BATTERY_THRESHOLD"],
+                )
                 formatted_device["is_shared"] = device_id in active_shared_device_ids
                 formatted_device["reports"] = []
                 devices_list.append(formatted_device)
@@ -385,7 +515,10 @@ def get_devices():
 
     except Exception as e:
         log.exception(f"Error in GET /api/devices for '{user_id}'")
-        return jsonify({"error": "Server Error", "message": "Error fetching devices."}), 500
+        return (
+            jsonify({"error": "Server Error", "message": "Error fetching devices."}),
+            500,
+        )
 
 
 @bp.route("/devices/<string:device_id>", methods=["PUT"])
@@ -604,11 +737,17 @@ def get_all_geofences():
     uds = UserDataService(current_app.config)
     try:
         all_user_geofences = uds.load_geofences_config(user_id)
-        geofences_list = sorted(list(all_user_geofences.values()), key=lambda g: g.get("name", "").lower())
-        return jsonify(geofences_list or []) # Return [] if no geofences
+        geofences_list = sorted(
+            list(all_user_geofences.values()), key=lambda g: g.get("name", "").lower()
+        )
+        return jsonify(geofences_list or [])  # Return [] if no geofences
     except Exception as e:
         log.exception(f"Error loading geofences for '{user_id}'")
-        return jsonify({"error": "Server Error", "message": "Failed to load geofences."}), 500
+        return (
+            jsonify({"error": "Server Error", "message": "Failed to load geofences."}),
+            500,
+        )
+
 
 @bp.route("/geofences", methods=["POST"])
 @login_required
@@ -1140,10 +1279,18 @@ def get_notification_history():
     uds = UserDataService(current_app.config)
     try:
         history = uds.load_notification_history(user_id)
-        return jsonify(history or []) # Ensure list is returned
+        return jsonify(history or [])  # Ensure list is returned
     except Exception as e:
         log.exception(f"Error getting notification history for user '{user_id}'")
-        return jsonify({"error": "Server Error", "message": "Failed to load notification history."}), 500
+        return (
+            jsonify(
+                {
+                    "error": "Server Error",
+                    "message": "Failed to load notification history.",
+                }
+            ),
+            500,
+        )
 
 
 @bp.route("/notifications/history/<string:notification_id>/read", methods=["PUT"])
@@ -1290,10 +1437,15 @@ def get_user_preferences():
     uds = UserDataService(current_app.config)
     try:
         prefs = uds.load_user_preferences(user_id)
-        return jsonify(prefs) # Should already return {} if not found
+        return jsonify(prefs)  # Should already return {} if not found
     except Exception as e:
         log.exception(f"Error getting preferences for user '{user_id}'")
-        return jsonify({"error": "Server Error", "message": "Failed to load user preferences."}), 500
+        return (
+            jsonify(
+                {"error": "Server Error", "message": "Failed to load user preferences."}
+            ),
+            500,
+        )
 
 
 @bp.route("/user/preferences", methods=["PUT"])
@@ -1342,7 +1494,6 @@ def update_user_preferences():
 
 
 # --- Force Refresh API Endpoint ---
-# --- NEW Force Refresh API Endpoint ---
 @bp.route("/user/refresh", methods=["POST"])
 @login_required
 def force_user_refresh():
@@ -1351,23 +1502,29 @@ def force_user_refresh():
     uds = UserDataService(current_app.config)
 
     try:
-        apple_id, apple_password = uds.load_apple_credentials(user_id)
+        # --- CORRECTED METHOD CALL ---
+        # Load ID, decrypted password, and state (ignore state for this function)
+        apple_id, apple_password, _ = uds.load_apple_credentials_and_state(user_id)
+        # --- END CORRECTION ---
+
+        # Check if decrypted password was successfully loaded
         if not apple_id or not apple_password:
-            log.warning(f"User '{user_id}': Cannot force refresh, credentials missing.")
+            log.warning(f"User '{user_id}': Cannot force refresh, credentials missing or decryption failed.")
             return (
                 jsonify(
                     {
                         "error": "Credentials Required",
-                        "message": "Apple credentials are not set.",
+                        "message": "Apple credentials are not set or could not be decrypted.",
                     }
                 ),
-                403,
+                403, # Forbidden is appropriate here
             )
 
+        # Proceed with spawning the thread using the decrypted password
         log.info(f"Spawning immediate fetch task for user '{user_id}' via API request.")
         immediate_fetch_thread = threading.Thread(
             target=run_fetch_for_user_task,
-            args=(user_id, apple_id, apple_password, current_app.config),
+            args=(user_id, apple_id, apple_password, current_app.config), # Pass decrypted password
             name=f"ApiForceFetch-{user_id}",
             daemon=True,
         )
@@ -1376,12 +1533,14 @@ def force_user_refresh():
         return jsonify({"message": "Background refresh initiated."}), 202  # Accepted
 
     except Exception as e:
+        # Log the full exception traceback for better debugging
         log.exception(f"Error initiating force refresh for user '{user_id}'")
         return (
             jsonify(
                 {
                     "error": "Server Error",
-                    "message": "Failed to initiate background refresh.",
+                    # Provide a slightly more informative generic message
+                    "message": f"Failed to initiate background refresh: {e}",
                 }
             ),
             500,
@@ -1400,19 +1559,37 @@ def delete_account():
         if delete_successful:
             log.info(f"Account data deletion successful for '{user_id}'.")
             # --- REMOVED BACKEND LOGOUT ---
-            return jsonify({
-                "message": f"Account '{user_id}' deletion process initiated successfully.",
-                "action": "redirect_to_login" # Hint for frontend
-            }), 200
+            return (
+                jsonify(
+                    {
+                        "message": f"Account '{user_id}' deletion process initiated successfully.",
+                        "action": "redirect_to_login",  # Hint for frontend
+                    }
+                ),
+                200,
+            )
         else:
             log.error(f"Account deletion failed for '{user_id}' during data removal.")
-            return jsonify({
-                "error": "Account deletion failed.",
-                "message": "Failed to remove user data. Check server logs."
-            }), 500
+            return (
+                jsonify(
+                    {
+                        "error": "Account deletion failed.",
+                        "message": "Failed to remove user data. Check server logs.",
+                    }
+                ),
+                500,
+            )
     except Exception as e:
-        log.exception(f"Unexpected error during account deletion API call for '{user_id}'")
-        return jsonify({"error": "Server Error", "message": "An unexpected error occurred."}), 500
+        log.exception(
+            f"Unexpected error during account deletion API call for '{user_id}'"
+        )
+        return (
+            jsonify(
+                {"error": "Server Error", "message": "An unexpected error occurred."}
+            ),
+            500,
+        )
+
 
 # --- Share Management API Endpoints ---
 @bp.route("/devices/<string:device_id>/share", methods=["POST"])
@@ -1427,31 +1604,52 @@ def create_device_share(device_id):
     duration_str = data.get("duration", "24h")
     note = data.get("note", "")[:100]
     duration_hours = None
-    if duration_str == "indefinite": duration_hours = 0
+    if duration_str == "indefinite":
+        duration_hours = 0
     elif duration_str.endswith("h"):
-        try: duration_hours = int(duration_str[:-1])
-        except ValueError: abort(400, description="Invalid duration number.")
+        try:
+            duration_hours = int(duration_str[:-1])
+        except ValueError:
+            abort(400, description="Invalid duration number.")
     elif duration_str.endswith("d"):
-        try: duration_hours = int(duration_str[:-1]) * 24
-        except ValueError: abort(400, description="Invalid duration number.")
-    else: abort(400, description="Invalid duration unit ('h', 'd', 'indefinite').")
+        try:
+            duration_hours = int(duration_str[:-1]) * 24
+        except ValueError:
+            abort(400, description="Invalid duration number.")
+    else:
+        abort(400, description="Invalid duration unit ('h', 'd', 'indefinite').")
 
-    if (duration_hours is not None and (duration_hours < 0 or duration_hours > 30 * 24) and duration_hours != 0):
+    if (
+        duration_hours is not None
+        and (duration_hours < 0 or duration_hours > 30 * 24)
+        and duration_hours != 0
+    ):
         abort(400, description="Duration out of range (1h-30d or indefinite).")
 
-    log.info(f"User '{user_id}' request share for '{device_id}' (Duration: {duration_str})")
+    log.info(
+        f"User '{user_id}' request share for '{device_id}' (Duration: {duration_str})"
+    )
     try:
         new_share = uds.add_share(user_id, device_id, duration_hours, note)
         if new_share:
-            share_url = url_for('public.view_shared_device', share_id=new_share["share_id"], _external=True)
+            share_url = url_for(
+                "public.view_shared_device",
+                share_id=new_share["share_id"],
+                _external=True,
+            )
             return jsonify({**new_share, "share_url": share_url}), 201
         else:
-             # Assuming add_share returns None on internal failure
-             return jsonify({"error": "Server Error", "message": "Failed to create share link."}), 500
+            # Assuming add_share returns None on internal failure
+            return (
+                jsonify(
+                    {"error": "Server Error", "message": "Failed to create share link."}
+                ),
+                500,
+            )
     except Exception as e:
         log.exception(f"Error creating share for {device_id}")
         return jsonify({"error": "Server Error", "message": f"Server error: {e}"}), 500
-    
+
 
 @bp.route("/shares", methods=["GET"])
 @login_required
@@ -1459,17 +1657,32 @@ def get_my_shares():
     user_id = current_user.id
     uds = UserDataService(current_app.config)
     try:
-        user_shares = uds.get_user_shares(user_id) # Note: Renamed variable from active_shares
+        user_shares = uds.get_user_shares(
+            user_id
+        )  # Note: Renamed variable from active_shares
         devices_config = uds.load_devices_config(user_id)
         for share in user_shares:
             device_conf = devices_config.get(share.get("device_id"))
-            share["device_name"] = device_conf.get("name", share.get("device_id", "Unknown")) if device_conf else "Unknown Device"
-            try: share["share_url"] = url_for('public.view_shared_device', share_id=share["share_id"], _external=True)
-            except Exception: share["share_url"] = None
-        return jsonify(user_shares or []) # Ensure JSON list return
+            share["device_name"] = (
+                device_conf.get("name", share.get("device_id", "Unknown"))
+                if device_conf
+                else "Unknown Device"
+            )
+            try:
+                share["share_url"] = url_for(
+                    "public.view_shared_device",
+                    share_id=share["share_id"],
+                    _external=True,
+                )
+            except Exception:
+                share["share_url"] = None
+        return jsonify(user_shares or [])  # Ensure JSON list return
     except Exception as e:
         log.exception(f"Error fetching shares for user '{user_id}'")
-        return jsonify({"error": "Server Error", "message": "Failed to retrieve shares."}), 500
+        return (
+            jsonify({"error": "Server Error", "message": "Failed to retrieve shares."}),
+            500,
+        )
 
 
 @bp.route("/shares/<string:share_id>/status", methods=["PUT"])
@@ -1658,3 +1871,207 @@ def delete_my_share_permanently(share_id):
             ),
             500,
         )
+    
+# --- NEW 2FA API Endpoints ---
+
+def _restore_pending_2fa_account() -> Optional[AppleAccount]:
+    """Helper to restore AppleAccount from session during 2FA."""
+    account_data = session.get('pending_2fa_account_data')
+    if not account_data or not isinstance(account_data, dict):
+        log.error(f"User {current_user.id}: No valid pending 2FA account data found in session.")
+        return None
+
+    anisette_server_url = get_available_anisette_server(current_app.config.get("ANISETTE_SERVERS", []))
+    if not anisette_server_url:
+         log.error(f"User {current_user.id}: No Anisette server for restoring 2FA account.")
+         return None
+
+    try:
+        provider = RemoteAnisetteProvider(anisette_server_url)
+        account = AppleAccount(provider)
+        account.restore(account_data)
+        # Double-check state after restore
+        if account.login_state != LoginState.REQUIRE_2FA:
+             log.warning(f"User {current_user.id}: Restored account is not in REQUIRE_2FA state ({account.login_state}). Invalidating flow.")
+             session.pop('pending_2fa_account_data', None)
+             session.pop('pending_2fa_creds', None)
+             return None
+        log.debug(f"User {current_user.id}: Successfully restored pending 2FA account.")
+        return account
+    except Exception as e:
+        log.exception(f"User {current_user.id}: Error restoring pending 2FA account from session.")
+        return None
+
+
+@bp.route("/auth/2fa/methods", methods=["GET"])
+@login_required
+def get_2fa_methods():
+    user_id = current_user.id
+    log.info(f"API GET /auth/2fa/methods requested by user '{user_id}'")
+
+    account = _restore_pending_2fa_account()
+    if not account:
+        # Clear potentially stale session data if restore failed
+        session.pop('pending_2fa_account_data', None)
+        session.pop('pending_2fa_creds', None)
+        abort(409, description="No active 2FA process found or account state invalid. Please try logging in again.")
+
+    try:
+        methods_raw = account.get_2fa_methods()
+        methods_serializable = []
+        for index, method in enumerate(methods_raw):
+            method_data = {"index": index} # Include index for selection
+            if isinstance(method, SmsSecondFactorMethod):
+                method_data["type"] = "sms"
+                method_data["detail"] = method.phone_number # Masked number
+                method_data["id"] = method.phone_number_id # Need the ID for requests
+            elif isinstance(method, TrustedDeviceSecondFactorMethod):
+                method_data["type"] = "trusted_device"
+                method_data["detail"] = "Trusted Device"
+                method_data["id"] = None # No specific ID needed for trusted device
+            else:
+                log.warning(f"User '{user_id}': Unknown 2FA method type encountered: {type(method)}")
+                continue # Skip unknown types
+            methods_serializable.append(method_data)
+
+        log.info(f"User '{user_id}': Returning {len(methods_serializable)} 2FA methods.")
+        return jsonify({"methods": methods_serializable})
+
+    except Exception as e:
+        log.exception(f"User '{user_id}': Error retrieving 2FA methods.")
+        abort(500, description=f"Server error getting 2FA methods: {e}")
+
+
+@bp.route("/auth/2fa/request_code", methods=["POST"])
+@login_required
+def request_2fa_code():
+    user_id = current_user.id
+    data = request.get_json()
+    if not data or "method_index" not in data:
+        abort(400, description="Missing 'method_index' in request.")
+
+    method_index = data.get("method_index")
+    log.info(f"API POST /auth/2fa/request_code by user '{user_id}', method index: {method_index}")
+
+    account = _restore_pending_2fa_account()
+    if not account:
+        abort(409, description="No active 2FA process found. Please try logging in again.")
+
+    try:
+        methods = account.get_2fa_methods()
+        if not isinstance(method_index, int) or not (0 <= method_index < len(methods)):
+            abort(400, description="Invalid method index.")
+
+        selected_method = methods[method_index]
+        log.info(f"User '{user_id}': Requesting 2FA code using method type: {type(selected_method).__name__}")
+        selected_method.request() # Request the code (e.g., send SMS)
+
+        # No need to save account state here, just requesting code
+        log.info(f"User '{user_id}': 2FA code request sent successfully for method index {method_index}.")
+        return jsonify({"message": "2FA code requested successfully."}), 200
+
+    except Exception as e:
+        log.exception(f"User '{user_id}': Error requesting 2FA code for index {method_index}.")
+        # Check specific FindMy.py errors if possible
+        abort(500, description=f"Server error requesting 2FA code: {e}")
+
+
+@bp.route("/auth/2fa/submit_code", methods=["POST"])
+@login_required
+def submit_2fa_code():
+    user_id = current_user.id
+    data = request.get_json()
+    if not data or "method_index" not in data or "code" not in data:
+        abort(400, description="Missing 'method_index' or 'code' in request.")
+
+    method_index = data.get("method_index")
+    code = str(data.get("code","")).strip()
+    log.info(f"API POST /auth/2fa/submit_code by user '{user_id}', method index: {method_index}")
+
+    if len(code) != 6 or not code.isdigit():
+         abort(400, description="Invalid code format. Must be 6 digits.")
+
+    account = _restore_pending_2fa_account()
+    pending_creds = session.get('pending_2fa_creds')
+
+    if not account or not pending_creds:
+        abort(409, description="No active 2FA process or credentials found. Please try logging in again.")
+
+    try:
+        methods = account.get_2fa_methods()
+        if not isinstance(method_index, int) or not (0 <= method_index < len(methods)):
+            abort(400, description="Invalid method index.")
+
+        selected_method = methods[method_index]
+        log.info(f"User '{user_id}': Submitting 2FA code for method type: {type(selected_method).__name__}")
+
+        # --- Submit the code using FindMy.py ---
+        # This internally calls account.sms_2fa_submit or account.td_2fa_submit
+        # which then calls _gsa_authenticate again and _login_mobileme if successful
+        final_state = selected_method.submit(code)
+        log.info(f"User '{user_id}': State after 2FA code submission: {final_state}")
+
+        if final_state == LoginState.LOGGED_IN:
+            # Success!
+            log.info(f"User '{user_id}': 2FA verification successful!")
+            uds = UserDataService(current_app.config)
+
+            # Get final state and original credentials
+            final_account_state = account.export()
+            apple_id = pending_creds.get('apple_id')
+            # Password needs to be decrypted from session THEN re-encrypted for storage
+            # OR we stored the already-encrypted one. Let's assume we stored encrypted.
+            encrypted_password = pending_creds.get('apple_password_encrypted')
+            # For saving, we need the *unencrypted* password. Let's decrypt from session storage.
+            # NOTE: This assumes 'pending_2fa_creds' stored the *unencrypted* password temporarily.
+            # If you stored the encrypted one, you'll need to decrypt it here before saving again.
+            # Let's MODIFY the plan slightly: Store UNENCRYPTED password in session during 2FA.
+            unencrypted_password = pending_creds.get('apple_password_unencrypted')
+
+            if not apple_id or not unencrypted_password:
+                 log.error(f"User '{user_id}': Missing credentials in session after successful 2FA. Cannot save state.")
+                 abort(500, description="Internal error: Missing credentials during 2FA completion.")
+
+            # Save permanently using the new service method
+            uds.save_apple_credentials_and_state(user_id, apple_id, unencrypted_password, final_account_state)
+
+            # Clear temporary session data
+            session.pop('pending_2fa_account_data', None)
+            session.pop('pending_2fa_creds', None)
+            log.info(f"User '{user_id}': Cleared pending 2FA session data.")
+
+            # Trigger background fetch
+            log.info(f"User '{user_id}': Triggering immediate fetch after successful 2FA.")
+            try:
+                immediate_fetch_thread = threading.Thread(
+                    target=run_fetch_for_user_task,
+                    args=(user_id, apple_id, unencrypted_password, current_app.config), # Use unencrypted pw
+                    name=f"ImmediateFetch2FA-{user_id}",
+                    daemon=True,
+                )
+                immediate_fetch_thread.start()
+            except Exception as fetch_trigger_err:
+                log.error(f"User '{user_id}': Failed to start immediate fetch after 2FA: {fetch_trigger_err}")
+                # Don't abort, login was successful, just warn user maybe
+
+            return jsonify({"message": "2FA verified successfully. Credentials saved.", "status": "success"}), 200
+
+        elif final_state == LoginState.REQUIRE_2FA:
+            # Incorrect code, user needs to retry
+            log.warning(f"User '{user_id}': Invalid 2FA code submitted.")
+            # Do NOT clear session data
+            abort(401, description="Invalid 2FA code.") # 401 Unauthorized suggests bad code
+        else:
+            # Unexpected state after submission
+            log.error(f"User '{user_id}': Unexpected state {final_state} after submitting 2FA code.")
+            # Clear session data in case of unexpected error state
+            session.pop('pending_2fa_account_data', None)
+            session.pop('pending_2fa_creds', None)
+            abort(500, description="Verification failed due to an unexpected server state.")
+
+    except Exception as e:
+        log.exception(f"User '{user_id}': Error submitting 2FA code for index {method_index}.")
+        # Clear session data on general error
+        session.pop('pending_2fa_account_data', None)
+        session.pop('pending_2fa_creds', None)
+        abort(500, description=f"Server error submitting 2FA code: {e}")

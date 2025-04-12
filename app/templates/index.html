@@ -88,31 +88,38 @@
     <!-- Drawer Overlay & Menu -->
     <div class="drawer-overlay" id="drawer-overlay"></div>
     <aside class="drawer" id="drawer">
+        <!-- TItle -->
         <div class="drawer-header"> <span class="material-icons menu-icon" id="drawer-close-button" tabindex="0"
                 role="button" aria-label="Close navigation drawer">arrow_back</span>
             <h2 class="drawer-title">Find My Location</h2>
         </div>
+        <!-- Contents -->
         <div class="drawer-content">
-            <div class="drawer-item" tabindex="0" data-page="index">
+            <!-- Map -->
+            <!-- <div class="drawer-item" tabindex="0" data-page="index">
                 <span class="material-icons drawer-item-icon">map</span>
                 <span class="drawer-item-text">Map</span>
-            </div>
-            <div class="drawer-item" tabindex="0" data-page="shared">
+            </div> -->
+            <!-- Devices -->
+            <!-- <div class="drawer-item" tabindex="0" data-page="shared">
                 <span class="material-icons drawer-item-icon">devices</span>
                 <span class="drawer-item-text">My Devices</span>
-            </div>
-            <div class="drawer-item" tabindex="0" data-page="geofences">
+            </div> -->
+            <!-- Geofences -->
+            <!-- <div class="drawer-item" tabindex="0" data-page="geofences">
                 <span class="material-icons drawer-item-icon">location_searching</span>
                 <span class="drawer-item-text">Geofences</span>
-            </div>
+            </div> -->
             <!-- Removed Places and History from Drawer -->
-            <div class="drawer-divider"></div>
+            <!-- <div class="drawer-divider"></div> -->
+            <!-- Settings -->
             <a href="#" data-page="settings" style="text-decoration: none; color: inherit;">
                 <div class="drawer-item" tabindex="0">
                     <span class="material-icons drawer-item-icon">settings</span>
                     <span class="drawer-item-text">Settings</span>
                 </div>
             </a>
+            <!-- Apple Credentials -->
             <a href="{{ url_for('main.manage_apple_creds_route') }}" data-target="manage_apple_creds"
                 style="text-decoration: none; color: inherit;">
                 <div class="drawer-item" tabindex="0">
@@ -120,12 +127,14 @@
                     <span class="drawer-item-text">Apple Credentials</span>
                 </div>
             </a>
+            <!-- Help & Feedback -->
             <div class="drawer-item" tabindex="0" data-dialog="help-dialog">
                 <span class="material-icons drawer-item-icon">help_outline</span>
                 <span class="drawer-item-text">Help & Feedback</span>
             </div>
             <!-- Removed Notification History from Drawer, moved to Bottom Nav -->
             <div class="drawer-divider"></div>
+            <!-- Logout -->
             <a href="{{ url_for('auth.logout_route') }}" style="text-decoration: none; color: inherit;">
                 <div class="drawer-item" tabindex="0">
                     <span class="material-icons drawer-item-icon">logout</span>
@@ -641,21 +650,21 @@
                     fetching devices. </p>
             </div>
             <!-- Add Shares List to Devices Page -->
-            <div class="settings-section" id="devices-active-shares-section" style="margin-top: 24px;">
+            <div class="settings-section" id="devices-page-active-shares-section" style="margin-top: 24px;">
                 <h4 class="settings-section-title">Active Shares</h4>
-                <div id="devices-active-shares-list-container">
-                    <div class="loading-indicator" id="devices-active-shares-loading"
+                <div id="devices-page-active-shares-list-container"> <!-- Container for loading/no-shares message -->
+                    <div class="loading-indicator" id="devices-page-active-shares-loading"
                         style="padding: 16px; text-align: center; display: none;">
                         <div class="spinner" style="width: 20px; height: 20px; margin: 10px auto;"></div> Loading
                         shares...
                     </div>
-                    <div id="devices-active-shares-list" style="display: block;">
+                    <div id="devices-page-active-shares-list" style="display: block;">
                         <!-- Shares will be rendered here by JS -->
                     </div>
-                    <p class="no-devices-message" id="devices-no-active-shares-message"
+                    <p class="no-devices-message" id="devices-page-no-active-shares-message"
                         style="display: none; padding: 16px; text-align: center; color: var(--m3-sys-color-outline-variant);">
                         No active shares found. Use the menu (<span class="material-icons"
-                            style="font-size: 1em; vertical-align: middle;">more_vert</span>) to share a device.
+                            style="font-size: 1em; vertical-align: middle;">more_vert</span>) on a device to share it.
                     </p>
                 </div>
             </div>
@@ -967,31 +976,37 @@
     </main>
     <!-- Bottom Navigation -->
     <nav class="bottom-nav">
-        <a href="#" class="nav-item nav-link active" data-page="index">
-            <span class="material-icons nav-icon">map</span>
-            <span class="nav-label">Map</span>
-        </a>
-        <a href="#" class="nav-item nav-link" data-page="shared">
-            <span class="material-icons nav-icon">devices</span>
-            <span class="nav-label">Devices</span>
-        </a>
-        <!-- Scanner Nav Item -->
+        <!-- Scanner -->
         <a href="#" class="nav-item nav-link" data-page="scanner">
             <span class="material-icons nav-icon">radar</span>
             <span class="nav-label">Scanner</span>
         </a>
-        <a href="#" class="nav-item nav-link" data-page="geofences">
-            <span class="material-icons nav-icon">location_searching</span> <!-- Changed icon -->
-            <span class="nav-label">Geofences</span>
-        </a>
+        <!-- Alerts -->
         <a href="#" class="nav-item nav-link" data-page="notifications-history"> <!-- Added -->
             <span class="material-icons nav-icon">notifications</span>
             <span class="nav-label">Alerts</span>
         </a>
-        <a href="#" class="nav-item nav-link" data-page="settings">
+        <!-- Map -->
+        <a href="#" class="nav-item nav-link active" data-page="index">
+            <span class="material-icons nav-icon">map</span>
+            <span class="nav-label">Map</span>
+        </a>
+        <!-- Devices -->
+        <a href="#" class="nav-item nav-link" data-page="shared">
+            <span class="material-icons nav-icon">devices</span>
+            <span class="nav-label">Devices</span>
+        </a>
+        <!-- Geofences -->
+        <a href="#" class="nav-item nav-link" data-page="geofences">
+            <span class="material-icons nav-icon">location_searching</span> <!-- Changed icon -->
+            <span class="nav-label">Geofences</span>
+        </a>
+        
+        <!-- Settings -->
+        <!-- <a href="#" class="nav-item nav-link" data-page="settings">
             <span class="material-icons nav-icon">settings</span>
             <span class="nav-label">Settings</span>
-        </a>
+        </a> -->
     </nav>
 
     <!-- FAB Button (Keep hidden, re-enable if places page is used) -->

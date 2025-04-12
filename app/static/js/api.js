@@ -2,96 +2,82 @@
 
 window.AppApi = {
     _fetch: async function (url, options = {}) {
+        // --- Helper to get CSRF token (ensure this exists or add it) ---
+        function getCsrfToken() {
+            return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        }
+        // --- --------------------------------------------------------- ---
+
         console.log(`API Call: ${options.method || 'GET'} ${url}`, options.body ? (typeof options.body === 'string' ? 'JSON body' : 'FormData/Other body') : '');
         let response;
         try {
             const defaultHeaders = {
-                'Accept': 'application/json', // Explicitly prefer JSON
+                'Accept': 'application/json',
                 ...(options.headers || {}),
             };
-            if (options.body && typeof options.body === 'string') {
-                defaultHeaders['Content-Type'] = 'application/json';
-            }
+
+
+
+            // Determine method (default to GET)
             const method = options.method?.toUpperCase() || 'GET';
-            if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
-                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-                if (csrfToken) { defaultHeaders['X-CSRFToken'] = csrfToken; }
-                else { console.warn("[API] CSRF meta tag not found."); }
+
+            // Automatically add CSRF token header for relevant methods
+            if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+                const csrfToken = getCsrfToken();
+                if (csrfToken) {
+                    defaultHeaders['X-CSRFToken'] = csrfToken;
+                    console.debug(`[API Fetch] Added X-CSRFToken header for ${method} ${url}`);
+                } else {
+                    // Log a warning but proceed? Or throw an error?
+                    // Proceeding might be okay if some POSTs are exempt, but risky.
+                    // Let's throw an error to enforce protection.
+                    console.error("[API Fetch] CSRF meta tag not found. Cannot send protected request.");
+                    throw new Error("CSRF token is missing, cannot perform action.");
+                }
             }
 
-            response = await fetch(url, { ...options, headers: defaultHeaders });
+            // Set Content-Type for JSON bodies
+            if (options.body && typeof options.body === 'string' && !defaultHeaders['Content-Type']) {
+                defaultHeaders['Content-Type'] = 'application/json';
+            }
+
+            response = await fetch(url, { ...options, method: method, headers: defaultHeaders }); // Ensure method is passed
 
             const contentType = response.headers.get("content-type");
             const isJson = contentType && contentType.includes("application/json");
 
             if (!response.ok) {
-                // Handle non-OK responses (errors)
-                let errorData;
-                let errorMessage = `HTTP error ${response.status}`;
-                if (isJson) {
-                    try { errorData = await response.json(); errorMessage = errorData.error || errorData.description || errorData.message || errorMessage; }
-                    catch (e) { errorMessage = `${errorMessage} (Failed to parse JSON error response)`; errorData = { message: errorMessage }; }
-                } else {
-                    try { const text = await response.text(); errorMessage = `${errorMessage}: ${text.substring(0, 150)}...`; }
-                    catch (e) { /* ignore inability to get text */ }
-                    errorData = { message: errorMessage };
-                }
-                const error = new Error(errorMessage);
-                error.status = response.status;
-                error.code = errorData?.code || `HTTP_${response.status}`;
-                error.data = errorData;
+                let errorData; let errorMessage = `HTTP error ${response.status}`;
+                if (isJson) { try { errorData = await response.json(); errorMessage = errorData.error || errorData.description || errorData.message || errorMessage; } catch (e) { errorMessage = `${errorMessage} (Failed to parse JSON error response)`; errorData = { message: errorMessage }; } }
+                else { try { const text = await response.text(); errorMessage = `${errorMessage}: ${text.substring(0, 150)}...`; } catch (e) { /* ignore */ } errorData = { message: errorMessage }; }
+                const error = new Error(errorMessage); error.status = response.status; error.code = errorData?.code || `HTTP_${response.status}`; error.data = errorData;
                 console.error(`API Error ${error.status} (${error.code || 'N/A'}) on ${url}: ${error.message}`, error.data);
-                throw error;
+
+                // --- Specific CSRF Error Handling (keep this) ---
+                if (error.status === 400 && (error.code === 'CSRF Error' || (error.message && error.message.includes('CSRF')) || (error.data?.message && error.data.message.includes('CSRF token is missing')))) {
+                    console.warn("[API Fetch CSRF] Detected CSRF error. Showing dialog.");
+                    if (window.AppUI && typeof window.AppUI.showErrorDialog === 'function') {
+                        AppUI.showErrorDialog("Security Token Error", "Your security token has expired or is invalid. Please <strong>reload the page</strong> and try the action again.");
+                    } else { alert("Security Token Error: Your session may have expired. Please reload the page and try again."); }
+                    return Promise.reject({ code: 'CSRF_ERROR_HANDLED', message: 'CSRF token error, user notified.' });
+                }
+                // --- End Specific CSRF ---
+                throw error; // Throw other errors
             }
 
-            // Handle OK responses
-            if (isJson) {
-                const data = await response.json();
-                console.log(`API Response OK (JSON) from ${url}:`, data);
-                return data;
-            } else {
-                // --- STRICTER CHECK: Treat non-JSON 200 OK as an error ---
-                const errorText = `API Error: Expected JSON response but received Content-Type: ${contentType || 'N/A'} for ${url}`;
-                console.error(errorText);
-                const error = new Error("Invalid response format from server.");
-                error.status = response.status; // Still 200, but bad format
-                error.code = 'INVALID_CONTENT_TYPE';
-                error.data = { message: errorText };
-                throw error;
-                // --- ---------------------------------------------------- ---
-            }
+            if (isJson) { const data = await response.json(); console.log(`API Response OK (JSON) from ${url}:`, data); return data; }
+            else { /* Strict check: non-JSON OK response is an error */ const errorText = `API Error: Expected JSON response but received Content-Type: ${contentType || 'N/A'} for ${url}`; console.error(errorText); const error = new Error("Invalid response format from server."); error.status = response.status; error.code = 'INVALID_CONTENT_TYPE'; error.data = { message: errorText }; throw error; }
 
         } catch (error) {
-            // --- START: Specific CSRF Error Handling ---
-            if (error.status === 400 && (error.code === 'CSRF Error' || (error.message && error.message.includes('CSRF')))) {
-                console.warn("[API Fetch CSRF] Detected CSRF error. Showing dialog.");
-                // Use AppUI to show a specific dialog
-                if (window.AppUI && typeof window.AppUI.showErrorDialog === 'function') {
-                    AppUI.showErrorDialog(
-                        "Security Token Error",
-                        "Your session security token may have expired or is invalid. Please <strong>reload the page</strong> and try the action again."
-                    );
-                } else {
-                    // Fallback alert if AppUI isn't ready
-                    alert("Security Token Error: Your session may have expired. Please reload the page and try again.");
-                }
-                // IMPORTANT: Do not re-throw the error here, as we've handled it with the dialog.
-                // We might want to return a specific object or null to indicate failure to the caller.
-                // Let's return a rejected Promise with a specific code so callers can optionally check.
-                return Promise.reject({ code: 'CSRF_ERROR_HANDLED', message: 'CSRF token error, user notified.' });
+            // Handle Network Errors / Other Errors (keep existing logic, CSRF handled above)
+            if (error.code === 'CSRF_ERROR_HANDLED') {
+                // Don't re-throw if CSRF was already handled by dialog
+                return Promise.reject(error); // Still reject the promise so calling code knows it failed
             }
-            // --- END: Specific CSRF Error Handling ---
-
-            // Handle Network Errors / Other Errors
-            if (!error.status) { // Network error or CORS issue maybe
-                console.error(`API Network Error on ${url}:`, error);
-                error.message = `Network error or server unreachable: ${error.message}`;
-                error.code = 'NETWORK_ERROR';
-            }
-            // Re-throw other errors
-            throw error;
+            if (!error.status) { error.message = `Network error or server unreachable: ${error.message}`; error.code = 'NETWORK_ERROR'; }
+            throw error; // Re-throw other errors
         }
-    },
+    }, // End _fetch
 
     triggerUserRefresh: async function () { // NEW FUNCTION
         return await this._fetch('/api/user/refresh', {

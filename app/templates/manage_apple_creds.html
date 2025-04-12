@@ -4,8 +4,9 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}"> {# Flask-WTF CSRF Token #}
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title or 'Manage Apple Credentials' }}</title> {# Use title variable #}
+    <title>{{ title or 'Manage Apple Credentials' }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
     <style>
@@ -86,13 +87,12 @@
         }
 
         .form-field-error {
-            color: var(--error-color);
+            color: var(--m3-sys-color-error);
             font-size: var(--body-small-size);
             margin-top: 4px;
         }
 
         .flash-messages .login-failed-2fa {
-            /* Add specific class */
             color: var(--m3-sys-color-error);
             font-weight: 500;
             border: 1px solid var(--m3-sys-color-error);
@@ -101,11 +101,59 @@
             background-color: color-mix(in srgb, var(--m3-sys-color-error-container) 50%, transparent);
             margin-top: 16px;
         }
+        
+        /* --- NEW 2FA Styles --- */
+        #two-factor-section {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px dashed var(--m3-sys-color-outline-variant);
+            /* Initially hidden */
+            display: none;
+        }
+
+        #two-factor-section.active {
+            display: block;
+            /* Show when active */
+        }
+
+        .two-factor-method-list label {
+            display: block;
+            padding: 8px 0;
+            cursor: pointer;
+        }
+
+        .two-factor-method-list input[type="radio"] {
+            margin-right: 8px;
+            accent-color: var(--m3-sys-color-primary);
+        }
+
+        #two-factor-code-input {
+            width: 100%;
+            /* Match other inputs */
+            margin-top: 8px;
+            /* Add space above input */
+        }
+
+        #two-factor-error-message {
+            color: var(--m3-sys-color-error);
+            font-size: var(--body-small-size);
+            margin-top: 4px;
+            min-height: 1.2em;
+            /* Prevent layout shift */
+        }
+
+        #request-code-status {
+            font-size: var(--body-small-size);
+            opacity: 0.8;
+            min-height: 1.2em;
+            margin-top: 8px;
+        }
+
+        /* --- End 2FA Styles --- */
     </style>
 </head>
 
 <body>
-    <!-- App Bar -->
     <header class="app-bar">
         <a href="{{ url_for('main.index_route') }}" style="text-decoration: none; color: inherit;">
             <span class="material-icons menu-icon">arrow_back</span>
@@ -118,8 +166,10 @@
             {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
             {% for category, message in messages %}
-            {# Add special styling for 2FA errors #}
-            {% if 'Two-Factor Authentication required' in message %}
+            {# Add special styling for 2FA required flash #}
+            {% if category == 'warning' and 'Two-Factor Authentication required' in message %}
+            <p class="warning">{{ message | safe }}</p>
+            {% elif 'Two-Factor Authentication required' in message %}
             <p class="login-failed-2fa">{{ message | safe }}</p>
             {% else %}
             <p class="{{ category }}">{{ message | safe }}</p>
@@ -131,24 +181,25 @@
 
         <div class="card">
             <div class="card-title">Set Apple ID</div>
-            <p class="credential-info">These credentials are used by the background service</p>
-            <!-- ASP Info Box -->
+            <p class="credential-info">These credentials are used by the background service.</p>
             <div class="asp-info">
                 <strong><span class="material-icons"
                         style="font-size: 1.2em; vertical-align: bottom; margin-right: 4px;">warning</span> Important:
-                    A 2FA-Enabled Apple is Account Required!</strong><br>
-                Using an account without 2FA usually <strong>will fail</strong> to load the FindMy devices reports.
+                    2FA Required!</strong><br>
+                A <strong>2FA-enabled Apple ID</strong> is needed. Using an account without 2FA will likely fail.
             </div>
-            <!-- End ASP Info Box -->
 
-            <form method="POST" action="{{ url_for('main.manage_apple_creds_route') }}" novalidate>
+            <form method="POST" action="{{ url_for('main.manage_apple_creds_route') }}" novalidate
+                id="apple-creds-form">
                 {{ form.hidden_tag() }}
 
                 <div class="settings-item" style="flex-direction: column; align-items: stretch; margin-top: 16px;">
                     <div class="settings-item-text">
                         {{ form.apple_id.label(class="settings-item-title") }}
                     </div>
-                    {{ form.apple_id(placeholder="you@example.com", autocomplete="username") }}
+                    {# Add readonly attribute if is_2fa_pending is true #}
+                    {{ form.apple_id(placeholder="you@example.com", autocomplete="username", **{'readonly': True} if
+                    is_2fa_pending else {}) }}
                     {% for error in form.apple_id.errors %}
                     <p class="form-field-error">{{ error }}</p>
                     {% endfor %}
@@ -158,23 +209,236 @@
                     <div class="settings-item-text">
                         {{ form.apple_password.label(class="settings-item-title") }}
                     </div>
-                    {{ form.apple_password(placeholder="Password",
-                    autocomplete="current-password") }} {# Changed placeholder #}
+                    {# Add readonly attribute and different placeholder if is_2fa_pending is true #}
+                    {{ form.apple_password(placeholder=("********" if is_2fa_pending else "Password"), autocomplete="current-password", **{'readonly': True} if is_2fa_pending else {}) }}
                     {% for error in form.apple_password.errors %}
                     <p class="form-field-error">{{ error }}</p>
                     {% endfor %}
                 </div>
 
-                <div class="button-row">
+                <div class="button-row" id="save-creds-button-row" {% if is_2fa_pending %} style="display: none;" {%
+                    endif %}>
                     {{ form.submit(class="button") }}
                 </div>
             </form>
+
+            <!-- --- NEW 2FA Section --- -->
+            <div id="two-factor-section" class="settings-section {% if is_2fa_pending %}active{% endif %}">
+                <h4 class="settings-section-title">Two-Factor Authentication</h4>
+                <div id="two-factor-loading" style="display: none; text-align: center; padding: 10px;">
+                    <div class="spinner" style="width: 24px; height: 24px; border-width: 3px;"></div> Loading methods...
+                </div>
+                <div id="two-factor-method-list" class="settings-item"
+                    style="flex-direction: column; align-items: stretch; background: none; box-shadow: none; padding: 0;">
+                    <!-- 2FA Methods will be loaded here by JS -->
+                    <p style="font-style: italic; opacity: 0.7;">Select a method to receive your verification code.</p>
+                </div>
+                <div id="request-code-status" style="font-style: italic; opacity: 0.7; margin-top: 8px;"></div>
+
+                <div class="settings-item" style="flex-direction: column; align-items: stretch; margin-top: 16px;">
+                    <div class="settings-item-text">
+                        <label for="two-factor-code-input" class="settings-item-title">Verification Code</label>
+                    </div>
+                    <input type="text" id="two-factor-code-input" inputmode="numeric" pattern="[0-9]*"
+                        autocomplete="one-time-code" placeholder="Enter 6-digit code" maxlength="6">
+                    <p id="two-factor-error-message" class="form-field-error"></p>
+                </div>
+
+                <div class="button-row" style="margin-top: 16px;">
+                    <button class="text-button" id="cancel-2fa-button">Cancel / Try Password Again</button>
+                    <button class="button" id="verify-2fa-code-button" disabled>Verify Code</button>
+                </div>
+            </div>
+            <!-- --- End 2FA Section --- -->
+
         </div>
     </main>
 
+    <!-- Keep early theme script -->
     <script>
-        (function () { const theme = localStorage.getItem('theme') || 'system'; if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.body.classList.add('dark-theme'); const meta = document.createElement('meta'); meta.name = "theme-color"; meta.content = "#1E1B22"; document.head.appendChild(meta); } else { const meta = document.createElement('meta'); meta.name = "theme-color"; meta.content = "#6750A4"; document.head.appendChild(meta); } })();
+        (function () { const theme = localStorage.getItem('theme') || 'system'; if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark-theme'); } })();
+    </script>
+    <!-- Add JS for 2FA flow -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const is2faPending = {{ is_2fa_pending | tojson }}; // Get flag from Flask
+
+
+            const twoFactorSection = document.getElementById('two-factor-section');
+            const methodListDiv = document.getElementById('two-factor-method-list');
+            const codeInput = document.getElementById('two-factor-code-input');
+            const verifyButton = document.getElementById('verify-2fa-code-button');
+            const errorMessage = document.getElementById('two-factor-error-message');
+            const loadingIndicator = document.getElementById('two-factor-loading');
+            const requestCodeStatus = document.getElementById('request-code-status');
+            const cancel2faButton = document.getElementById('cancel-2fa-button');
+            const credsForm = document.getElementById('apple-creds-form');
+            const appleIdInput = document.getElementById('apple_id');
+            const applePwInput = document.getElementById('apple_password');
+            const saveCredsButtonRow = document.getElementById('save-creds-button-row');
+
+            let selectedMethodIndex = null;
+
+            // --- Helper to get CSRF token ---
+            function getCsrfToken() {
+                return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            }
+
+            async function fetch2FAMethods() {
+                if (!methodListDiv || !loadingIndicator) return;
+                loadingIndicator.style.display = 'block';
+                methodListDiv.innerHTML = '<p style="font-style: italic; opacity: 0.7;">Loading 2FA methods...</p>';
+                errorMessage.textContent = '';
+                verifyButton.disabled = true;
+                requestCodeStatus.textContent = '';
+
+                try {
+                    const response = await fetch('/api/auth/2fa/methods'); // Using relative path
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.description || `HTTP error ${response.status}`);
+                    }
+                    const data = await response.json();
+
+                    if (data.methods && data.methods.length > 0) {
+                         methodListDiv.innerHTML = ''; // Clear loading message
+                         data.methods.forEach((method, index) => {
+                             const label = document.createElement('label');
+                             const input = document.createElement('input');
+                             input.type = 'radio';
+                             input.name = 'two_factor_method';
+                             input.value = index; // Use index as value
+                             input.dataset.methodId = method.id; // Store phone ID if available
+                             input.dataset.methodType = method.type;
+                             input.required = true;
+                             input.addEventListener('change', handleMethodSelection);
+
+                             label.appendChild(input);
+                             label.appendChild(document.createTextNode(` ${method.detail || method.type.replace('_', ' ')}`));
+                             methodListDiv.appendChild(label);
+                         });
+                         requestCodeStatus.textContent = 'Select a method to receive your code.';
+                    } else {
+                        methodListDiv.innerHTML = '<p>No 2FA methods found.</p>';
+                        errorMessage.textContent = 'Could not retrieve 2FA options.';
+                    }
+
+                } catch (error) {
+                    console.error('Error fetching 2FA methods:', error);
+                    methodListDiv.innerHTML = ''; // Clear
+                    errorMessage.textContent = `Error loading 2FA methods: ${error.message}. Try logging in again.`;
+                    requestCodeStatus.textContent = '';
+                } finally {
+                     loadingIndicator.style.display = 'none';
+                }
+            } async function handleMethodSelection(event) {
+                 selectedMethodIndex = parseInt(event.target.value, 10);
+                 console.log("Selected 2FA method index:", selectedMethodIndex);
+                 verifyButton.disabled = true;
+                 codeInput.value = '';
+                 errorMessage.textContent = '';
+                 requestCodeStatus.textContent = 'Requesting code...';
+
+                 try {
+                     // --- Add CSRF Token to POST request ---
+                     const csrfToken = getCsrfToken();
+                     if (!csrfToken) {
+                        throw new Error("CSRF token not found. Cannot proceed.");
+                     }
+                     const response = await fetch('/api/auth/2fa/request_code', {
+                         method: 'POST',
+                         headers: {
+                             'Content-Type': 'application/json',
+                             'Accept': 'application/json',
+                             'X-CSRFToken': csrfToken // <<< ADDED HEADER
+                            },
+                         body: JSON.stringify({ method_index: selectedMethodIndex })
+                     });
+                     // --- --------------------------------- ---
+                     if (!response.ok) {
+                         const errorData = await response.json();
+                         throw new Error(errorData.description || `HTTP error ${response.status}`);
+                     }
+                     const data = await response.json();
+                     requestCodeStatus.textContent = data.message || 'Code requested. Enter it below.';
+                     verifyButton.disabled = false;
+                     codeInput.focus();
+                 } catch (error) {
+                      console.error('Error requesting 2FA code:', error);
+                      requestCodeStatus.textContent = `Failed to request code: ${error.message}`;
+                      selectedMethodIndex = null;
+                      document.querySelectorAll('input[name="two_factor_method"]').forEach(r => r.checked = false);
+                 }
+            }
+
+            async function handleVerifyCode() {
+                if (selectedMethodIndex === null || codeInput.value.length !== 6) {
+                     errorMessage.textContent = 'Please select a method and enter the 6-digit code.';
+                     return;
+                }
+                verifyButton.disabled = true;
+                verifyButton.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Verifying...';
+                errorMessage.textContent = '';
+
+                try {
+                    // --- Add CSRF Token to POST request ---
+                     const csrfToken = getCsrfToken();
+                     if (!csrfToken) {
+                        throw new Error("CSRF token not found. Cannot proceed.");
+                     }
+                    const response = await fetch('/api/auth/2fa/submit_code', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRFToken': csrfToken // <<< ADDED HEADER
+                        },
+                        body: JSON.stringify({ method_index: selectedMethodIndex, code: codeInput.value })
+                    });
+                    // --- --------------------------------- ---
+
+                    if (!response.ok) {
+                         let errorMsg = `HTTP error ${response.status}`;
+                         try { const errorData = await response.json(); errorMsg = errorData.description || errorMsg; } catch(e){}
+                         if (response.status === 401) {
+                              throw new Error("Invalid 2FA code. Please try again.");
+                         } else {
+                             throw new Error(errorMsg);
+                         }
+                    }
+
+                    const data = await response.json();
+                    if (data.status === 'success') {
+                         errorMessage.textContent = '';
+                         requestCodeStatus.textContent = 'Verification successful! Redirecting...';
+                         window.location.href = "{{ url_for('main.index_route') }}";
+                    } else {
+                         throw new Error(data.message || "Verification failed with unexpected status.");
+                    }
+
+                } catch (error) {
+                    console.error('Error verifying 2FA code:', error);
+                    errorMessage.textContent = error.message || 'Verification failed. Please check the code and try again.';
+                    verifyButton.disabled = false;
+                    verifyButton.innerHTML = 'Verify Code';
+                }
+            }
+
+            function handleCancel2FA() {
+                 console.log("Cancelling 2FA flow.");
+                 window.location.href = "{{ url_for('main.manage_apple_creds_route') }}";
+            }
+
+            // --- Initialization ---
+            if (is2faPending) {
+                twoFactorSection.classList.add('active');
+                fetch2FAMethods();
+                verifyButton?.addEventListener('click', handleVerifyCode);
+                cancel2faButton?.addEventListener('click', handleCancel2FA);
+            } else {
+                 twoFactorSection.classList.remove('active');
+            }
+        });
     </script>
 </body>
-
 </html>

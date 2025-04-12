@@ -63,7 +63,7 @@ class NotificationService:
             "GEOFENCE_EXIT_BADGE_PATH", "img/crisis_alert_16dp.png"
         )
         self.battery_low_badge_path = config.get(
-            "BATTERY_LOW_BADGE_PATH", "img/battery_warning_16dp.png"
+            "BATTERY_LOW_BADGE_PATH", "img/battery_alert_16dp.png"
         )
         self.test_badge_path = config.get("TEST_BADGE_PATH", "img/labs_16dp.png")
         self.welcome_badge_path = config.get(

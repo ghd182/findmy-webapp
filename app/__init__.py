@@ -22,6 +22,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
 from .config import config
 from .services.user_data_service import UserDataService
 
@@ -32,6 +35,14 @@ login_manager.login_message = "Please log in to access this page."
 csrf = CSRFProtect()
 background_scheduler = BackgroundScheduler(daemon=True)
 log = logging.getLogger(__name__)
+
+# --- Create Limiter instance globally but initialize later ---
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+    strategy="fixed-window",
+)
 
 
 def create_app():
@@ -54,11 +65,37 @@ def create_app():
         f"CSRF Protection Enabled (Config): {app.config.get('WTF_CSRF_ENABLED', 'Not Set')}"
     )
 
+    # --- Configure ProxyFix (Important for Rate Limiting & Secure Headers) ---
+    # Ensure this is applied *before* initializing extensions that rely on remote addr
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=0)
+    log.info("ProxyFix enabled (x_for=1, x_proto=1, x_host=1)")
+
+    # --- Configure Session Cookies ---
+    if not app.config.get("TESTING"):
+        app.config.update(
+            SESSION_COOKIE_SECURE=True,
+            SESSION_COOKIE_HTTPONLY=True,
+            SESSION_COOKIE_SAMESITE="Lax",
+            REMEMBER_COOKIE_SECURE=True,
+            REMEMBER_COOKIE_HTTPONLY=True,
+            REMEMBER_COOKIE_SAMESITE="Lax",
+        )
+        log.info(
+            "Applied secure session cookie settings (Secure, HttpOnly, SameSite=Lax)."
+        )
+    else:
+        app.config.update(SESSION_COOKIE_SAMESITE="Lax", REMEMBER_COOKIE_SAMESITE="Lax")
+        log.info("Applied standard session cookie settings for TESTING environment.")
 
     # --- Initialize Extensions ---
     login_manager.init_app(app)
     csrf.init_app(app)
+
+    # --- Initialize Limiter HERE, *before* blueprints that use it ---
+    limiter.init_app(app)
+    app.config["RATELIMIT_ENABLED"] = True
+    log.info(f"Flask-Limiter initialized and attached to app. Default limits applied.")
+    # --- End Limiter Init ---
 
     # --- Initialize Locks ---
     if "users" in config.FILE_LOCKS and config.FILE_LOCKS["users"] is None:
@@ -226,14 +263,14 @@ def create_app():
             )
             return redirect(url_for("main.index_route"))  # Redirect on error
 
-    @app.route('/<path:filename>.map')
+    @app.route("/<path:filename>.map")
     def suppress_map_requests(filename):
         # Simply return a 404 Not Found response without rendering a template
         # This prevents the TemplateNotFound error for 404.html on these requests
         log.debug(f"Intercepted and suppressed .map file request: {filename}.map")
         return Response("Not Found", status=404)
-    # --- End .map file route ---
 
+    # --- End .map file route ---
 
     # --- Global Error Handlers ---
     @app.errorhandler(404)

@@ -32,10 +32,12 @@ window.AppState = {
     userActiveShares: [],
     currentAccuracyCircle: null,
     userAccuracyCircle: null,
+    isInitialLoad: true,
 
     // --- Initialization ---
     loadInitialState: function () {
         this.mapReady = false;
+        this.isInitialLoad = true;
         this.isShowingAllDevices = localStorage.getItem('isShowingAllDevices') === 'true';
         this.showDeviceHistory = localStorage.getItem('showDeviceHistory') === 'true';
 
@@ -93,15 +95,10 @@ window.AppState = {
     getCurrentDeviceData: function () { return this.currentDeviceData; },
     setCurrentDeviceData: function (data) {
         if (Array.isArray(data)) {
-            // Ensure 'reports' key exists and is an array for each device
-            this.currentDeviceData = data.map(device => ({
-                ...device,
-                reports: Array.isArray(device.reports) ? device.reports : []
-            }));
-            this.lastDeviceUpdateTime = new Date(); // Update timestamp when data is set
-        } else {
-            console.error("Invalid device data format:", data);
-        }
+            this.currentDeviceData = data.map(device => ({...device, reports: Array.isArray(device.reports) ? device.reports : [] }));
+            this.lastDeviceUpdateTime = new Date(); // Update timestamp
+            // DO NOT set isInitialLoad to false here, let _updateDeviceUI handle it after first SUCCESSFUL update
+        } else { console.error("Invalid device data format:", data); }
     },
 
     getGlobalGeofences: function () { return this.globalGeofenceData; },

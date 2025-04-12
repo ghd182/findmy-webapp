@@ -10,6 +10,8 @@ from datetime import datetime, timezone, timedelta
 from werkzeug.security import generate_password_hash
 import uuid
 
+from findmy.reports import AppleAccount # Import AppleAccount
+
 
 from app.utils.json_utils import load_json_file, save_json_atomic
 from app.utils.helpers import (
@@ -259,102 +261,130 @@ class UserDataService:
 
     # --- Apple Credentials ---
 
-    def load_apple_credentials(
+    def load_apple_credentials_and_state(
         self, user_id: str
-    ) -> Tuple[Optional[str], Optional[str]]:
-        """Loads Apple ID and (decrypted) password for a user."""
+    ) -> Tuple[Optional[str], Optional[str], Optional[Dict]]:
+        """
+        Loads Apple ID, (decrypted) password, and the full account state
+        from the user's credential file.
+
+        Returns:
+            Tuple (apple_id, decrypted_password, account_state_dict) or (None, None, None)
+        """
         creds_filename = self.config["USER_APPLE_CREDS_FILENAME"]
         creds_file = self._get_user_file_path(user_id, creds_filename)
         if not creds_file:
-            return None, None
+            return None, None, None
         lock = self.file_locks.get(creds_filename)
         if not lock:
-            log.error(f"Lock for '{creds_filename}' not found.")
-            return None, None
+            log.error(f"Lock for '{creds_filename}' not found for user '{user_id}'.")
+            return None, None, None
 
         creds_data = load_json_file(creds_file, lock)
         if creds_data is None:
-            log.debug(f"No Apple credentials file found for user '{user_id}'.")
-            return None, None
+            log.debug(f"No Apple credentials/state file found for user '{user_id}'.")
+            return None, None, None
 
         apple_id = creds_data.get("apple_id")
         encrypted_password = creds_data.get("apple_password_encrypted")
-        if not apple_id or not encrypted_password:
-            log.warning(
-                f"Incomplete Apple credentials found for user '{user_id}' in {creds_file.name}."
-            )
-            return apple_id or None, None
+        account_state = creds_data.get("account_state") # Load the full state
 
+        if not apple_id or not encrypted_password:
+            # If basic creds are missing, state is irrelevant
+            log.warning(
+                f"Incomplete Apple credentials found for user '{user_id}'."
+            )
+            return apple_id or None, None, None
+
+        # Decrypt password (keep existing logic)
         password = decrypt_password(encrypted_password, self.config)
         if not password:
             log.error(
                 f"Password decryption failed for user '{user_id}'. Check FERNET_KEY or stored format."
             )
-            return apple_id, None
-        log.debug(f"Loaded Apple credentials for user '{user_id}'.")
-        return apple_id, password
+            return apple_id, None, account_state # Return state even if password decrypt fails
 
-    def save_apple_credentials(self, user_id: str, apple_id: str, apple_password: str):
-        """Saves (encrypted) Apple credentials for a user."""
-        if not user_id or not apple_id or not apple_password:
-            raise ValueError("Missing required arguments for saving Apple credentials.")
+        if not isinstance(account_state, dict):
+             log.warning(f"Account state for user '{user_id}' is missing or not a dict. Full functionality might be limited.")
+             account_state = None # Treat missing/invalid state as None
+
+        log.debug(f"Loaded Apple credentials and state for user '{user_id}'.")
+        return apple_id, password, account_state
+
+    def save_apple_credentials_and_state(self, user_id: str, apple_id: str, apple_password: str, account_export_data: Dict):
+        """
+        Saves Apple ID (encrypted), password (encrypted), and the full
+        account state dict from account.export() to the user's credential file.
+        """
+        if not user_id or not apple_id or not apple_password or not account_export_data:
+            raise ValueError("Missing required arguments for saving Apple credentials and state.")
+        if not isinstance(account_export_data, dict):
+             raise TypeError("account_export_data must be a dictionary.")
+
         creds_filename = self.config["USER_APPLE_CREDS_FILENAME"]
         creds_file = self._get_user_file_path(user_id, creds_filename)
         if not creds_file:
-            raise IOError(f"Could not determine file path for user '{user_id}'.")
+            raise IOError(f"Could not determine credential file path for user '{user_id}'.")
         lock = self.file_locks.get(creds_filename)
         if not lock:
-            raise RuntimeError("Apple credentials lock configuration missing.")
+            raise RuntimeError(f"Apple credentials lock configuration missing for user '{user_id}'.")
 
+        # Encrypt password (keep existing logic)
         encrypted_password = encrypt_password(apple_password, self.config)
-        if not encrypted_password and apple_password:
+        if not encrypted_password and apple_password: # Only error if password wasn't empty
             raise ValueError("Password encryption failed.")
 
-        creds_data = {
+        # Prepare data to save
+        data_to_save = {
             "apple_id": apple_id,
             "apple_password_encrypted": encrypted_password,
+            "account_state": account_export_data, # Store the full exported state
             "last_updated": datetime.now(timezone.utc).isoformat(),
         }
+
         try:
-            save_json_atomic(creds_file, creds_data, lock, indent=4)
-            log.info(f"Saved Apple credentials to {creds_file} for user '{user_id}'.")
+            # Use save_json_atomic (ensure it handles Path objects)
+            save_json_atomic(creds_file, data_to_save, lock, indent=2) # Use indent=2 for state file
+            log.info(f"Saved Apple credentials and state to {creds_file} for user '{user_id}'.")
         except Exception as e:
-            log.error(f"Failed to save Apple credentials for user '{user_id}': {e}")
+            log.error(f"Failed to save Apple credentials and state for user '{user_id}': {e}")
             raise
 
     def clear_apple_credentials(self, user_id: str):
-        """Removes the Apple credentials file for a user."""
+        """Removes the Apple credentials/state file for a user."""
+        # This function remains largely the same, just deletes the combined file
         if not user_id:
             log.error("clear_apple_credentials called without user_id")
             return
         creds_filename = self.config["USER_APPLE_CREDS_FILENAME"]
         creds_file = self._get_user_file_path(user_id, creds_filename)
         if not creds_file:
+            log.warning(f"Could not get creds file path for clear for user '{user_id}'")
             return
         lock = self.file_locks.get(creds_filename)
         if not lock:
-            log.error(f"Lock for '{creds_filename}' not found.")
+            log.error(f"Lock for '{creds_filename}' not found for user '{user_id}'.")
             return
         with lock:
             try:
                 if creds_file.exists():
                     os.remove(creds_file)
-                    log.info(f"Removed Apple credentials file for user '{user_id}'.")
+                    log.info(f"Removed Apple credentials/state file for user '{user_id}'.")
                 else:
-                    log.debug(
-                        f"No Apple credentials file to remove for user '{user_id}'."
-                    )
+                    log.debug(f"No Apple credentials/state file to remove for user '{user_id}'.")
             except OSError as e:
-                log.error(f"Failed to remove {creds_file}: {e}")
+                log.error(f"Failed to remove {creds_file} for user '{user_id}': {e}")
 
     def user_has_apple_credentials(self, user_id: str) -> bool:
-        """Checks if the credentials file exists and contains an ID."""
-        creds_filename = self.config["USER_APPLE_CREDS_FILENAME"]
-        creds_file = self._get_user_file_path(user_id, creds_filename)
-        if not creds_file or not creds_file.exists():
-            return False
-        apple_id, _ = self.load_apple_credentials(user_id)
-        return bool(apple_id)
+        """Checks if the credentials/state file exists and contains essential data."""
+        apple_id, _, account_state = self.load_apple_credentials_and_state(user_id)
+        # Check if both Apple ID and some account state exist
+        has_creds = bool(apple_id)
+        has_state = isinstance(account_state, dict) and bool(account_state) # Basic check if state dict exists and is not empty
+        log.debug(f"Cred check for user {user_id}: has_creds={has_creds}, has_state={has_state}")
+        # Require both ID and state for the user to be considered fully configured.
+        # Adjust this logic if you only want to check for ID initially.
+        return has_creds and has_state
 
     # --- Devices Config ---
 

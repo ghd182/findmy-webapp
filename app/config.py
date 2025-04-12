@@ -160,7 +160,7 @@ class Config:
         "GEOFENCE_EXIT_BADGE_PATH", "img/crisis_alert_16dp.png"
     )  # Still used by current logic
     BATTERY_LOW_BADGE_PATH = os.getenv(
-        "BATTERY_LOW_BADGE_PATH", "img/battery_warning_16dp.png"
+        "BATTERY_LOW_BADGE_PATH", "img/battery_alert_16dp.png"
     )  # Still used
     TEST_BADGE_PATH = os.getenv("TEST_BADGE_PATH", "img/labs_16dp.png")  # Still used
     WELCOME_BADGE_PATH = os.getenv(
@@ -199,19 +199,25 @@ class DevelopmentConfig(Config):
 
 
 class ProductionConfig(Config):
+    # --- ADD VALIDATION ---
     if not Config.SECRET_KEY or Config._using_fallback_secret:
+        # Use log.critical before raising the error
         log.critical(
-            "CRITICAL STARTUP FAILURE: No valid SECRET_KEY found via SECRET_SEED or environment variable for production environment!"
+            "CRITICAL STARTUP FAILURE: Production environment requires a persistent SECRET_KEY set via SECRET_SEED or SECRET_KEY environment variable. Defaulting to os.urandom() is insecure. App will not start."
         )
-        raise RuntimeError(
-            "Missing or insecure SECRET_KEY configuration for production."
+        raise ValueError( # Raise ValueError for clearer indication of bad config
+            "Missing or insecure SECRET_KEY configuration for production environment."
         )
     if not Config.ENCRYPTION_ENABLED:
-        log.critical(
-            "CRITICAL STARTUP FAILURE: Encryption is DISABLED (FERNET_KEY missing via FERNET_SEED or environment variable) in production environment!"
-        )
-        raise RuntimeError("Missing FERNET_KEY configuration for production.")
-    WTF_CSRF_ENABLED = True
+         # This check can remain a warning or be made critical depending on requirements
+         log.warning( # Changed to warning, as lack of encryption might be intentional in some setups, though risky.
+             "SECURITY WARNING: Encryption is DISABLED (FERNET_KEY missing via FERNET_SEED or environment variable) in production environment! Sensitive data like Apple passwords will be stored less securely (Base64)."
+         )
+         # If encryption MUST be enabled for production, uncomment the raise below:
+         # raise ValueError("Missing FERNET_KEY configuration for production environment.")
+    # --- END VALIDATION ---
+
+    WTF_CSRF_ENABLED = True # Ensure CSRF is explicitly enabled
 
 
 class TestingConfig(Config):

@@ -14,6 +14,14 @@ from findmy.reports import (
 )
 from findmy import FindMyAccessory, KeyPair
 
+
+from findmy.errors import (
+    InvalidCredentialsError,
+    UnauthorizedError,
+    UnhandledProtocolError,
+)
+
+
 # Import necessary services and utilities
 from .user_data_service import UserDataService
 from app.utils.helpers import get_available_anisette_server
@@ -37,79 +45,113 @@ class AppleDataService:
         self.history_duration_days = config.get("HISTORY_DURATION_DAYS", 30)
 
     def perform_account_login(
-        self, apple_id: str, apple_password: str
-    ) -> Tuple[Optional[AppleAccount], Optional[str]]:
+        self, apple_id: str, apple_password: str, existing_state: Optional[Dict] = None
+    ) -> Tuple[Optional[AppleAccount], LoginState, Optional[str]]:
         """
-        Logs into an Apple account using provided credentials.
+        Logs into an Apple account or restores from existing state.
 
         Args:
             apple_id: The user's Apple ID.
-            apple_password: The user's Apple password.
+            apple_password: The user's Apple password (decrypted).
+            existing_state: Optional pre-existing account state dict from account.export().
 
         Returns:
-            A tuple containing the logged-in AppleAccount object (or None)
-            and an error message string (or None).
+            A tuple containing:
+                - The AppleAccount object (or None on failure).
+                - The resulting LoginState.
+                - An error message string (or None).
         """
         if not apple_id or not apple_password:
-            return None, "Apple ID or Password not provided."
+            return None, LoginState.LOGGED_OUT, "Apple ID or Password not provided."
 
         anisette_server_url = get_available_anisette_server(
             self.config.get("ANISETTE_SERVERS", [])
         )
         if not anisette_server_url:
             log.error("Login failed: No Anisette server available.")
-            return None, "No Anisette server available."
+            return None, LoginState.LOGGED_OUT, "Authentication service unavailable."
+
+        account = None
+        login_result = LoginState.LOGGED_OUT
+        error_msg = None
 
         try:
             provider = RemoteAnisetteProvider(anisette_server_url)
-            account = AppleAccount(provider)
-            log.debug(
-                f"Attempting login for {apple_id} using Anisette: {anisette_server_url}"
-            )
-            login_result = account.login(apple_id, apple_password)
+            account = AppleAccount(provider) # Always create a new instance for login/restore attempt
+
+            if existing_state and isinstance(existing_state, dict):
+                log.debug(f"Attempting to restore account state for {apple_id}")
+                try:
+                    account.restore(existing_state)
+                    login_result = account.login_state # State after restore
+                    log.info(f"Restored account state for {apple_id}: {login_result}")
+                    # If restored state is already logged in, we might not need password verification here,
+                    # but FindMy.py might re-validate internally on first fetch.
+                    # Let's assume background task handles re-auth if needed.
+                    if login_result == LoginState.LOGGED_IN:
+                         log.info(f"Account for {apple_id} restored to LOGGED_IN state.")
+                         # No need to call login again if already logged in
+                         return account, login_result, None
+                    elif login_result == LoginState.REQUIRE_2FA:
+                         log.warning(f"Restored account for {apple_id} is in REQUIRE_2FA state. Needs interactive flow.")
+                         # We still need the password to potentially *complete* 2FA later
+                         # Store the password temporarily if needed by the calling function (like in the session)
+                         return account, login_result, "Restored account requires 2FA completion."
+                    else:
+                         log.warning(f"Restored account for {apple_id} is in state {login_result}. Attempting full login.")
+                         # Fall through to attempt full login if restored state isn't useful
+
+                except Exception as restore_err:
+                    log.warning(f"Failed to restore account state for {apple_id}, attempting full login: {restore_err}")
+                    # Fall through to full login
+
+            # --- Full Login Attempt (if no state or restore failed/insufficient) ---
+            log.debug(f"Attempting full login for {apple_id} using Anisette: {anisette_server_url}")
+            login_result = account.login(apple_id, apple_password) # Use the same account instance
             log.info(f"Login attempt result for {apple_id}: {login_result}")
 
             if login_result == LoginState.LOGGED_IN:
-                log.info(
-                    f"Successfully logged in Apple account for {apple_id} ({getattr(account, 'first_name', 'N/A')})"
-                )
-                return account, None
+                log.info(f"Successfully logged in Apple account for {apple_id} ({getattr(account, 'first_name', 'N/A')})")
+                error_msg = None
             elif login_result == LoginState.REQUIRE_2FA:
-                log.warning(
-                    f"Login requires 2FA for {apple_id}. Interactive 2FA not supported."
-                )
-                try:
-                    methods = account.get_2fa_methods()
-                except Exception:
-                    methods = []
-                method_details = [
-                    {
-                        "type": type(m).__name__,
-                        "detail": getattr(
-                            m, "phone_number", getattr(m, "device_name", "N/A")
-                        ),
-                    }
-                    for m in methods
-                ]
-                error_msg = f"Two-Factor Authentication required. Available methods: {method_details}. Interactive 2FA not supported by this app."
-                return None, error_msg
+                log.warning(f"Login requires 2FA for {apple_id}. Returning account object in 2FA state.")
+                error_msg = "Two-Factor Authentication required." # Simple message for now
             elif login_result == LoginState.LOGGED_OUT:
-                error_detail = getattr(
-                    account, "login_error_detail", "Invalid Apple ID or Password"
-                )
+                 # Check for specific errors if FindMy.py provides them, otherwise use generic
+                error_detail = "Invalid Apple ID or Password." # Default
+                if hasattr(account, 'login_error_detail'): # Hypothetical attribute
+                     error_detail = account.login_error_detail
                 log.error(f"Authentication failed for {apple_id}: {error_detail}")
-                return None, f"Authentication failed: {error_detail}"
+                error_msg = f"Authentication failed: {error_detail}"
+                account = None # Ensure account is None on outright failure
             else:
-                log.error(
-                    f"Login failed for {apple_id} with unexpected state: {login_result}"
-                )
-                return None, f"Login failed with unexpected state: {login_result}"
+                log.error(f"Login failed for {apple_id} with unexpected state: {login_result}")
+                error_msg = f"Login failed with unexpected state: {login_result}"
+                account = None # Ensure account is None on unexpected failure
 
+        except InvalidCredentialsError as e:
+            log.error(f"Login failed for {apple_id}: Invalid Credentials ({e})")
+            error_msg = f"Invalid Apple ID or Password."
+            login_result = LoginState.LOGGED_OUT
+            account = None
+        except UnauthorizedError as e:
+            log.error(f"Login failed for {apple_id}: Unauthorized ({e})")
+            error_msg = f"Authorization error: {e}"
+            login_result = LoginState.LOGGED_OUT
+            account = None
+        except UnhandledProtocolError as e:
+            log.error(f"Login failed for {apple_id}: Unhandled Protocol Error ({e})")
+            error_msg = f"Communication error with Apple servers: {e}"
+            login_result = LoginState.LOGGED_OUT
+            account = None
         except Exception as e:
-            log.exception(
-                f"An error occurred during Apple account login attempt for {apple_id}:"
-            )
-            return None, f"Failed to connect or log in: {e}"
+            log.exception(f"An unexpected error occurred during Apple account login/restore for {apple_id}:")
+            error_msg = f"An unexpected error occurred during login: {e}"
+            login_result = LoginState.LOGGED_OUT
+            account = None # Ensure account is None on general exception
+
+        # --- Return the account object, the final state, and any error message ---
+        return account, login_result, error_msg
 
     def _load_private_keys_from_file(self, keys_file_path: Path) -> List[str]:
         """Loads valid base64 private keys from a .keys file."""
@@ -250,27 +292,24 @@ class AppleDataService:
         }
 
     def fetch_accessory_data(
-        self, user_id: str, account: AppleAccount
+        self, user_id: str, account: AppleAccount # Now requires a logged-in account object
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Set[str]]:
         """
         Fetches historical data for all accessories configured for the user.
-
-        Args:
-            user_id: The ID of the user.
-            account: The logged-in AppleAccount object.
-
-        Returns:
-            A tuple containing:
-                - A dictionary of processed device data {device_id: {"config": {...}, "reports": [...]}}.
-                  The "reports" list contains the FULL history within the duration.
-                - An error message string (or None).
-                - A set of device IDs for which data was processed (or attempted).
+        MODIFIED: Now expects a pre-authenticated AppleAccount object.
         """
-        log.info(f"Starting data fetch for user '{user_id}'...")
+        # --- Remove the login logic from this function ---
+        # It now assumes `account` is already logged in or restored correctly.
+        if not account or account.login_state != LoginState.LOGGED_IN:
+            log.error(f"fetch_accessory_data called for user '{user_id}' but account is not in LOGGED_IN state ({account.login_state if account else 'None'}).")
+            return None, "Account not logged in.", set()
+
+        log.info(f"Starting data fetch for user '{user_id}' using provided account...")
+
         processed_data: Dict[str, Dict[str, Any]] = {}
         error_messages: List[str] = []
         processed_ids: Set[str] = set()
-
+        
         user_data_dir = self.uds._get_user_data_dir(user_id)
         if not user_data_dir:
             return None, f"Could not access data directory for user '{user_id}'", set()
@@ -347,11 +386,15 @@ class AppleDataService:
                     )
 
             except Exception as e:
-                msg = f"Error fetching history for plist {plist_file.name}: {e}"
+                # Handle other fetch errors as before
+                msg = f"Error fetching history for {plist_file.name if 'plist_file' in locals() else keys_file.name}: {e}"
                 log.exception(f"User '{user_id}': {msg}")
                 error_messages.append(msg)
                 # Keep the device entry but with empty reports
-                processed_data[device_id]["reports"] = []
+                device_id = plist_file.stem if 'plist_file' in locals() else keys_file.stem
+                if device_id not in processed_data: # Initialize if first error for device
+                    processed_data[device_id] = {"config": devices_config.get(device_id,{}), "reports": []}
+                processed_data[device_id]["reports"] = [] # Ensure 
 
         # --- Process .keys files ---
         for keys_file in user_data_dir.glob("*.keys"):
@@ -439,9 +482,7 @@ class AppleDataService:
                 }
                 processed_ids.add(device_id)
 
+        # --- Combine errors and return ---
         combined_error_msg = "; ".join(error_messages) if error_messages else None
-        log.info(
-            f"Finished data fetch for user '{user_id}'. Processed {len(processed_ids)} devices. Errors: {combined_error_msg or 'None'}"
-        )
-
+        log.info(f"Finished data fetch for user '{user_id}'. Processed {len(processed_ids)} devices. Errors: {combined_error_msg or 'None'}")
         return processed_data, combined_error_msg, processed_ids

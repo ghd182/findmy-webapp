@@ -16,6 +16,10 @@ from flask import (
     make_response,
 )
 
+from app.services.apple_data_service import AppleDataService
+from findmy.reports import LoginState  # Import LoginState
+from app.utils.helpers import encrypt_password  # Import encrypt helper
+
 from flask_login import login_required, current_user
 import threading
 import traceback
@@ -66,99 +70,149 @@ def manifest():
 def manage_apple_creds_route():
     user_id = current_user.id
     uds = UserDataService(current_app.config)
-    form = AppleCredentialsForm()  # Instantiate the form
+    apple_service = AppleDataService(current_app.config, uds)  # Need Apple service
+    form = AppleCredentialsForm()
 
-    if form.validate_on_submit():  # Handles POST, validation, CSRF
+    # --- Handle POST (Credential Submission) ---
+    if form.validate_on_submit():
         apple_id = form.apple_id.data.strip()
-        apple_password = form.apple_password.data  # No strip
+        apple_password = form.apple_password.data  # Raw password
+
+        log.info(
+            f"User '{user_id}': Attempting to save/verify Apple credentials for ID {apple_id}."
+        )
+
+        # Clear any previous pending 2FA state first
+        session.pop("pending_2fa_account_data", None)
+        session.pop("pending_2fa_creds", None)
 
         try:
-            uds.save_apple_credentials(user_id, apple_id, apple_password)
-            log.info(
-                f"User '{user_id}' updated Apple credentials in storage (ID: {apple_id})."
+            # Attempt login (passing NO existing state for a fresh attempt)
+            account, login_status, error_msg = apple_service.perform_account_login(
+                apple_id, apple_password, existing_state=None
             )
-            flash("Apple credentials updated and stored securely.", "success")
 
-            log.info(
-                f"Triggering immediate fetch for user '{user_id}' after credential update."
-            )
-            try:
-                # Note: run_fetch_for_user_task should ideally handle decryption itself
-                # or we pass the unencrypted password carefully.
-                # For now, assume run_fetch_for_user_task expects the unencrypted password.
-                immediate_fetch_thread = threading.Thread(
-                    target=run_fetch_for_user_task,
-                    args=(user_id, apple_id, apple_password, current_app.config),
-                    name=f"ImmediateFetch-{user_id}",
-                    daemon=True,
+            if login_status == LoginState.LOGGED_IN and account:
+                # === SUCCESSFUL LOGIN ===
+                log.info(f"User '{user_id}': Login successful during credential save.")
+                # Save credentials AND the full state permanently
+                uds.save_apple_credentials_and_state(
+                    user_id, apple_id, apple_password, account.export()
                 )
-                immediate_fetch_thread.start()
-                flash("Credentials saved. Initial background fetch initiated.", "info")
-            except Exception as e:
-                log.error(
-                    f"Failed to start immediate fetch thread for user '{user_id}': {e}",
-                    exc_info=True,
+                flash("Apple credentials verified and saved successfully.", "success")
+
+                # Trigger background fetch
+                log.info(
+                    f"User '{user_id}': Triggering immediate fetch after successful credential save."
+                )
+                # (Keep existing fetch trigger logic)
+                try:
+                    immediate_fetch_thread = threading.Thread(
+                        target=run_fetch_for_user_task,
+                        args=(user_id, apple_id, apple_password, current_app.config),
+                        name=f"ImmediateFetchCredSave-{user_id}",
+                        daemon=True,
+                    )
+                    immediate_fetch_thread.start()
+                    flash("Initial background fetch initiated.", "info")
+                except Exception as e:
+                    log.error(
+                        f"Failed starting immediate fetch thread for {user_id}: {e}"
+                    )
+                    flash(
+                        "Credentials saved, but initial fetch failed to start.",
+                        "warning",
+                    )
+
+                return redirect(url_for(".index_route"))
+
+            elif login_status == LoginState.REQUIRE_2FA and account:
+                # === 2FA REQUIRED ===
+                log.warning(
+                    f"User '{user_id}': Login requires 2FA. Storing pending state in session."
                 )
                 flash(
-                    "Credentials saved, but initial fetch could not be started.",
+                    "Two-Factor Authentication required. Please complete the steps below.",
                     "warning",
                 )
 
-            return redirect(
-                url_for(".index_route")
-            )  # Redirect to main app after success
+                # Store pending state and credentials (unencrypted pw for now) in session
+                session["pending_2fa_account_data"] = account.export()
+                session["pending_2fa_creds"] = {
+                    "apple_id": apple_id,
+                    "apple_password_unencrypted": apple_password,  # Store unencrypted temporarily
+                }
+                session.modified = True  # Ensure session is saved
 
-        except ValueError as ve:  # Catch specific validation errors from UDS
-            log.error(f"Validation error saving credentials for user {user_id}: {ve}")
-            flash(f"Failed to save credentials: {ve}", "error")
-            # No redirect, fall through to render template again
+                # Redirect back to the same page with a status flag
+                return redirect(
+                    url_for(".manage_apple_creds_route", status="2fa_required")
+                )
+
+            else:
+                # === LOGIN FAILED ===
+                log.error(
+                    f"User '{user_id}': Apple credential verification failed: {error_msg}"
+                )
+                # Add specific flash message for 2FA failure that might lead here
+                if "Two-Factor Authentication required" in (error_msg or ""):
+                    flash(
+                        f"Login Failed: {error_msg}. App-Specific Password might be needed if using SMS/Device Code doesn't work.",
+                        "danger login-failed-2fa",
+                    )
+                else:
+                    flash(f"Failed to verify Apple credentials: {error_msg}", "danger")
+                # Do NOT redirect, stay on the page to show error
+
         except Exception as e:
-            log.exception(f"Error saving Apple credentials for user {user_id}")
-            flash("Failed to save credentials: An unexpected error occurred.", "error")
-            # No redirect, fall through to render template again
-
-    # --- Render the GET request or if validation failed ---
-    # Pre-populate the Apple ID field if it exists
-    current_apple_id_stored = None
-    if not form.is_submitted():  # Only load on GET request
-        try:
-            current_apple_id_stored, _ = uds.load_apple_credentials(user_id)
-            form.apple_id.data = current_apple_id_stored or ""  # Pre-fill form field
-            log.debug(
-                f"Pre-populating manage_apple_creds form for '{user_id}'. Stored ID: {bool(current_apple_id_stored)}"
+            log.exception(
+                f"Unexpected error saving/verifying Apple credentials for user {user_id}"
             )
-        except Exception as e:
-            log.error(f"Error loading Apple credentials for form pre-population: {e}")
-            flash("Could not load current Apple ID status.", "warning")
+            flash(f"An unexpected server error occurred: {e}", "danger")
+            # Do NOT redirect, stay on page
 
-    # Pass the form object to the template
-    return render_template(
-        "manage_apple_creds.html",
-        title="Manage Apple Credentials",
-        form=form,
-        current_apple_id=current_apple_id_stored,
+    # --- Handle GET request ---
+    # Check if we are returning from a POST that required 2FA
+    is_2fa_pending = (
+        request.args.get("status") == "2fa_required"
+        and "pending_2fa_account_data" in session
     )
+    log.debug(f"GET /manage_apple_creds: is_2fa_pending = {is_2fa_pending}")
 
-    # --- Render the GET request or if validation failed ---
-    # Pre-populate the Apple ID field if it exists
-    current_apple_id_stored = None
-    if not form.is_submitted():  # Only load on GET request
+    # Pre-populate Apple ID field (only if NOT in 2FA flow, or use session creds if pending)
+    current_apple_id_display = None
+    if not is_2fa_pending:
         try:
-            current_apple_id_stored, _ = uds.load_apple_credentials(user_id)
-            form.apple_id.data = current_apple_id_stored or ""  # Pre-fill form field
-            log.debug(
-                f"Pre-populating manage_apple_creds form for '{user_id}'. Stored ID: {bool(current_apple_id_stored)}"
+            # Use the new method, but only need the ID for display here
+            current_apple_id_display, _, _ = uds.load_apple_credentials_and_state(
+                user_id
             )
+            if not form.is_submitted():  # Only pre-fill on initial GET
+                form.apple_id.data = current_apple_id_display or ""
         except Exception as e:
-            log.error(f"Error loading Apple credentials for form pre-population: {e}")
+            log.error(f"Error loading current Apple ID for display: {e}")
             flash("Could not load current Apple ID status.", "warning")
+    elif is_2fa_pending and "pending_2fa_creds" in session:
+        # If pending 2FA, show the ID the user just entered
+        current_apple_id_display = session["pending_2fa_creds"].get("apple_id")
+        form.apple_id.data = current_apple_id_display or ""
+        form.apple_id.render_kw = {"readonly": True}  # Make field readonly during 2FA
+        form.apple_password.render_kw = {
+            "readonly": True,
+            "placeholder": "********",
+        }  # Make password readonly
+        form.submit.render_kw = {
+            "disabled": True,
+            "style": "display: none;",
+        }  # Hide original save button
 
-    # Pass the form object to the template
+    # Pass status to template
     return render_template(
         "manage_apple_creds.html",
         title="Manage Apple Credentials",
         form=form,
-        current_apple_id=current_apple_id_stored,
+        current_apple_id=current_apple_id_display,
+        is_2fa_pending=is_2fa_pending,  # Pass the flag to the template
     )
 
 

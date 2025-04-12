@@ -748,30 +748,63 @@ window.AppMap = {
 
     generateHistoryPopupContent: function (report, displayInfo) {
         if (!report) return "No data available for this point.";
-        const markerTime = report.timestamp ? new Date(report.timestamp) : null;
-        const publishedTime = report.published_at ? new Date(report.published_at) : null;
-        const markerTimestampISO = markerTime ? markerTime.toISOString() : '';
-        const publishedTimestampISO = publishedTime ? publishedTime.toISOString() : '';
-        const markerTimeRelative = markerTimestampISO ? AppUtils.formatTimeRelative(markerTime) : 'N/A';
-        const publishedTimeRelative = publishedTimestampISO ? AppUtils.formatTimeRelative(publishedTime) : 'N/A';
+
+        // --- Get Date objects ---
+        const markerTime = report.timestamp ? new Date(report.timestamp.replace("Z", "+00:00")) : null;
+        const publishedTime = report.published_at ? new Date(report.published_at.replace("Z", "+00:00")) : null;
+
+        // --- Get ISO strings (for title attribute) ---
+        const markerTimestampISO = markerTime && !isNaN(markerTime) ? markerTime.toISOString() : '';
+        const publishedTimestampISO = publishedTime && !isNaN(publishedTime) ? publishedTime.toISOString() : '';
+
+        // --- Calculate BOTH Absolute and Relative times using AppUtils ---
+        let markerTimeAbsolute = "N/A";
+        let markerTimeRelative = "N/A";
+        if (markerTime && !isNaN(markerTime)) {
+            markerTimeAbsolute = AppUtils.formatTime(markerTime); // e.g., "12/04/2025 16:38"
+            markerTimeRelative = AppUtils.formatTimeRelative(markerTime); // e.g., "5 min ago"
+        }
+
+        let publishedTimeAbsolute = "N/A";
+        let publishedTimeRelative = "N/A";
+        if (publishedTime && !isNaN(publishedTime)) {
+            publishedTimeAbsolute = AppUtils.formatTime(publishedTime);
+            publishedTimeRelative = AppUtils.formatTimeRelative(publishedTime);
+        }
+        // --- END Time Calculation ---
+
         const lat = report.lat; const lon = report.lon;
         const googleMapsLink = (lat != null && lon != null) ? `https://www.google.com/maps?q=${lat},${lon}` : '#';
-        const [mappedBattPercent, batteryStatusStr] = window.AppUtils ? AppUtils._parseBatteryInfo(report.battery, report.status, AppConfig.LOW_BATTERY_THRESHOLD) : [null, report.battery || report.status || 'Unknown'];
+
+        // Use the utility function for battery parsing
+        const [mappedBattPercent, batteryStatusStr] = AppUtils._parseBatteryInfo(
+            report.battery,
+            report.status,
+            AppConfig.LOW_BATTERY_THRESHOLD
+        );
+
         let batteryPercentStr = 'N/A';
         if (mappedBattPercent !== null) { batteryPercentStr = `${mappedBattPercent.toFixed(0)}%`; }
         else if (batteryStatusStr !== 'Unknown') { batteryPercentStr = batteryStatusStr; }
+
         const icon = (name) => `<span class="material-symbols-outlined">${name}</span>`;
-        const smallSvgIconHtml = window.AppUtils ? AppUtils.generateDeviceIconSVG(displayInfo.label, displayInfo.color, 20) : `<div style="display:inline-block; width:20px; height:20px; border-radius:50%; background-color:${displayInfo.color || '#ccc'}; vertical-align:middle; margin-right: 5px;"></div>`;
+        const smallSvgIconHtml = AppUtils.generateDeviceIconSVG(displayInfo.label, displayInfo.color, 20);
         const labelHtml = `<span style="display:inline-block; width:20px; height:20px; vertical-align:middle; margin-right: 5px;">${smallSvgIconHtml}</span>`;
+
         let content = `<div style="font-size: var(--body-small-size); max-width: 280px;"><table class="history-popup-table">`;
         content += `<tr><td>${icon('sell')}</td><td colspan="2" style="font-weight: bold;">${labelHtml}${displayInfo.name}</td></tr>`;
-        content += `<tr><td>${icon('schedule')}</td><td>Located:</td><td><span class="relative-time" data-timestamp="${markerTimestampISO}" title="${markerTimestampISO}">${markerTimeRelative}</span></td></tr>`;
-        if (publishedTime && (!markerTime || publishedTime.getTime() !== markerTime.getTime())) { content += `<tr><td>${icon('publish')}</td><td>Reported:</td><td><span class="relative-time" data-timestamp="${publishedTimestampISO}" title="${publishedTimestampISO}">${publishedTimeRelative}</span></td></tr>`; }
+        
+        content += `<tr><td>${icon('schedule')}</td><td>Located:</td><td><span class="relative-time" data-timestamp="${markerTimestampISO}" title="${markerTimestampISO}">${markerTimeAbsolute} (${markerTimeRelative})</span></td></tr>`;
+        // Show 'Reported' only if different from 'Located' time
+        if (publishedTime && markerTime && Math.abs(publishedTime.getTime() - markerTime.getTime()) > 1000) { // Check if more than 1s difference
+            content += `<tr><td>${icon('publish')}</td><td>Reported:</td><td><span class="relative-time" data-timestamp="${publishedTimestampISO}" title="${publishedTimestampISO}">${publishedTimeAbsolute} (${publishedTimeRelative})</span></td></tr>`;
+        }
+
         content += `<tr><td>${icon('location_on')}</td><td>Coords:</td><td><a href="${googleMapsLink}" target="_blank">${lat != null ? `${lat.toFixed(5)}°, ${lon.toFixed(5)}°` : 'N/A'}</a></td></tr>`;
         content += `<tr><td>${icon('battery_std')}</td><td>Battery:</td><td>${batteryPercentStr}${report.status !== null ? ` <small>(S:${report.status})</small>` : ''}</td></tr>`;
         content += `<tr><td>${icon('my_location')}</td><td>Accuracy:</td><td>${report.horizontalAccuracy != null ? `±${report.horizontalAccuracy.toFixed(0)}m` : 'N/A'}</td></tr>`;
         if (report.altitude != null) { content += `<tr><td>${icon('height')}</td><td>Altitude:</td><td>${report.altitude.toFixed(0)}m ${report.verticalAccuracy != null ? `(±${report.verticalAccuracy.toFixed(0)}m)` : ''}</td></tr>`; }
-        if (report.description) { content += `<tr><td>${icon('info')}</td><td>Desc:</td><td>${report.description}</td></tr>`; }
+        if (report.description) { content += `<tr><td>${icon('info')}</td><td>Desc:</td><td>${AppUtils.escapeHtml(report.description)}</td></tr>`; } // Added escapeHtml
         if (report.confidence != null) { content += `<tr><td>${icon('verified')}</td><td>Confidence:</td><td>${report.confidence}</td></tr>`; }
         content += `</table></div>`;
         return content;

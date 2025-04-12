@@ -275,12 +275,27 @@ window.AppUI = {
         createButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Creating...`;
 
         try {
+            // 1. Create the share link via API
             const shareResult = await AppApi.createDeviceShare(deviceId, duration, note);
             console.log("Share created:", shareResult);
 
+            // --- START: Fetch updated shares and update state ---
+            console.log("[UI Share Submit] Fetching updated shares list AFTER creation...");
+            try {
+                const updatedShares = await AppApi.fetchUserShares(); // Fetch the latest list
+                AppState.setUserActiveShares(updatedShares || []); // Update the global state
+                console.log("[UI Share Submit] AppState updated with latest shares.");
+            } catch (fetchErr) {
+                console.error("[UI Share Submit] Failed to fetch updated shares list:", fetchErr);
+                // Optionally show a warning, but proceed with rendering using potentially stale state
+                this.showErrorDialog("Update Warning", "Share created, but failed to refresh the shares list immediately.");
+            }
+            // --- END: Fetch updated shares ---
+
+            // 2. Close the creation dialog
             this.closeDialog('share-device-dialog');
 
-            // Populate and open the link dialog
+            // 3. Populate and open the link dialog (using data from createDeviceShare)
             document.getElementById('share-link-textarea').value = shareResult.share_url || 'Error: URL not returned';
             const expiryInfo = document.getElementById('share-link-expiry-info');
             if (shareResult.expires_at) {
@@ -293,17 +308,16 @@ window.AppUI = {
             } else {
                 expiryInfo.textContent = "Link does not expire automatically.";
             }
-            // Setup copy button listener
             const copyButton = document.getElementById('copy-share-link-button');
             const newCopyButton = copyButton.cloneNode(true);
             newCopyButton.onclick = () => this.copyShareLink();
             copyButton.parentNode.replaceChild(newCopyButton, copyButton);
-
             this.openDialog('share-link-dialog');
 
-            // Refresh lists in the background
-            this.renderActiveSharesList(); // Update settings page list
-            AppActions.refreshDevices(); // Update main device list for icon
+            // 4. Refresh UI lists using the NEWLY updated state
+            this.renderDevicePageSharesList(); // <<< Now uses updated state
+            this.renderActiveSharesList();     // <<< Also refresh settings page list
+            AppActions.refreshDevices();       // Refresh device list for share icon status
 
         } catch (error) {
             console.error("Error creating share link:", error);
@@ -346,68 +360,76 @@ window.AppUI = {
         }
     },
 
-    renderActiveSharesList: async function () {
+    renderActiveSharesList: function () {
+        // Ensure using the correct ID for the settings page list
         const listContainer = document.getElementById('devices-active-shares-list');
         const loadingIndicator = document.getElementById('devices-active-shares-loading');
         const noItemsMessage = document.getElementById('devices-no-active-shares-message');
-        if (!listContainer || !loadingIndicator || !noItemsMessage) return;
+        console.log("[UI Render] Rendering Settings Active Shares List..."); // Add log
 
-        loadingIndicator.style.display = 'block'; listContainer.style.display = 'none'; noItemsMessage.style.display = 'none'; listContainer.innerHTML = '';
+        if (!listContainer || !loadingIndicator || !noItemsMessage) {
+            console.warn("[UI Render Shares (Settings)] Settings page shares list UI elements missing.");
+            return;
+        }
+
+        // Show loading, clear list (Keep this logic)
+        loadingIndicator.style.display = 'block';
+        listContainer.style.display = 'none';
+        noItemsMessage.style.display = 'none';
+        listContainer.innerHTML = ''; // Clear previous items
 
         try {
-            const shares = await AppApi.fetchUserShares();
-            AppState.setUserActiveShares(shares);
+            const shares = AppState.getUserActiveShares(); // Get data directly from state
+            console.log("[UI Render Shares (Settings)] Data from state:", shares);
 
-            // --- ADD SAFETY CHECK ---
-            if (!Array.isArray(shares)) {
-                console.error("Received non-array data for shares:", shares);
-                throw new Error("Invalid data format received for shares.");
-            }
-            // --- ------------------ ---
+            if (!Array.isArray(shares)) { throw new Error("Invalid shares data in state."); }
 
-            if (shares.length === 0) { noItemsMessage.style.display = 'block'; }
-            else {
+            if (shares.length === 0) {
+                noItemsMessage.style.display = 'block';
+            } else {
                 listContainer.style.display = 'block';
-                shares.forEach(share => { // Safe to call forEach 
+                shares.forEach(share => { // Use data from state
                     const item = document.createElement('div');
-                    item.className = 'settings-item share-item'; // Keep same classes for styling
+                    item.className = 'settings-item share-item';
                     item.dataset.shareId = share.share_id;
-                    item.classList.toggle('share-inactive', !share.active);
-                    item.classList.toggle('share-expired', !!share.is_expired);
 
-                    const createdDate = share.created_at ? AppUtils.formatTimeRelative(new Date(share.created_at)) : 'Unknown';
-                    let expiryText = share.active ? "Never" : "Inactive";
-                    let expiryClass = share.active ? "" : "inactive";
-                    if (share.expires_at) {
-                        try { const expiryDate = new Date(share.expires_at.replace("Z", "+00:00")); const isExpired = expiryDate < new Date(); expiryText = `${isExpired ? 'Expired' : 'Expires'} ${AppUtils.formatTimeRelative(expiryDate)}`; if (isExpired) expiryClass = "expired"; else if (!share.active) expiryClass = "inactive"; } catch (e) { expiryText = "Invalid expiry"; expiryClass = "error"; }
-                    } else if (!share.active) { expiryText = "Inactive"; expiryClass = "inactive"; }
+                    // *** Use AppState data for rendering flags ***
+                    const isActive = share.active;
+                    const isExpired = !!share.is_expired; // Check expiry state
+                    // *** -------------------------------------- ***
 
-                    const noteHtml = share.note ? `<div class="settings-item-description share-note">Note: ${AppUtils.escapeHtml(share.note)}</div>` : '';
-                    const toggleButtonIcon = share.active ? 'pause_circle' : 'play_circle';
-                    const toggleButtonTitle = share.active ? 'Suspend Share (Deactivate Link)' : 'Resume Share (Activate Link)';
-                    const toggleButtonClass = share.active ? 'suspend-share-button' : 'resume-share-button';
+                    item.classList.toggle('share-inactive', !isActive);
+                    item.classList.toggle('share-expired', isExpired);
 
                     const createdISO = share.created_at || '';
                     const createdDateStr = createdISO ? AppUtils.formatTimeRelative(new Date(createdISO)) : 'Unknown';
+                    let expiryText = isActive ? "Never" : "Inactive";
+                    let expiryClass = isActive ? "" : "inactive";
+                    if (share.expires_at) { try { const expiryDate = new Date(share.expires_at.replace("Z", "+00:00")); const isNowExpired = expiryDate < new Date(); expiryText = `${isNowExpired ? 'Expired' : 'Expires'} ${AppUtils.formatTimeRelative(expiryDate)}`; if (isNowExpired) expiryClass = "expired"; else if (!isActive) expiryClass = "inactive"; } catch (e) { expiryText = "Invalid expiry"; expiryClass = "error"; } }
+                    else if (!isActive) { expiryText = "Inactive"; expiryClass = "inactive"; }
 
+                    const noteHtml = share.note ? `<div class="settings-item-description share-note">Note: ${AppUtils.escapeHtml(share.note)}</div>` : '';
+                    const toggleButtonIcon = isActive ? 'pause_circle' : 'play_circle';
+                    const toggleButtonTitle = isActive ? 'Suspend Share (Deactivate Link)' : 'Resume Share (Activate Link)';
+                    const toggleButtonClass = isActive ? 'suspend-share-button' : 'resume-share-button';
 
                     item.innerHTML = `
-                    <span class="material-icons drawer-item-icon share-status-icon ${expiryClass}">${share.active ? (share.is_expired ? 'history_toggle_off' : 'share') : 'pause_circle'}</span>
-                    <div class="settings-item-text">
-                        <div class="settings-item-title">${AppUtils.escapeHtml(share.device_name || 'Unknown Device')}</div>
-                        <div class="settings-item-description share-details">
-                            Created: <span class="relative-time" data-timestamp="${createdISO}">${createdDateStr}</span> | <span class="share-expiry ${expiryClass}">${expiryText}</span>
-                        </div>
+                        <span class="material-icons drawer-item-icon share-status-icon ${expiryClass}">${isActive ? (isExpired ? 'history_toggle_off' : 'share') : 'pause_circle'}</span>
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">${AppUtils.escapeHtml(share.device_name || 'Unknown Device')}</div>
+                            <div class="settings-item-description share-details">
+                                Created: <span class="relative-time" data-timestamp="${createdISO}">${createdDateStr}</span> | <span class="share-expiry ${expiryClass}">${expiryText}</span>
+                            </div>
                             <div class="settings-item-description share-link-display">
-                                <a href="${share.share_url}" target="_blank" title="Open share link">${share.share_url.replace(/^https:\/\/|^http:\/\//, '')}</a>
+                                <a href="${share.share_url}" target="_blank" title="Open share link">${share.share_url?.replace(/^https:\/\/|^http:\/\//, '') || 'N/A'}</a>
                                 <button class="text-button copy-share-button-list" title="Copy Link" data-url="${share.share_url}">
                                     <span class="material-icons" style="font-size: 16px;">content_copy</span>
                                 </button>
                             </div>
                             ${noteHtml}
-                    </div>
-                    <div class="share-item-actions">
-                            <button class="text-button toggle-share-button ${toggleButtonClass}" title="${toggleButtonTitle}" data-share-id="${share.share_id}" data-active="${share.active}">
+                        </div>
+                        <div class="share-item-actions">
+                            <button class="text-button toggle-share-button ${toggleButtonClass}" title="${toggleButtonTitle}" data-share-id="${share.share_id}" data-active="${isActive}">
                                 <span class="material-icons" style="font-size: 22px;">${toggleButtonIcon}</span>
                             </button>
                             <button class="text-button edit-share-button" title="Edit Duration/Note" data-share-id="${share.share_id}">
@@ -416,20 +438,28 @@ window.AppUI = {
                             <button class="text-button revoke-share-button" title="Delete Share Link Permanently" data-share-id="${share.share_id}" style="color: var(--m3-sys-color-error);">
                                 <span class="material-icons" style="font-size: 20px;">delete_forever</span>
                             </button>
-                    </div>
-                `;
+                        </div>
+                    `;
+                    // Attach event listeners using the **current** active state from the loop
                     item.querySelector('.revoke-share-button').addEventListener('click', (e) => { e.stopPropagation(); this.handleDeleteShare(share.share_id, share.device_name); });
-                    item.querySelector('.toggle-share-button').addEventListener('click', (e) => { e.stopPropagation(); this.handleToggleShareStatus(share.share_id, share.active); });
+                    item.querySelector('.toggle-share-button').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        // *** Read state directly from the button's data attribute ON CLICK ***
+                        const currentButtonStatus = e.currentTarget.dataset.active === 'true';
+                        this.handleToggleShareStatus(share.share_id, currentButtonStatus);
+                    });
                     item.querySelector('.edit-share-button').addEventListener('click', (e) => { e.stopPropagation(); this.openEditShareDialog(share); });
                     item.querySelector('.copy-share-button-list').addEventListener('click', (e) => { e.stopPropagation(); this.copyTextToClipboard(share.share_url, e.currentTarget); });
 
                     listContainer.appendChild(item);
                 });
             }
+            this.updateRelativeTimes();
         } catch (error) {
-            console.error("Error loading active shares:", error);
+            console.error("Error rendering active shares list (Settings):", error);
             noItemsMessage.textContent = `Error loading shares: ${error.message}`;
             noItemsMessage.style.display = 'block';
+            listContainer.style.display = 'none';
         } finally {
             loadingIndicator.style.display = 'none';
         }
@@ -440,21 +470,43 @@ window.AppUI = {
         this.showConfirmationDialog(
             "Delete Share Permanently?",
             `Are you sure you want to <strong>permanently delete</strong> the share link for "${AppUtils.escapeHtml(deviceName || 'this device')}"? This cannot be undone.`,
-            async () => {
+            async () => { // Make the callback async
                 console.log(`[UI] Deleting share ${shareId} permanently.`);
                 try {
-                    // This calls DELETE /api/shares/<share_id>
-                    const result = await AppApi.revokeShare(shareId); // <<< KEEP THIS NAME, it maps to the DELETE route
-                    this.showConfirmationDialog("Share Deleted", result.message || "Share link permanently deleted."); // Use result message
-                    this.renderActiveSharesList(); // Refresh the list
-                    AppActions.refreshDevices(); // Refresh device list status
+                    // 1. Call the API to delete the share
+                    const result = await AppApi.revokeShare(shareId); // Keep API call name (maps to DELETE route)
+
+                    // --- START: Fetch updated shares and update state ---
+                    console.log("[UI Delete Share] Fetching updated shares list AFTER deletion...");
+                    try {
+                        const updatedShares = await AppApi.fetchUserShares(); // Fetch the latest list
+                        AppState.setUserActiveShares(updatedShares || []); // Update the global state
+                        console.log("[UI Delete Share] AppState updated with latest shares.");
+                    } catch (fetchErr) {
+                        console.error("[UI Delete Share] Failed to fetch updated shares list:", fetchErr);
+                        // Optionally show a warning, but proceed with rendering anyway
+                        this.showErrorDialog("Update Warning", "Share deleted, but failed to refresh the shares list immediately.");
+                    }
+                    // --- END: Fetch updated shares ---
+
+                    // 3. Show success confirmation (using message from API if available)
+                    this.showConfirmationDialog("Share Deleted", result.message || "Share link permanently deleted.");
+
+                    // 4. Refresh UI lists using the NEWLY updated state
+                    this.renderDevicePageSharesList(); // <<< Refresh the list on the Devices page
+                    this.renderActiveSharesList();     // <<< Also refresh the list on the Settings page
+
+                    // 5. Refresh the main device list (to update share icons)
+                    AppActions.refreshDevices();
+
                 } catch (error) {
                     console.error("Error deleting share:", error);
-                    this.showErrorDialog("Deletion Failed", `Could not delete share: ${error.message}`);
+                    // Show error message from API response if possible
+                    const errorMessage = error?.data?.message || error?.message || "An unknown error occurred.";
+                    this.showErrorDialog("Deletion Failed", `Could not delete share: ${errorMessage}`);
                 }
-            },
-            null,
-            true
+            }
+            // No need for 'isDestructive: true' here, the confirmation is handled
         );
     },
 
@@ -465,23 +517,68 @@ window.AppUI = {
     handleToggleShareStatus: async function (shareId, currentIsActive) {
         const newStatus = !currentIsActive;
         const action = newStatus ? "resume" : "suspend";
-        console.log(`[UI] Toggling share ${shareId} status to ${newStatus}`);
-        // Optionally show visual feedback on the button
+        console.log(`[UI] Toggling share ${shareId} status to ${newStatus} (from current: ${currentIsActive})`);
+
+        // Find button for visual feedback during API call
         const button = document.querySelector(`.toggle-share-button[data-share-id="${shareId}"]`);
-        if (button) button.disabled = true;
+        let originalIcon = null;
+        if (button) {
+            originalIcon = button.querySelector('.material-icons')?.textContent;
+            button.disabled = true;
+            button.querySelector('.material-icons').textContent = 'pending';
+        } else {
+            console.warn(`[UI Toggle] Could not find button for share ${shareId} to disable.`);
+        }
 
         try {
-            await AppApi.toggleShareStatus(shareId, newStatus);
-            // Refresh lists to reflect the change
-            this.renderActiveSharesList();
-            AppActions.refreshDevices(); // Refresh device list to update share icon
-            this.showConfirmationDialog("Share Updated", `Share link has been ${action}d.`);
+            // Call API - it returns the *updated* share object
+            const updatedShare = await AppApi.toggleShareStatus(shareId, newStatus);
+            console.log("[UI Toggle Success] API call successful, updated share data received:", updatedShare);
+
+            // --- 1. Update AppState ---
+            const shareIndex = AppState.userActiveShares.findIndex(s => s.share_id === shareId);
+            if (shareIndex > -1) {
+                // Merge the updated data into the existing state array object
+                // Ensure 'is_expired' is correctly propagated from the API response if present
+                AppState.userActiveShares[shareIndex] = {
+                    ...AppState.userActiveShares[shareIndex], // Keep existing data like device_name
+                    ...updatedShare, // Overwrite with updated fields from API (active, expires_at, etc.)
+                    is_expired: !!updatedShare.is_expired // Ensure boolean flag
+                };
+                console.log(`[UI Toggle] Updated AppState for share ${shareId} with data:`, AppState.userActiveShares[shareIndex]);
+            } else {
+                console.warn(`[UI Toggle] Share ${shareId} not found in AppState after update. Adding.`);
+                // If not found, perhaps add it? Or better, rely on the re-render fetching full state.
+                // Let's just log for now and rely on re-render.
+            }
+
+            // --- 2. Trigger UI Re-render ---
+            // Re-render both lists to ensure consistency
+            this.renderActiveSharesList();     // Refresh settings page list
+            this.renderDevicePageSharesList(); // Refresh devices page list (if visible)
+
+            // --- 3. Refresh device list for icon ---
+            // This can happen in the background, no need to await
+            AppActions.refreshDevices();
+
+            // Optional: Brief success confirmation
+            // this.showConfirmationDialog("Share Updated", `Share link has been ${newStatus ? 'resumed' : 'suspended'}.`);
+
         } catch (error) {
             console.error(`Error ${action}ing share:`, error);
             this.showErrorDialog("Update Failed", `Could not ${action} share link: ${error.message}`);
-            if (button) button.disabled = false; // Re-enable button on error
+            // --- Restore button only if it exists ---
+            if (button) {
+                button.disabled = false;
+                if (originalIcon) button.querySelector('.material-icons').textContent = originalIcon;
+            }
+            // Re-render lists even on error to potentially reset state visually? Or leave as is?
+            // Let's re-render to be safe, showing the previous state.
+            this.renderActiveSharesList();
+            this.renderDevicePageSharesList();
         }
-    },
+        // NO finally block needed for button re-enabling - handled in try/catch
+    }, // End handleToggleShareStatus
 
     // Helper to copy text - used by share link dialog and list item copy button
     copyTextToClipboard: async function (textToCopy, buttonElement = null) {
@@ -583,33 +680,48 @@ window.AppUI = {
         saveButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div> Saving...`;
 
         try {
-            await AppApi.updateShareDuration(shareId, duration, note);
+            // Call API - returns the updated share object
+            const updatedShare = await AppApi.updateShareDuration(shareId, duration, note);
+            console.log("[UI Edit Share Success] API call successful, updated share data:", updatedShare);
+
+            // --- 1. Update AppState ---
+            const shareIndex = AppState.userActiveShares.findIndex(s => s.share_id === shareId);
+            if (shareIndex > -1) {
+                // Merge updated data
+                 AppState.userActiveShares[shareIndex] = {
+                     ...AppState.userActiveShares[shareIndex],
+                     ...updatedShare, // Overwrite with updated fields from API
+                     is_expired: !!updatedShare.is_expired // Ensure boolean flag
+                 };
+                console.log(`[UI Edit Share] Updated AppState for share ${shareId}`);
+            } else {
+                console.warn(`[UI Edit Share] Share ${shareId} not found in AppState after update.`);
+                // Add the updated share if it wasn't found? Or rely on re-render?
+                // AppState.userActiveShares.push(updatedShare); // Option to add if missing
+            }
+
+            // --- 2. Close Dialog & Show Confirmation ---
             this.closeDialog('edit-share-dialog');
             this.showConfirmationDialog("Share Updated", "Share duration and note have been updated.");
-            this.renderActiveSharesList(); // Refresh list
+
+            // --- 3. Trigger UI Re-render ---
+            this.renderActiveSharesList();     // Refresh settings page list
+            this.renderDevicePageSharesList(); // Refresh devices page list
+
+            // --- 4. Refresh device list (optional, but updates icons if needed) ---
+            // AppActions.refreshDevices(); // Might be overkill here unless status changes affect device icon
+
         } catch (error) {
             console.error("Error updating share:", error);
             errorElement.textContent = `Failed to update share: ${error.message}`;
             errorElement.style.display = 'block';
             this.showErrorDialog("Update Failed", `Could not update share: ${error.message}`);
+            // Keep dialog open on error? Yes.
         } finally {
             saveButton.disabled = false;
             saveButton.innerHTML = 'Save Changes';
         }
-    },
-
-
-
-
-
-
-
-
-
-
-    // --- END: New Share Dialog Functions ---
-
-
+    }, // End handleEditShareSubmit
 
 
     // --- NEW: Trigger Test Notification ---
@@ -945,14 +1057,12 @@ window.AppUI = {
 
     // --- Page Navigation ---
     changePage: function (pageId, sectionId = null) {
-        console.log(`[UI Debug] changePage called with pageId: "${pageId}" (type: ${typeof pageId})`);
+        console.log(`[UI] changePage called with pageId: "${pageId}"`); // Keep log
         const mainContent = document.getElementById('main-content');
         const pages = ['index', 'shared', 'places', 'history', 'geofences', 'settings', 'notifications-history', 'scanner']; // <-- ADD 'scanner'
 
         // --- Stop Scanner if navigating away ---
-        if (AppState.lastActivePageId === 'scanner' && pageId !== 'scanner' && window.Scanner) {
-            Scanner.stopScan("Navigated away from Scanner tab.");
-        }
+        if (AppState.lastActivePageId === 'scanner' && pageId !== 'scanner' && window.Scanner) { Scanner.stopScan("Navigated away from Scanner tab."); }
         // --- --------------------------------- ---
 
         if (pages.includes(pageId)) {
@@ -978,20 +1088,41 @@ window.AppUI = {
 
             // Handle page-specific actions
             if (pageId === 'index') {
-                if (AppState.getMap() && AppState.mapReady) { AppMap.invalidateMapSize(); AppMap.updateMapView(); }
-                else if (!AppState.getMap()) { AppMap.initMap(); }
+                if (AppState.getMap() && AppState.mapReady) {
+                    AppMap.invalidateMapSize(); // Invalidate size when switching TO map
+                    AppMap.updateMapView();
+                } else if (!AppState.getMap()) {
+                    // Initialize map only if it doesn't exist and we are navigating TO the map page
+                    AppMap.initMap();
+                }
             }
-            else if (pageId === 'shared') { this.renderDevicesList(AppState.getCurrentDeviceData()); AppActions.refreshDevices(); this.renderActiveSharesList(); } // Also render shares here now
+            if (pageId === 'shared') {
+                console.log("[UI ChangePage] Navigated to 'shared' page.");
+                // --- Render BOTH lists using current state ---
+                this.renderDevicesList(AppState.getCurrentDeviceData());
+                this.renderDevicePageSharesList(); // <<< CALL NEW FUNCTION
+                // --- Optionally trigger a silent background refresh ---
+                // AppActions.refreshDevices(); // Maybe omit this on simple nav?
+            }
             // else if (pageId === 'places') { this.renderSavedPlacesList(); }
             // else if (pageId === 'history') { this.renderLocationHistory(); }
-            else if (pageId === 'settings') { this.setupSettingsPage(); this.renderActiveSharesList(); if (sectionId) { setTimeout(() => this.scrollToSection(sectionId), 100); } } // Call renderActiveSharesList here
-            else if (pageId === 'geofences') { this.renderGlobalGeofences(); this.renderDeviceGeofenceLinks(); AppActions.refreshGeofencesAndDevices(); }
-            else if (pageId === 'notifications-history') { this.renderNotificationHistory(); }
-            // --- ADD Scanner Init ---
-            else if (pageId === 'scanner') {
-                if (window.Scanner) Scanner.initScannerPage();
-                else console.error("Scanner object not found when changing to scanner page.");
+            else if (pageId === 'geofences') {
+                // Refresh both geofences and device links when switching to this page
+                this.renderGlobalGeofences(); // Render known global fences first
+                this.renderDeviceGeofenceLinks(); // Render known links first
+                if (window.AppActions && typeof AppActions.refreshGeofencesAndDevices === 'function') {
+                    AppActions.refreshGeofencesAndDevices(); // Trigger background update
+                } else {
+                    console.error("AppActions.refreshGeofencesAndDevices not available.");
+                }
             }
+            else if (pageId === 'settings') {
+                this.setupSettingsPage(); // Setup specific listeners/UI for settings
+                this.renderActiveSharesList(); // Render shares list when settings page is shown
+                if (sectionId) { setTimeout(() => this.scrollToSection(sectionId), 100); }
+            }
+            else if (pageId === 'notifications-history') { this.renderNotificationHistory(); }
+            else if (pageId === 'scanner') { if (window.Scanner) Scanner.initScannerPage(); else console.error("Scanner object not found"); }
             // --- END Scanner Init ---
             // Removed places/history specific logic as they are gone from nav
         } else {
@@ -1081,68 +1212,63 @@ window.AppUI = {
 
     // --- List Rendering ---
     renderDevicesList: function (devices) {
+        // Get references (keep this part)
         const listElement = document.getElementById('shared-devices-list');
+        const listContainer = document.getElementById('shared-devices-list-container');
         const loadingIndicator = document.getElementById('devices-loading-indicator');
         const noDevicesMessage = document.getElementById('no-devices-message');
         const errorMessageElement = document.getElementById('devices-error-message');
-        if (!listElement || !loadingIndicator || !noDevicesMessage || !errorMessageElement) return;
 
-        loadingIndicator.style.display = 'none'; errorMessageElement.style.display = 'none'; listElement.innerHTML = '';
-        if (!devices || devices.length === 0) { noDevicesMessage.innerHTML = `...`; noDevicesMessage.style.display = 'block'; listElement.style.display = 'none'; return; }
-        noDevicesMessage.style.display = 'none'; listElement.style.display = 'block';
+        console.log(`[RenderDevicesList] Called. Received ${Array.isArray(devices) ? devices.length : 'INVALID'} devices. List Element: ${listElement ? 'Found' : 'Missing'}, Container: ${listContainer ? 'Found' : 'Missing'}`);
+        if (!listElement || !listContainer || !loadingIndicator || !noDevicesMessage || !errorMessageElement) {
+            console.error("[RenderDevicesList] Critical UI elements missing. Aborting render.");
+            return;
+        }
+
+        // Clear previous state (keep this)
+        loadingIndicator.style.display = 'none';
+        errorMessageElement.style.display = 'none';
+        listElement.innerHTML = ''; // Clear previous items
 
 
+        // --- START: Simplified Visibility Logic ---
+        if (!devices || !Array.isArray(devices) || devices.length === 0) {
+            console.log("[RenderDevicesList] No devices to render. Showing 'no devices' message.");
+            noDevicesMessage.innerHTML = `No devices configured or found yet. Add device files in Settings or wait for the next automatic refresh.`;
+            noDevicesMessage.style.display = 'block';
+            listElement.style.display = 'none'; // Hide the list itself
+            listContainer.style.display = 'block'; // Show the container (which holds the message)
+            return; // Exit early
+        }
+
+        // If we have devices, hide the 'no devices' message and ensure list/container are visible
+        noDevicesMessage.style.display = 'none';
+        listContainer.style.display = 'block'; // Show the container
+        listElement.style.display = 'block';   // Show the list
+
+        console.log("[RenderDevicesList] Rendering device items...");
+        let itemsRendered = 0;
         devices.forEach((device, index) => {
-            const displayInfo = AppState.getDeviceDisplayInfo(device.id);
-            const deviceElement = document.createElement('div');
-            deviceElement.classList.add('shared-device'); deviceElement.setAttribute('tabindex', '0'); deviceElement.setAttribute('role', 'button');
-            const locationStatusText = (displayInfo.lat != null && displayInfo.lng != null) ? displayInfo.status : "Location Unknown"; deviceElement.setAttribute('aria-label', `Device: ${displayInfo.name}, Status: ${locationStatusText}`); deviceElement.dataset.deviceId = device.id;
-
-            let batteryIcon = 'battery_unknown';
-            let batteryClass = ''; // For error styling
-            let batteryTooltip = '';
-            if (displayInfo.batteryLevel != null) {
-                const level = displayInfo.batteryLevel;
-                batteryTooltip = `${level.toFixed(0)}%`;
-                // Use Material Symbols names
-                if (level > 95) batteryIcon = 'battery_full';
-                else if (level > 80) batteryIcon = 'battery_6_bar';
-                else if (level > 60) batteryIcon = 'battery_5_bar';
-                else if (level > 40) batteryIcon = 'battery_4_bar';
-                else if (level > 25) batteryIcon = 'battery_3_bar';
-                // Use LOW_BATTERY_THRESHOLD from AppConfig
-                else if (level >= AppConfig.LOW_BATTERY_THRESHOLD) batteryIcon = 'battery_alert'; // Low but not critical yet? Or use 1/2 bar? Let's use alert for now.
-                else { batteryIcon = 'battery_0_bar'; batteryClass = 'error'; } // Very Low/Critical
-            } else if (displayInfo.batteryStatus !== 'Unknown') {
-                batteryTooltip = displayInfo.batteryStatus;
-                if (displayInfo.batteryStatus === 'Low' || displayInfo.batteryStatus === 'Very Low') {
-                    batteryIcon = 'battery_alert'; batteryClass = 'error';
-                }
-            }
-
-            // --- START: Fix Battery Indicator ---
-            // Use material-symbols-outlined class
-            const batteryIndicator = batteryTooltip
-                ? `<span class="material-symbols-outlined ${batteryClass}" style="font-size: 18px; vertical-align: middle; font-variation-settings: 'FILL' 1;" title="${batteryTooltip}">${batteryIcon}</span>`
-                : '';
-            // --- END: Fix Battery Indicator ---
-
-            const iconHtml = displayInfo.svg_icon || `<div class="device-icon-fallback">?</div>`;
-            const isCurrentlyVisible = displayInfo.isVisible;
-            const visibilityToggleHtml = `<label class="toggle-switch device-visibility-toggle" style="margin-left: 16px;" title="Show/Hide on Map"><input type="checkbox" data-device-id="${device.id}" ${isCurrentlyVisible ? 'checked' : ''}><span class="toggle-slider"></span></label>`;
-            let displayStatus = displayInfo.status || 'Unknown Status';
-            if (displayInfo.lat == null && displayInfo.lng == null && displayInfo.status === 'Location Unknown') { displayStatus = 'Awaiting first location...'; }
-            else { displayStatus = displayStatus.replace(/ - Batt:.*$/, ''); } // Remove battery part if present
-
-            const shareIndicatorHtml = device.is_shared
-                ? `<span class="material-icons share-indicator" title="Shared" style="font-size: 16px; vertical-align: middle; margin-left: 4px; opacity: 0.7; color: var(--m3-sys-color-secondary);">share</span>`
-                : '';
-
-            const timestampISO = device.rawLocation?.timestamp || ''; // Get ISO timestamp
-            const relativeTimeStr = timestampISO ? AppUtils.formatTimeRelative(new Date(timestampISO)) : 'Never';
-            const addressTitle = displayInfo.address || ''; // Use formatted address string as title
-
-            deviceElement.innerHTML = `
+            try {
+                const displayInfo = AppState.getDeviceDisplayInfo(device.id);
+                const deviceElement = document.createElement('div');
+                deviceElement.classList.add('shared-device');
+                deviceElement.setAttribute('tabindex', '0');
+                deviceElement.setAttribute('role', 'button');
+                const locationStatusText = (displayInfo.lat != null && displayInfo.lng != null) ? displayInfo.status : "Location Unknown";
+                deviceElement.setAttribute('aria-label', `Device: ${displayInfo.name}, Status: ${locationStatusText}`);
+                deviceElement.dataset.deviceId = device.id;
+                let batteryIcon = 'battery_unknown'; let batteryClass = ''; let batteryTooltip = '';
+                if (displayInfo.batteryLevel != null) { const level = displayInfo.batteryLevel; batteryTooltip = `${level.toFixed(0)}%`; if (level > 95) batteryIcon = 'battery_full'; else if (level > 80) batteryIcon = 'battery_6_bar'; else if (level > 60) batteryIcon = 'battery_5_bar'; else if (level > 40) batteryIcon = 'battery_4_bar'; else if (level > 25) batteryIcon = 'battery_3_bar'; else if (level >= AppConfig.LOW_BATTERY_THRESHOLD) batteryIcon = 'battery_alert'; else { batteryIcon = 'battery_0_bar'; batteryClass = 'error'; } }
+                else if (displayInfo.batteryStatus !== 'Unknown') { batteryTooltip = displayInfo.batteryStatus; if (displayInfo.batteryStatus === 'Low' || displayInfo.batteryStatus === 'Very Low') { batteryIcon = 'battery_alert'; batteryClass = 'error'; } }
+                const batteryIndicator = batteryTooltip ? `<span class="material-symbols-outlined ${batteryClass}" style="font-size: 18px; vertical-align: middle; font-variation-settings: 'FILL' 1;" title="${batteryTooltip}">${batteryIcon}</span>` : '';
+                const iconHtml = displayInfo.svg_icon || `<div class="device-icon-fallback">?</div>`;
+                const isCurrentlyVisible = displayInfo.isVisible;
+                const visibilityToggleHtml = `<label class="toggle-switch device-visibility-toggle" style="margin-left: 16px;" title="Show/Hide on Map"><input type="checkbox" data-device-id="${device.id}" ${isCurrentlyVisible ? 'checked' : ''}><span class="toggle-slider"></span></label>`;
+                let displayStatus = displayInfo.status || 'Unknown Status'; if (displayInfo.lat == null && displayInfo.lng == null && displayInfo.status === 'Location Unknown') { displayStatus = 'Awaiting first location...'; } else { displayStatus = displayStatus.replace(/ - Batt:.*$/, ''); }
+                const shareIndicatorHtml = device.is_shared ? `<span class="material-icons share-indicator" title="Shared" style="font-size: 16px; vertical-align: middle; margin-left: 4px; opacity: 0.7; color: var(--m3-sys-color-secondary);">share</span>` : '';
+                const timestampISO = device.rawLocation?.timestamp || ''; const relativeTimeStr = timestampISO ? AppUtils.formatTimeRelative(new Date(timestampISO)) : 'Never'; const addressTitle = displayInfo.address || '';
+                deviceElement.innerHTML = `
                    <div class="device-icon">${iconHtml}</div>
                    <div class="device-info">
                        <div class="device-name">${displayInfo.name}</div>
@@ -1153,8 +1279,89 @@ window.AppUI = {
                    </div>
                    ${visibilityToggleHtml}
                    <span class="material-icons device-menu" data-device-index="${index}" tabindex="0" role="button" aria-label="Device options for ${displayInfo.name}">more_vert</span>`;
-            listElement.appendChild(deviceElement);
+
+                listElement.appendChild(deviceElement);
+                itemsRendered++;
+            } catch (renderError) {
+                console.error(`[RenderDevicesList] Error rendering item for device ${device.id}:`, renderError);
+            }
         });
+
+        // --- REMOVE the delayed check and forced style ---
+        // --- END Simplified Visibility Logic ---
+
+        console.log(`[RenderDevicesList] Finished rendering. ${itemsRendered} items added.`);
+        this.updateRelativeTimes(); // Update relative times after rendering
+    }, // End renderDevicesList
+
+    renderDevicePageSharesList: function () {
+        const listContainer = document.getElementById('devices-page-active-shares-list');
+        const loadingIndicator = document.getElementById('devices-page-active-shares-loading');
+        const noItemsMessage = document.getElementById('devices-page-no-active-shares-message');
+        console.log("[UI Render] Rendering Devices Page Active Shares List..."); // Add log
+
+        if (!listContainer || !loadingIndicator || !noItemsMessage) {
+            console.error("[UI Render Shares (Devices)] Devices page shares list UI elements missing.");
+            return;
+        }
+        loadingIndicator.style.display = 'block'; listContainer.style.display = 'none'; noItemsMessage.style.display = 'none'; listContainer.innerHTML = '';
+
+        try {
+            const shares = AppState.getUserActiveShares(); // Get data directly from state
+             console.log("[UI Render Shares (Devices)] Data from state:", shares);
+
+            if (!Array.isArray(shares)) { throw new Error("Invalid shares data in state."); }
+
+            if (shares.length === 0) {
+                noItemsMessage.style.display = 'block';
+            } else {
+                listContainer.style.display = 'block';
+                shares.forEach(share => {
+                    // --- Reuse the exact same rendering logic and listener attachment as renderActiveSharesList ---
+                    const item = document.createElement('div');
+                    item.className = 'settings-item share-item';
+                    item.dataset.shareId = share.share_id;
+                    const isActive = share.active; const isExpired = !!share.is_expired;
+                    item.classList.toggle('share-inactive', !isActive); item.classList.toggle('share-expired', isExpired);
+                    const createdISO = share.created_at || ''; const createdDateStr = createdISO ? AppUtils.formatTimeRelative(new Date(createdISO)) : 'Unknown';
+                    let expiryText = isActive ? "Never" : "Inactive"; let expiryClass = isActive ? "" : "inactive";
+                    if (share.expires_at) { try { const expiryDate = new Date(share.expires_at.replace("Z", "+00:00")); const isNowExpired = expiryDate < new Date(); expiryText = `${isNowExpired ? 'Expired' : 'Expires'} ${AppUtils.formatTimeRelative(expiryDate)}`; if (isNowExpired) expiryClass = "expired"; else if (!isActive) expiryClass = "inactive"; } catch (e) { expiryText = "Invalid expiry"; expiryClass = "error"; } }
+                    else if (!isActive) { expiryText = "Inactive"; expiryClass = "inactive"; }
+                    const noteHtml = share.note ? `<div class="settings-item-description share-note">Note: ${AppUtils.escapeHtml(share.note)}</div>` : '';
+                    const toggleButtonIcon = isActive ? 'pause_circle' : 'play_circle'; const toggleButtonTitle = isActive ? 'Suspend Share (Deactivate Link)' : 'Resume Share (Activate Link)'; const toggleButtonClass = isActive ? 'suspend-share-button' : 'resume-share-button';
+                    item.innerHTML = `
+                        <span class="material-icons drawer-item-icon share-status-icon ${expiryClass}">${isActive ? (isExpired ? 'history_toggle_off' : 'share') : 'pause_circle'}</span>
+                        <div class="settings-item-text">
+                            <div class="settings-item-title">${AppUtils.escapeHtml(share.device_name || 'Unknown Device')}</div>
+                            <div class="settings-item-description share-details"> Created: <span class="relative-time" data-timestamp="${createdISO}">${createdDateStr}</span> | <span class="share-expiry ${expiryClass}">${expiryText}</span> </div>
+                            <div class="settings-item-description share-link-display"> <a href="${share.share_url}" target="_blank" title="Open share link">${share.share_url?.replace(/^https:\/\/|^http:\/\//, '') || 'N/A'}</a> <button class="text-button copy-share-button-list" title="Copy Link" data-url="${share.share_url}"> <span class="material-icons" style="font-size: 16px;">content_copy</span> </button> </div>
+                            ${noteHtml}
+                        </div>
+                        <div class="share-item-actions">
+                             <button class="text-button toggle-share-button ${toggleButtonClass}" title="${toggleButtonTitle}" data-share-id="${share.share_id}" data-active="${isActive}"> <span class="material-icons" style="font-size: 22px;">${toggleButtonIcon}</span> </button>
+                             <button class="text-button edit-share-button" title="Edit Duration/Note" data-share-id="${share.share_id}"> <span class="material-icons" style="font-size: 20px;">edit_calendar</span> </button>
+                             <button class="text-button revoke-share-button" title="Delete Share Link Permanently" data-share-id="${share.share_id}" style="color: var(--m3-sys-color-error);"> <span class="material-icons" style="font-size: 20px;">delete_forever</span> </button>
+                        </div>
+                    `;
+                    item.querySelector('.revoke-share-button').addEventListener('click', (e) => { e.stopPropagation(); this.handleDeleteShare(share.share_id, share.device_name); });
+                    item.querySelector('.toggle-share-button').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        // *** Read state directly from the button's data attribute ON CLICK ***
+                        const currentButtonStatus = e.currentTarget.dataset.active === 'true';
+                        this.handleToggleShareStatus(share.share_id, currentButtonStatus);
+                     });
+                    item.querySelector('.edit-share-button').addEventListener('click', (e) => { e.stopPropagation(); this.openEditShareDialog(share); });
+                    item.querySelector('.copy-share-button-list').addEventListener('click', (e) => { e.stopPropagation(); this.copyTextToClipboard(share.share_url, e.currentTarget); });
+                    listContainer.appendChild(item);
+                    // --- ------------------------------------------------------------------------------------------- ---
+                });
+            }
+            this.updateRelativeTimes();
+        } catch (error) {
+            console.error("Error rendering device page shares list:", error); noItemsMessage.textContent = `Error loading shares: ${error.message}`; noItemsMessage.style.display = 'block'; listContainer.style.display = 'none';
+        } finally {
+            loadingIndicator.style.display = 'none';
+        }
     },
 
     renderSavedPlacesList: function () {

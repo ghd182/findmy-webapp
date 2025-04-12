@@ -18,7 +18,10 @@ from urllib.parse import urlparse, urljoin
 # Blueprint, User model, LoginManager instance
 from . import bp
 from app.models import User
-from app import login_manager  # No csrf import needed here anymore
+from app import login_manager
+
+# --- Import the globally defined limiter instance ---
+from app import limiter
 
 # UserDataService for data operations
 from app.services.user_data_service import UserDataService
@@ -61,11 +64,12 @@ def load_user(user_id):
 
 # --- Registration Route (Using WTForms) ---
 @bp.route("/register", methods=["GET", "POST"])
+@limiter.limit("5 per hour")  # <<< Use the imported 'limiter' instance directly
 def register_route():
     if current_user.is_authenticated:
         return redirect(url_for("main.index_route"))
     form = RegistrationForm()
-    if form.validate_on_submit():  # CSRF check happens here if enabled globally
+    if form.validate_on_submit():
         username = form.username.data.strip()
         email = form.email.data.strip().lower()
         password = form.password.data
@@ -105,7 +109,7 @@ def register_route():
         except Exception as e:
             log.exception(f"Unexpected error saving new user '{username}': {e}")
             flash(
-                "An unexpected error occurred during registration. Please try again later.",
+                "An error occurred during registration. Please try again later.",
                 "error",
             )
     return render_template("register.html", title="Register", form=form)
@@ -113,18 +117,19 @@ def register_route():
 
 # --- Login Route (Using WTForms) ---
 @bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute;200 per day") # <<< Use the imported 'limiter' instance directly
 def login_route():
     uds = UserDataService(current_app.config)
     first_user_redirect = False
     try:
-        existing_users = uds.load_users() # Returns {} on error or empty
+        existing_users = uds.load_users()  # Returns {} on error or empty
         # --- MODIFIED CHECK ---
         # Redirect to register ONLY if the users file was loaded successfully AND is empty
         if isinstance(existing_users, dict) and not existing_users:
-             log.warning("No users found in users.json. Redirecting to registration.")
-             flash("No users exist yet. Please register the first user.", "info")
-             first_user_redirect = True
-             return redirect(url_for(".register_route"))
+            log.warning("No users found in users.json. Redirecting to registration.")
+            flash("No users exist yet. Please register the first user.", "info")
+            first_user_redirect = True
+            return redirect(url_for(".register_route"))
         # --- END MODIFIED CHECK ---
     except Exception as e:
         # Log error if loading users failed, but don't necessarily redirect to register
@@ -134,17 +139,18 @@ def login_route():
 
     # If redirected to register, don't process the login form
     if first_user_redirect:
-        return redirect(url_for(".register_route")) # Ensure redirect happens
+        return redirect(url_for(".register_route"))  # Ensure redirect happens
 
     # --- Proceed with Login Form ---
     form = LoginForm()
     if form.validate_on_submit():
-        # ... (keep existing login logic) ...
         username = form.username.data
         password = form.password.data
         remember = form.remember.data
         log.info(f"Login attempt for user: '{username}'")
         user_obj = User.get(username)
+
+        # --- IMPORTANT: Check user_obj BEFORE checking password to avoid timing attacks ---
         if user_obj and user_obj.check_password(password):
             login_user(user_obj, remember=remember)
             log.info(f"User '{username}' logged in successfully.")
@@ -153,17 +159,24 @@ def login_route():
             if not is_safe_url(next_page):
                 log.warning(f"Unsafe 'next' URL: {next_page}. Ignoring.")
                 next_page = None
-            has_creds = uds.user_has_apple_credentials(username) # Error handled in uds
-            log.info(f"User '{username}' creds status: {'Found' if has_creds else 'Not Found'}")
+            has_creds = uds.user_has_apple_credentials(username)  # Error handled in uds
+            log.info(
+                f"User '{username}' creds status: {'Found' if has_creds else 'Not Found'}"
+            )
 
-            if next_page: return redirect(next_page)
+            if next_page:
+                return redirect(next_page)
             elif not has_creds:
                 flash("Login successful. Please set your Apple credentials.", "info")
                 return redirect(url_for("main.manage_apple_creds_route"))
-            else: return redirect(url_for("main.index_route"))
+            else:
+                return redirect(next_page or url_for("main.index_route"))
         else:
+            # Failed login attempt
             log.warning(f"Login failed for user '{username}'. Invalid credentials.")
+            # Rate limit decorator automatically handles the 429 response on too many attempts
             flash("Invalid username or password.", "error")
+            # No need to explicitly handle rate limit error here, Flask-Limiter does it
 
     return render_template("login.html", title="Login", form=form)
 

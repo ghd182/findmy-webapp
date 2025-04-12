@@ -24,7 +24,7 @@ const urlsToCache = [
   '/static/img/wifi_tethering_16dp.png', // Examples - keep if used
   '/static/img/crisis_alert_16dp.png',   // Examples - keep if used
   '/static/img/labs_16dp.png',         // Examples - keep if used
-   '/static/img/battery_warning_16dp.png',
+   '/static/img/battery_alert_16dp.png',
    '/favicon.ico', // Use root route now handled by Flask
 
   // Leaflet assets

@@ -1193,6 +1193,15 @@ input:checked+.toggle-slider:before {
     font-style: italic;
 }
 
+#shared-devices-list{
+    display: block;
+}
+
+#shared-devices-list-container{
+    display: block;
+}
+
+
 .shared-device {
     display: flex;
     align-items: center;

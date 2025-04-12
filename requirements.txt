@@ -2,6 +2,7 @@
 aiohappyeyeballs==2.4.4
 aiohttp==3.11.11
 aiosignal==1.3.2
+alembic>=1.8        # Required by Flask-Migrate
 asgiref==3.8.1
 attrs==25.1.0
 beautifulsoup4==4.12.3
@@ -18,7 +19,10 @@ filelock==3.18.0
 FindMy==0.7.6
 Flask==3.1.0
 Flask-Executor==1.0.0
+Flask-Limiter>=3.0.0
 Flask-Login==0.6.3
+Flask-Migrate>=4.0  # Use a recent version
+Flask-SQLAlchemy>=3.0 # Use a recent version
 Flask-WTF>=1.0.0
 frozenlist==1.5.0
 h11==0.14.0
@@ -36,6 +40,7 @@ pywebpush==2.0.3
 requests==2.32.3
 six==1.17.0
 soupsieve==2.6
+SQLAlchemy>=2.0 # Recommended for Flask-SQLAlchemy 3+
 srp==1.0.22
 typing_extensions==4.12.2
 urllib3==2.3.0

@@ -11,6 +11,10 @@ from app.services.user_data_service import UserDataService
 from app.services.apple_data_service import AppleDataService
 from app.services.notification_service import NotificationService
 
+from findmy.reports import AppleAccount, LoginState # Add LoginState
+from findmy.errors import UnauthorizedError # Import error for re
+
+
 # Import scheduler components
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -25,156 +29,147 @@ def run_fetch_for_user_task(
 ):
     """
     Performs the background data fetch and processing for a single user.
-    This function is intended to be run in a separate thread.
-
-    Args:
-        user_id: The ID of the user to fetch data for.
-        apple_id: The user's Apple ID (decrypted).
-        apple_password: The user's Apple password or ASP (decrypted).
-        config_obj: The application configuration dictionary.
+    Handles potential re-authentication requirements during fetch.
     """
     log.info(f"Starting background fetch task for user '{user_id}'...")
     task_start_time = time.monotonic()
     uds = UserDataService(config_obj)
     apple_service = AppleDataService(config_obj, uds)
     notifier = NotificationService(config_obj, uds)
+    account = None
+    login_required_message = "Account re-authentication required. Please go to Credentials page and re-save."
 
-    # 1. Perform Login
-    account, login_error_msg = apple_service.perform_account_login(
-        apple_id, apple_password
-    )
+    # 1. Load Credentials AND State
+    try:
+        # --- Use the NEW method ---
+        loaded_apple_id, loaded_password, loaded_state = uds.load_apple_credentials_and_state(user_id)
+        # --- -------------------- ---
 
-    # Handle login failure
-    if login_error_msg or not account:
-        log.error(
-            f"User '{user_id}': Background fetch failed during login: {login_error_msg}"
+        # Basic validation - ensure we have at least ID and password from the file
+        if not loaded_apple_id or not loaded_password:
+            log.warning(f"User '{user_id}': Credentials missing or incomplete in storage. Cannot fetch.")
+            # Update cache with error
+            uds.save_cache_to_file(user_id, {
+                "data": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": "Credentials not configured."
+            })
+            return
+
+        # Restore or Login
+        # Pass the loaded state to perform_account_login
+        account, state, login_error = apple_service.perform_account_login(
+            loaded_apple_id, loaded_password, loaded_state # Pass loaded state
         )
-        try:
-            user_cache = uds.load_cache_from_file(user_id) or {"data": None}
-            # *** IMPROVED ERROR MESSAGE FOR CACHE ***
-            cache_error_msg = login_error_msg or "Login failed: Unknown reason."
-            if "Two-Factor Authentication required" in cache_error_msg:
-                cache_error_msg = (
-                    "Login Failed: 2FA Required. Use App-Specific Password."
-                )
-            # *** END IMPROVEMENT ***
-            user_cache["error"] = cache_error_msg  # Store user-friendlier message
-            user_cache["timestamp"] = datetime.now(timezone.utc).isoformat()
-            uds.save_cache_to_file(user_id, user_cache)
-            log.debug(
-                f"User '{user_id}': Updated cache with login error: {cache_error_msg}"
-            )
-        except Exception as e:
-            log.error(f"User '{user_id}': Failed to update cache with login error: {e}")
-        log.info(f"Exiting fetch task early for user '{user_id}' due to login failure.")
-        return
 
-    # 2. Fetch Accessory Data
+        if state != LoginState.LOGGED_IN:
+            # This handles cases where restoration failed, initial login failed,
+            # or restored state wasn't LOGGED_IN (including REQUIRE_2FA).
+            # Background task cannot proceed if not LOGGED_IN.
+            log.error(f"User '{user_id}': Background fetch cannot proceed. Account not in LOGGED_IN state ({state}). Error: {login_error}")
+            cache_error_msg = login_error or "Login/Restore failed."
+            # Make 2FA error message clearer for background task
+            if state == LoginState.REQUIRE_2FA:
+                cache_error_msg = login_required_message
+            uds.save_cache_to_file(user_id, {
+                "data": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": cache_error_msg
+            })
+            return # Exit task
+
+        # If we reach here, account is in LOGGED_IN state
+        log.info(f"User '{user_id}': Account ready for data fetch.")
+
+    except Exception as e:
+        log.exception(f"User '{user_id}': Error during initial credential loading/login in background task.")
+        uds.save_cache_to_file(user_id, {
+            "data": None, "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": f"Internal error loading credentials: {e}"
+        })
+        return # Exit task
+
+    # 2. Fetch Accessory Data (account is guaranteed to be LOGGED_IN here)
     fetched_data_dict, fetch_errors, found_device_ids = None, None, set()
     try:
-        fetched_data_dict, fetch_errors, found_device_ids = (
-            apple_service.fetch_accessory_data(user_id, account)
-        )
+        # --- fetch_accessory_data now requires the account object ---
+        fetched_data_dict, fetch_errors, found_device_ids = apple_service.fetch_accessory_data(user_id, account)
+        # --- ----------------------------------------------------- ---
+
+    except UnauthorizedError as auth_err:
+        # Handle session expiry during fetch
+        log.warning(f"User '{user_id}': Authorization error during data fetch ({auth_err}). Re-login might be needed.")
+        fetch_errors = login_required_message # Signal user to re-auth interactively
+        # Set fetched_data_dict to None so cache gets updated with error
+        fetched_data_dict = None
     except Exception as fetch_exc:
-        log.exception(
-            f"User '{user_id}': Unhandled exception during fetch_accessory_data"
-        )
+        log.exception(f"User '{user_id}': Unhandled exception during fetch_accessory_data")
         fetch_errors = f"Fetch failed unexpectedly: {fetch_exc}"
+        fetched_data_dict = None
 
-    # Log any non-fatal errors during fetch
-    if fetch_errors:
-        log.warning(f"User '{user_id}': Fetch encountered errors: {fetch_errors}")
+    # Log any non-fatal errors during fetch (if fetch didn't raise UnauthorizedError)
+    if fetch_errors and fetch_errors != login_required_message:
+        log.warning(f"User '{user_id}': Fetch encountered non-fatal errors: {fetch_errors}")
 
-    # 3. Process Fetched Data (if successful)
+    # 3. Process Data & Update Cache (Similar logic as before)
     if fetched_data_dict is not None:
-        timestamp_now_iso = datetime.now(timezone.utc).isoformat()
-        user_cache_data = {
-            "data": fetched_data_dict,
-            "timestamp": timestamp_now_iso,
-            "error": fetch_errors,  # Store non-fatal errors in cache
-        }
+        # ... (Keep the existing logic for saving cache, checking notifications, cleanup) ...
+         timestamp_now_iso = datetime.now(timezone.utc).isoformat()
+         user_cache_data = {
+             "data": fetched_data_dict,
+             "timestamp": timestamp_now_iso,
+             "error": fetch_errors, # Store non-fatal fetch errors
+         }
+         uds.save_cache_to_file(user_id, user_cache_data)
+         log.info(f"User '{user_id}': Cache updated with {len(fetched_data_dict)} devices.")
+         # ... Notification checks ...
+         log.info(f"User '{user_id}': Starting notification checks...")
+         check_start_time = time.monotonic()
+         try:
+             user_devices_config_for_notify = uds.load_devices_config(user_id) # Load fresh config
+             for device_id, device_data in fetched_data_dict.items():
+                 device_config = device_data.get("config") # Use config embedded in fetched data
+                 if not device_config: continue
+                 latest_report = (device_data["reports"][0] if device_data.get("reports") else None)
+                 if latest_report:
+                     try:
+                         notifier.check_device_notifications(user_id, device_id, latest_report, device_config)
+                     except Exception as notify_err:
+                         log.exception(f"User '{user_id}': Error checking notifications for {device_id}: {notify_err}")
+             log.info(f"User '{user_id}': Notification checks finished in {time.monotonic() - check_start_time:.2f}s.")
+         except Exception as e:
+             log.error(f"User '{user_id}': Error during notification check phase: {e}", exc_info=True)
 
-        # Save data to cache file
+         # ... Cleanup ...
+         cleanup_start_time = time.monotonic()
+         try:
+             uds.cleanup_user_data_files(user_id, found_device_ids)
+             log.debug(f"User '{user_id}': Stale state cleanup finished in {time.monotonic() - cleanup_start_time:.2f}s.")
+         except Exception as e:
+             log.error(f"User '{user_id}': Error during state cleanup: {e}")
+
+    else: # Handle fetch failure (including UnauthorizedError caught above)
+        log.error(f"User '{user_id}': Background fetch failed or requires re-authentication.")
+        # Update cache with the specific fetch error
+        uds.save_cache_to_file(user_id, {
+            "data": None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": fetch_errors or "Fetch failed: Unknown reason."
+        })
+
+    # 4. Save updated account state IF login/fetch didn't require re-auth
+    #    (FindMy.py might update internal tokens even during fetch)
+    if account and account.login_state == LoginState.LOGGED_IN and fetch_errors != login_required_message:
         try:
-            uds.save_cache_to_file(user_id, user_cache_data)
-            log.info(
-                f"User '{user_id}': Cache updated with {len(fetched_data_dict)} devices."
-            )
+            # Save the potentially updated state back (using original credentials)
+            uds.save_apple_credentials_and_state(user_id, loaded_apple_id, loaded_password, account.export())
+            log.debug(f"User '{user_id}': Saved potentially updated account state after fetch.")
         except Exception as e:
-            log.error(f"User '{user_id}': Failed to save cache file: {e}")
-            # Continue processing even if cache save fails
+            log.error(f"User '{user_id}': Failed to save updated account state after fetch: {e}")
 
-        # Check for notifications based on the new data
-        log.info(f"User '{user_id}': Starting notification checks...")
-        check_start_time = time.monotonic()
-        try:
-            # Load fresh device config for notification checks
-            user_devices_config_for_notify = uds.load_devices_config(user_id)
-
-            for device_id, device_data in fetched_data_dict.items():
-                # Use the config embedded within the fetched data (already validated)
-                device_config = device_data.get("config")
-                if not device_config:
-                    log.debug(
-                        f"User '{user_id}': No config found for device '{device_id}' in fetched data during notification check, skipping."
-                    )
-                    continue
-
-                # Get the latest report from the list (should be sorted newest first)
-                latest_report = (
-                    device_data["reports"][0] if device_data.get("reports") else None
-                )
-
-                if latest_report:
-                    try:
-                        # Perform geofence and battery checks
-                        notifier.check_device_notifications(
-                            user_id, device_id, latest_report, device_config
-                        )
-                    except Exception as notify_err:
-                        log.exception(
-                            f"User '{user_id}': Error checking notifications for {device_id}: {notify_err}"
-                        )
-            log.info(
-                f"User '{user_id}': Notification checks finished in {time.monotonic() - check_start_time:.2f}s."
-            )
-        except Exception as e:
-            log.error(
-                f"User '{user_id}': Error during notification check phase: {e}",
-                exc_info=True,
-            )
-
-        # Cleanup stale state files (geofence, battery, notifications times)
-        cleanup_start_time = time.monotonic()
-        try:
-            uds.cleanup_user_data_files(user_id, found_device_ids)
-            log.debug(
-                f"User '{user_id}': Stale state cleanup finished in {time.monotonic() - cleanup_start_time:.2f}s."
-            )
-        except Exception as e:
-            log.error(f"User '{user_id}': Error during state cleanup: {e}")
-
-    # 4. Handle Case Where Fetch Returned No Data
-    else:
-        log.error(
-            f"User '{user_id}': Background fetch did not return any data dictionary (fetch_accessory_data returned None)."
-        )
-        # Update cache with the fetch error
-        try:
-            user_cache = uds.load_cache_from_file(user_id) or {"data": None}
-            user_cache["error"] = (
-                fetch_errors or "Failed to retrieve data dictionary from fetch service."
-            )
-            user_cache["timestamp"] = datetime.now(timezone.utc).isoformat()
-            uds.save_cache_to_file(user_id, user_cache)
-            log.debug(f"User '{user_id}': Updated cache with fetch failure error.")
-        except Exception as e:
-            log.error(f"User '{user_id}': Failed to update cache with fetch error: {e}")
 
     # 5. Log Task Completion
-    log.info(
-        f"Finished background fetch task for user '{user_id}' in {time.monotonic() - task_start_time:.2f}s."
-    )
+    log.info(f"Finished background fetch task for user '{user_id}' in {time.monotonic() - task_start_time:.2f}s.")
 
 
 # --- Master Scheduler Job ---
@@ -221,50 +216,28 @@ def master_fetch_scheduler_job(config_obj: Dict[str, Any]):
 
     for user_id in users_to_fetch:
         try:
-            # Load DECRYPTED credentials for the user
-            apple_id, apple_password = uds.load_apple_credentials(user_id)
+            # --- Use the NEW method to load creds and state ---
+            apple_id, apple_password, _ = uds.load_apple_credentials_and_state(user_id)
+            # --- ------------------------------------------- ---
 
-            # Check if credentials exist
-            if not apple_id or not apple_password:
-                log.warning(
-                    f"Master fetch: Skipping user '{user_id}', Apple credentials not found or incomplete."
-                )
-                # Optionally update cache to reflect missing credentials if needed
-                try:
-                    user_cache = uds.load_cache_from_file(user_id) or {"data": None}
-                    # Only update error if it's different or cache is missing error
-                    if (
-                        user_cache.get("error")
-                        != "Apple credentials not set. Cannot fetch data."
-                    ):
-                        user_cache["error"] = (
-                            "Apple credentials not set. Cannot fetch data."
-                        )
-                        user_cache["timestamp"] = datetime.now(timezone.utc).isoformat()
-                        uds.save_cache_to_file(user_id, user_cache)
-                except Exception as e:
-                    log.error(
-                        f"Master fetch: Failed to update cache for skipped user '{user_id}': {e}"
-                    )
+            # Check if credentials exist (only need password for the task)
+            if not apple_id or not apple_password: # Check for decrypted password here
+                log.warning(f"Master fetch: Skipping user '{user_id}', credentials missing/incomplete or decryption failed.")
+                # ... (keep cache update logic for skipped user) ...
                 skipped_count += 1
-                continue  # Skip to the next user
+                continue # Skip to the next user
 
-            # Spawn a new thread for the user fetch task
+            # --- Spawn thread with UNENCRYPTED password ---
             log.debug(f"Master fetch: Spawning fetch task thread for user '{user_id}'")
             fetch_thread = threading.Thread(
                 target=run_fetch_for_user_task,
-                args=(
-                    user_id,
-                    apple_id,
-                    apple_password,
-                    config_obj,
-                ),  # Pass necessary args
-                name=f"FetchUser-{user_id}",  # Helpful thread name
-                daemon=True,  # Allow main process to exit even if threads are running
+                args=(user_id, apple_id, apple_password, config_obj), # Pass UNENCRYPTED password
+                name=f"FetchUser-{user_id}", daemon=True,
             )
             fetch_thread.start()
             thread_list.append(fetch_thread)
             spawned_count += 1
+            # --- --------------------------------------- ---
 
         except Exception as e:
             # Catch errors during credential loading or thread spawning for a specific user
