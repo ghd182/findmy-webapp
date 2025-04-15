@@ -793,7 +793,7 @@ window.AppMap = {
 
         let content = `<div style="font-size: var(--body-small-size); max-width: 280px;"><table class="history-popup-table">`;
         content += `<tr><td>${icon('sell')}</td><td colspan="2" style="font-weight: bold;">${labelHtml}${displayInfo.name}</td></tr>`;
-        
+
         content += `<tr><td>${icon('schedule')}</td><td>Located:</td><td><span class="relative-time" data-timestamp="${markerTimestampISO}" title="${markerTimestampISO}">${markerTimeAbsolute} (${markerTimeRelative})</span></td></tr>`;
         // Show 'Reported' only if different from 'Located' time
         if (publishedTime && markerTime && Math.abs(publishedTime.getTime() - markerTime.getTime()) > 1000) { // Check if more than 1s difference
@@ -804,7 +804,7 @@ window.AppMap = {
         content += `<tr><td>${icon('battery_std')}</td><td>Battery:</td><td>${batteryPercentStr}${report.status !== null ? ` <small>(S:${report.status})</small>` : ''}</td></tr>`;
         content += `<tr><td>${icon('my_location')}</td><td>Accuracy:</td><td>${report.horizontalAccuracy != null ? `±${report.horizontalAccuracy.toFixed(0)}m` : 'N/A'}</td></tr>`;
         if (report.altitude != null) { content += `<tr><td>${icon('height')}</td><td>Altitude:</td><td>${report.altitude.toFixed(0)}m ${report.verticalAccuracy != null ? `(±${report.verticalAccuracy.toFixed(0)}m)` : ''}</td></tr>`; }
-        if (report.description) { content += `<tr><td>${icon('info')}</td><td>Desc:</td><td>${AppUtils.escapeHtml(report.description)}</td></tr>`; } // Added escapeHtml
+        if (report.description) { content += `<tr><td>${icon('info')}</td><td>Details:</td><td>${AppUtils.escapeHtml(report.description)}</td></tr>`; } // Added escapeHtml
         if (report.confidence != null) { content += `<tr><td>${icon('verified')}</td><td>Confidence:</td><td>${report.confidence}</td></tr>`; }
         content += `</table></div>`;
         return content;

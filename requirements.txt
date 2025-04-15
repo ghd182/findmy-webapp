@@ -13,7 +13,7 @@ cffi==1.17.1
 charset-normalizer==3.4.1
 click==8.1.8
 colorama==0.4.6
-cryptography==44.0.0
+cryptography==44.0.1
 email_validator>=1.1
 filelock==3.18.0
 FindMy==0.7.6
@@ -29,7 +29,7 @@ h11==0.14.0
 http_ece==1.2.1
 idna==3.10
 itsdangerous==2.2.0
-Jinja2==3.1.5
+Jinja2>=3.1.6
 MarkupSafe==3.0.2
 multidict==6.1.0
 propcache==0.2.1
