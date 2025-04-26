@@ -1,6 +1,6 @@
 # FindMy WebApp - A Multi-User Find My Alternative
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-119900.svg?style=flat-square)](https://opensource.org/licenses/MIT)  
+[![License: MIT](https://img.shields.io/badge/License-MIT-119900.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-donate-yellow.svg?style=flat-square&logo=buy-me-a-coffee)](https://www.buymeacoffee.com/ghd182)
 
 A self-hosted, multi-user web application designed as an alternative to Apple's Find My service. It tracks Apple devices (e.g., AirTags, iPhones, MacBooks) using [FindMy.py](https://github.com/malmeloo/FindMy.py) and features a modern Material 3 interface.
@@ -21,9 +21,12 @@ This project provides a self-hosted web interface to locate Apple devices. It pe
 - **Apple Device Tracking**: Supports `.plist` or `.keys` files (e.g., OpenHaystack) for device association.
 - **Interactive Map**: Displays device locations with dynamic icons, popups, and history trails.
 - **Geofencing**: Create zones and receive entry/exit notifications.
-- **Push Notifications**: Alerts for geofence events, low battery, and more.
-- **Device Sharing**: Generate secure, time-limited revocable public links for live location sharing.
+- **Push Notifications**: Alerts for geofence events, low battery, and configurable "device not seen" events.
+- **Configurable Alerts**: Enable/disable low battery and "not seen" notifications per device. Set custom low battery thresholds per device.
+- **Device Sharing**: Generate secure, time-limited (or indefinite), revocable public links for sharing the live location of **one or more devices**.
+- **Local Share Geofences**: Viewers of shared links can define their own temporary geofences and receive browser notifications (page must remain open).
 - **Material 3 Design**: Responsive UI with light/dark modes and dynamic theming.
+- **Splash Screen**: Smooth loading transition on app start.
 - **PWA Support**: Installable as a Progressive Web App with offline caching.
 - **Dockerized Deployment**: Easy setup with Docker and Docker Compose.
 
@@ -51,20 +54,20 @@ This project provides a self-hosted web interface to locate Apple devices. It pe
 
 ### Installation
 
-1. Clone the repository:  
+1. Clone the repository:
    ```bash
    git clone https://github.com/ghd182/findmy-webapp.git && cd findmy-webapp
    ```
 
 #### Local Development (Not Recommended for Full Functionality)
 
-2. Create a virtual environment and install dependencies:  
+2. Create a virtual environment and install dependencies:
    ```bash
    python -m venv venv && source venv/bin/activate
    pip install -r requirements.txt
    ```
-3. Configure environment variables in a `.env` file (see `.env.example`).
-4. Run the app:  
+3. Configure environment variables in a `.env` file (see `docker-compose.yml` for variables - `.env` file itself is less used now).
+4. Run the app:
    ```bash
    python run.py
    ```
@@ -73,29 +76,30 @@ This project provides a self-hosted web interface to locate Apple devices. It pe
 #### Docker Deployment (Recommended)
 
 2. Configure `docker-compose.yml`:
-   - Set environment variables (e.g., `SECRET_SEED`, `FERNET_SEED`, `VAPID_SEED`).
-   - Adjust optional variables as needed.
-3. Build and run the containers:  
+   - **CRITICAL:** Set strong, unique values for `SECRET_SEED`, `FERNET_SEED`, and `VAPID_SEED`. Use long random phrases.
+   - Set `VAPID_CLAIMS_EMAIL` to your email address (e.g., `mailto:you@example.com`).
+   - Adjust volume paths for `./data` to use **absolute paths** on your host machine (e.g., `/home/your_user/findmy-app/data:/app/data`).
+   - Customize optional variables (timezone `TZ`, `FETCH_INTERVAL_MINUTES`, `LOW_BATTERY_THRESHOLD`, `NOTIFICATION_HISTORY_DAYS`, `DEFAULT_NOT_SEEN_THRESHOLD_HOURS`, etc.) if needed.
+3. Build and run the containers:
    ```bash
-   docker compose up -d
+   docker compose up -d --build
    ```
 4. Access the app at `http://<your-docker-host-ip>:5000`.
 
 ---
 
-
 ## Usage
 
 1.  **Access & Register/Login:** Open the app URL. Create an account or log in.
-2.  **Set Apple Credentials:** Navigate `☰ Menu` ➔ `Apple Credentials`. Enter your Apple ID email and **your regular Apple ID password**. Save. (An initial data fetch is triggered).
+2.  **Set Apple Credentials:** Navigate `☰ Menu` ➔ `Apple Credentials`. Enter your Apple ID email and **your regular Apple ID password**. Save. Complete the 2FA process if prompted. (An initial data fetch is triggered).
 3.  **Upload Device Files:** Navigate `☰ Menu` ➔ `Settings` ➔ `Manage Device Files`. Upload `.plist` or `.keys` files. (Another fetch is triggered).
 4.  **View Map:** Go to `Map` tab. Devices appear after background fetch. Use controls (Zoom, My Location, Show All, History Toggle/Slider). Click markers for info popups.
-5.  **View Devices:** Go to `Devices` tab for list. Click item to center map. Use `⋮` menu (Edit, Share, Geofences, Test Notifications, Remove). Toggle map visibility (eye icon).
+5.  **View Devices:** Go to `Devices` tab for list. Click item to center map. Use `⋮` menu (Edit, Share, Geofences, Test Notifications, Remove). Toggle map visibility (eye icon). **Edit Device:** Configure display name, label, color, and **enable/disable low battery/not seen alerts**, set custom low battery threshold.
 6.  **Manage Geofences:** Go to `Geofences` tab. Create global areas ("+" button). Link/unlink devices and configure notifications per link in device cards.
 7.  **View Alerts:** Go to `Alerts` tab for notification history. Manage read/unread/delete.
 8.  **Configure Settings:** Go to `Settings` tab. Manage theme/color, map defaults, notification permissions, import/export, manage active shares, delete account.
-
-
+9.  **Sharing:** From the device `⋮` menu, select `Share Device`. Choose **multiple devices**, set duration (or indefinite), add an optional note, and create the link. Manage created shares in Settings.
+10. **View Shared Link:** Open the generated share link. View device location(s). **Define Local Geofences** (optional) using map tools within the share page; receive browser notifications when the device enters/exits these *local* zones (page must stay open).
 
 ---
 
@@ -107,8 +111,8 @@ This project provides a self-hosted web interface to locate Apple devices. It pe
 | <img src="app/static/img/screenshot_map.png" alt="Map Tab" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> | <img src="app/static/img/screenshot_devices.png" alt="Devices Tab" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> | <img src="app/static/img/screenshot_drawer.png" alt="Drawer" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> |
 
 ### Device Management
-| Device Options | Share Creation | Shared View |
-|:-------------:|:--------------:|:-----------:|
+| Device Options | Share Creation (Multi-Device) | Shared View (Multi-Device) |
+|:-------------:|:-----------------------------:|:--------------------------:|
 | <img src="app/static/img/screenshot_device.png" alt="Device Options" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> | <img src="app/static/img/screenshot_share.png" alt="Device Sharing" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> | <img src="app/static/img/screenshot_shared.png" alt="Shared Device" width="200" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"/> |
 
 ---
@@ -128,21 +132,21 @@ This project provides a self-hosted web interface to locate Apple devices. It pe
                     <li>Confirm the Apple ID has been <b>previously used on an Apple device</b> (iPhone, Mac, etc.) or signed into iCloud within a <b>macOS virtual machine</b> (e.g., using <a href="https://github.com/sickcodes/Docker-OSX">Docker-OSX</a>) to establish trust.</li>
                     <li>Check the <b>Anisette server</b> status (<code>docker compose logs anisette</code>). If it's crashing or showing errors, the authentication process will fail. Ensure it's running and <code>ANISETTE_SERVERS</code> points to it.</li>
                     <li>Check the <code>findmyapp</code> logs (<code>docker compose logs findmyapp</code>) for specific error messages from <code>FindMy.py</code>.</li>
+                    <li>Complete the interactive 2FA flow on the <b>Credentials</b> page if prompted.</li>
                 </ol>
             </li>
         </ul>
     </li>
     <li><b>No Devices Showing:</b> Check credentials, file uploads, wait for fetch interval, trigger manual refresh (<code>Devices</code> ➔ <code>Update Status</code>), check server logs (<code>findmyapp</code> and <code>anisette</code>).</li>
-    <li><b>Notifications Not Working:</b> Check browser permission, VAPID setup (<code>VAPID_SEED</code>, <code>VAPID_CLAIMS_EMAIL</code>), subscription status (Settings), geofence link notification toggles, low battery threshold, cooldown period.</li>
+    <li><b>Notifications Not Working:</b> Check browser permission, VAPID setup (<code>VAPID_SEED</code>, <code>VAPID_CLAIMS_EMAIL</code>), subscription status (Settings), check per-device notification toggles (Edit Device), check geofence link notification toggles, low battery threshold (global and per-device), cooldown period, "not seen" threshold.</li>
+    <li><b>"Not Seen" Alerts Triggering Unexpectedly:</b> Check the "Not Seen Threshold" (global in config, per-device in Edit Device). Ensure background fetches are running successfully (check logs). Temporary network issues or Apple service delays can affect location reporting frequency.</li>
+    <li><b>Shared Link Geofences/Notifications Not Working:</b> These are *local* to the browser viewing the link. The share page tab must remain open for checks and notifications to occur. They do not use the backend push system.</li>
+    <li><b>Cannot Change Fetch Interval Per User:</b> This is currently not supported due to the global background task architecture. The fetch interval is set globally in the `docker-compose.yml` or `.env`.</li>
     <li><b>Map Issues:</b> Clear cache, check internet, check browser console (F12).</li>
-    <li><b>Docker Permissions:</b> Ensure host <code>./data</code> directory is writable by the container user (often UID/GID 1000). Use <code>sudo chown -R 1000:1000 ./data</code> or Docker volumes.</li>
-    <li><b>VAPID Seed Failure:</b> If logs mention "scalar... outside the valid range", use a <i>different</i> random string for <code>VAPID_SEED</code> and restart.</li>
-    <li><b>Updating:</b> Pull latest code (<code>git pull</code>), rebuild images (<code>docker compose build</code>), redeploy (<code>docker compose up -d</code> or Portainer "Update the stack" with "Re-pull image").</li>
-    <li><b>Data Storage:</b> User data in <code>data/</code> (mapped to <code>/app/data</code> in container).</li>            <li><b>Important:</b> If you delete the container, this data is lost unless you use Docker volumes.</li>
-            <li><b>Anisette Server:</b> If you are using the Anisette server, ensure it is running and accessible.</li>
-            <li><b>Web Bluetooth Scanner:</b> The scanner tab is experimental and has limitations. It cannot reliably identify standard Find My packets from <code>.plist</code>/official devices due to Web Bluetooth MAC address obfuscation. It only works for OpenHaystack devices with Haystack Service Data UUID or static <code>.keys</code> files.</li>
-        </ul>
-    </li>
+    <li><b>Docker Permissions:</b> Ensure host `./data` directory is writable by the container user (often UID/GID 1000). Use `sudo chown -R 1000:1000 ./data` or Docker volumes.</li>
+    <li><b>VAPID Seed Failure:</b> If logs mention "scalar... outside the valid range", use a <i>different</i> random string for `VAPID_SEED` and restart.</li>
+    <li><b>Updating:</b> Pull latest code (`git pull`), rebuild images (`docker compose build`), redeploy (`docker compose up -d` or Portainer "Update the stack" with "Re-pull image").</li>
+    <li><b>Data Storage:</b> User data in `data/` (mapped to `/app/data` in container).</li>
 </ul>
 </details>
 

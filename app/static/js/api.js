@@ -6,10 +6,11 @@ window.AppApi = {
         function getCsrfToken() {
             return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         }
-        // --- --------------------------------------------------------- ---
 
         console.log(`API Call: ${options.method || 'GET'} ${url}`, options.body ? (typeof options.body === 'string' ? 'JSON body' : 'FormData/Other body') : '');
         let response;
+        const originalRequestUrl = url; // Keep track for error messages
+
         try {
             const defaultHeaders = {
                 'Accept': 'application/json',
@@ -41,7 +42,7 @@ window.AppApi = {
                 defaultHeaders['Content-Type'] = 'application/json';
             }
 
-            response = await fetch(url, { ...options, method: method, headers: defaultHeaders }); // Ensure method is passed
+            response = await fetch(url, { ...options, method: method, headers: defaultHeaders });
 
             const contentType = response.headers.get("content-type");
             const isJson = contentType && contentType.includes("application/json");
@@ -69,12 +70,44 @@ window.AppApi = {
             else { /* Strict check: non-JSON OK response is an error */ const errorText = `API Error: Expected JSON response but received Content-Type: ${contentType || 'N/A'} for ${url}`; console.error(errorText); const error = new Error("Invalid response format from server."); error.status = response.status; error.code = 'INVALID_CONTENT_TYPE'; error.data = { message: errorText }; throw error; }
 
         } catch (error) {
-            // Handle Network Errors / Other Errors (keep existing logic, CSRF handled above)
-            if (error.code === 'CSRF_ERROR_HANDLED') {
-                // Don't re-throw if CSRF was already handled by dialog
-                return Promise.reject(error); // Still reject the promise so calling code knows it failed
+            // --- Cloudflare Access Error Detection ---
+            const isCorsFetchError = error instanceof TypeError && error.message.includes('Failed to fetch');
+            // Check if the error message contains the Cloudflare URL OR if the SW sent our specific code
+            const isCloudflareAccessUrlInError = error.message.includes('cloudflareaccess.com');
+            const isCloudflareCode = error.code === 'CLOUDFLARE_AUTH_REQUIRED'; // Check code from SW
+        
+            if ((isCorsFetchError && isCloudflareAccessUrlInError) || isCloudflareCode) {
+                console.warn("[API Fetch] Detected potential Cloudflare Access block.", error);
+                if (window.AppUI && typeof window.AppUI.showCloudflareReauthPrompt === 'function') {
+                    // Check if prompt is already shown to prevent duplicates
+                    const existingPrompt = document.getElementById('confirmation-dialog-overlay');
+                     if (!existingPrompt || !existingPrompt.classList.contains('show')) {
+                         AppUI.showCloudflareReauthPrompt(originalRequestUrl);
+                     } else {
+                         console.log("[API Fetch] Cloudflare prompt already visible, skipping new one.");
+                     }
+                } else {
+                    // Fallback if UI isn't ready
+                    alert("Your security session may have expired. Please reload the page to re-authenticate.");
+                }
+                // Reject the promise to signal failure, but mark it as handled
+                return Promise.reject({ code: 'CLOUDFLARE_AUTH_REQUIRED', message: 'Cloudflare Access re-authentication needed.' });
             }
-            if (!error.status) { error.message = `Network error or server unreachable: ${error.message}`; error.code = 'NETWORK_ERROR'; }
+            // --- END: Cloudflare Access Error Detection ---
+    
+            // Handle other errors (CSRF Handled, Network Errors etc.)
+            if (error.code === 'CSRF_ERROR_HANDLED') {
+                return Promise.reject(error); // Don't re-handle
+            }
+            // If it wasn't Cloudflare, treat TypeError as likely network issue
+            if (!error.status && error instanceof TypeError) {
+                 error.message = `Network error or server unreachable fetching ${originalRequestUrl}. Are you offline?`;
+                 error.code = 'NETWORK_ERROR';
+             } else if (!error.status) { // Other non-HTTP errors
+                error.message = `Error fetching ${originalRequestUrl}: ${error.message}`;
+                error.code = error.code || 'FETCH_ERROR';
+            }
+            console.error(`[API Fetch Catch] Unhandled Error: ${error.code || 'N/A'} - ${error.message}`); // Log other errors
             throw error; // Re-throw other errors
         }
     }, // End _fetch

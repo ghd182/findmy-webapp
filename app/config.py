@@ -154,17 +154,17 @@ class Config:
     )
     # --- Keep specific ones if needed by NotificationService logic ---
     GEOFENCE_ENTRY_BADGE_PATH = os.getenv(
-        "GEOFENCE_ENTRY_BADGE_PATH", "img/wifi_tethering_16dp.png"
+        "GEOFENCE_ENTRY_BADGE_PATH", "img/input_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
     )  # Still used by current logic
     GEOFENCE_EXIT_BADGE_PATH = os.getenv(
-        "GEOFENCE_EXIT_BADGE_PATH", "img/crisis_alert_16dp.png"
+        "GEOFENCE_EXIT_BADGE_PATH", "img/output_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
     )  # Still used by current logic
     BATTERY_LOW_BADGE_PATH = os.getenv(
-        "BATTERY_LOW_BADGE_PATH", "img/battery_alert_16dp.png"
+        "BATTERY_LOW_BADGE_PATH", "img/battery_alert_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
     )  # Still used
-    TEST_BADGE_PATH = os.getenv("TEST_BADGE_PATH", "img/labs_16dp.png")  # Still used
+    TEST_BADGE_PATH = os.getenv("TEST_BADGE_PATH", "img/labs_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png")  # Still used
     WELCOME_BADGE_PATH = os.getenv(
-        "WELCOME_BADGE_PATH", "img/notifications_16dp.png"
+        "WELCOME_BADGE_PATH", "img/celebration_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
     )  # Still used
     WELCOME_NOTIFICATION_ICON_PATH = os.getenv(
         "WELCOME_NOTIFICATION_ICON_PATH", DEFAULT_NOTIFICATION_ICON_PATH

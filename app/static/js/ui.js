@@ -1,6 +1,53 @@
 // app/static/js/ui.js
 
 window.AppUI = {
+
+
+    /**
+ * Displays a modal dialog prompting the user to re-authenticate with Cloudflare Access.
+ * @param {string} failedUrl - The URL that failed to load (for context, not redirection).
+ */
+    showCloudflareReauthPrompt: function (failedUrl) {
+        console.log("[UI] Showing Cloudflare re-authentication prompt.");
+        const title = "Authentication Required";
+        // Provide a user-friendly message explaining the likely cause
+        const message = `Your access session seems to have expired, preventing the app from loading necessary resources (like ${failedUrl ? `<code>${AppUtils.escapeHtml(failedUrl)}</code>` : 'assets or data'}).<br><br>Please re-authenticate with the access gateway to continue. Reloading the page should initiate this.`;
+
+        // Use your existing confirmation dialog structure
+        this.showConfirmationDialog(
+            title,
+            message,
+            () => { // onConfirm: User clicks "Re-authenticate"
+                console.log("[UI] User clicked Re-authenticate. Reloading page...");
+                // Reload the current page. Cloudflare Access should intercept this
+                // if the session is expired. Using true forces a server check.
+                window.location.reload(true);
+                // Alternative: Redirect to root, might be cleaner sometimes
+                // window.location.href = '/';
+            },
+            () => { // onCancel: User clicks "Cancel"
+                console.log("[UI] User cancelled Cloudflare re-authentication.");
+                // Optional: Show a less intrusive warning that the app might not work correctly
+                this.showErrorDialog("Authentication Needed", "The app may not function correctly until you re-authenticate. Reload the page when ready.", 5000);
+            },
+            "Reload & Re-authenticate", // Custom confirm button text
+            "Cancel" // Custom cancel button text
+        );
+
+        // Customize the confirmation dialog slightly for this specific case
+        const dialog = document.getElementById('confirmation-dialog');
+        const dialogTitle = document.getElementById('confirmation-dialog-title');
+        // Find the icon span within the header (adjust selector if needed)
+        const iconSpan = dialog?.querySelector('.dialog-header .material-icons');
+
+        if (dialogTitle) dialogTitle.textContent = title; // Ensure title is set
+        // Use a relevant icon for security/authentication
+        if (iconSpan) iconSpan.textContent = 'vpn_key';
+        // You might want to style the confirm button differently if needed using CSS
+    },
+
+
+
     // --- Dialog Management ---
     openDialog: function (dialogId) {
         console.log("[UI] Opening dialog:", dialogId);
@@ -146,29 +193,28 @@ window.AppUI = {
         this.openDialog('error-dialog');
     },
 
-    showConfirmationDialog: function (title, message, onConfirm = null, onCancel = null) {
+    showConfirmationDialog: function (title, message, onConfirm = null, onCancel = null, confirmText = 'Confirm', cancelText = 'Cancel') { // Added button text args
         document.getElementById('confirmation-dialog-title').textContent = title;
         document.getElementById('confirmation-dialog-content').innerHTML = message; // Use innerHTML
         const actions = document.getElementById('confirmation-dialog-actions');
+        const iconSpan = document.getElementById('confirmation-dialog')?.querySelector('.dialog-header .material-icons'); // Get icon
+
         actions.innerHTML = ''; // Clear previous buttons
 
         if (onConfirm && typeof onConfirm === 'function') {
-            // Confirmation mode
-            const cancelButton = document.createElement('button'); cancelButton.className = 'text-button'; cancelButton.textContent = 'Cancel';
-            cancelButton.onclick = () => {
-                if (onCancel && typeof onCancel === 'function') onCancel();
-                this.closeDialog('confirmation-dialog');
-            };
+            // Set default icon if not the specific re-auth case
+            if (iconSpan && title !== "Authentication Required") iconSpan.textContent = 'check_circle_outline';
 
-            const confirmButton = document.createElement('button'); confirmButton.className = 'button'; confirmButton.textContent = 'Confirm';
-            confirmButton.onclick = () => {
-                onConfirm();
-                this.closeDialog('confirmation-dialog');
-            };
-            actions.appendChild(cancelButton);
-            actions.appendChild(confirmButton);
+            // Confirmation mode
+            const cancelButton = document.createElement('button'); cancelButton.className = 'text-button'; cancelButton.textContent = cancelText; // Use arg
+            cancelButton.onclick = () => { if (onCancel && typeof onCancel === 'function') onCancel(); this.closeDialog('confirmation-dialog'); };
+
+            const confirmButton = document.createElement('button'); confirmButton.className = 'button'; confirmButton.textContent = confirmText; // Use arg
+            confirmButton.onclick = () => { onConfirm(); this.closeDialog('confirmation-dialog'); };
+            actions.appendChild(cancelButton); actions.appendChild(confirmButton);
         } else {
             // Simple OK mode
+            if (iconSpan) iconSpan.textContent = 'info_outline'; // Use info icon for simple OK
             const okButton = document.createElement('button'); okButton.className = 'button'; okButton.textContent = 'OK';
             okButton.onclick = () => this.closeDialog('confirmation-dialog');
             actions.appendChild(okButton);
@@ -688,11 +734,11 @@ window.AppUI = {
             const shareIndex = AppState.userActiveShares.findIndex(s => s.share_id === shareId);
             if (shareIndex > -1) {
                 // Merge updated data
-                 AppState.userActiveShares[shareIndex] = {
-                     ...AppState.userActiveShares[shareIndex],
-                     ...updatedShare, // Overwrite with updated fields from API
-                     is_expired: !!updatedShare.is_expired // Ensure boolean flag
-                 };
+                AppState.userActiveShares[shareIndex] = {
+                    ...AppState.userActiveShares[shareIndex],
+                    ...updatedShare, // Overwrite with updated fields from API
+                    is_expired: !!updatedShare.is_expired // Ensure boolean flag
+                };
                 console.log(`[UI Edit Share] Updated AppState for share ${shareId}`);
             } else {
                 console.warn(`[UI Edit Share] Share ${shareId} not found in AppState after update.`);
@@ -755,38 +801,49 @@ window.AppUI = {
 
         try {
             const history = await AppApi.fetchNotificationHistory();
-            // --- ADD SAFETY CHECK ---
             if (!Array.isArray(history)) {
                 console.error("Received non-array data for notification history:", history);
                 throw new Error("Invalid data format received for history.");
             }
-            // --- ------------------ ---
+
             if (history.length === 0) {
                 noItemsMessage.style.display = 'block'; markAllReadButton.disabled = true; clearAllButton.disabled = true;
             } else {
                 listContainer.style.display = 'block'; let hasUnread = false;
                 history.forEach(item => {
                     const itemElement = document.createElement('div');
-                    itemElement.classList.add('notification-item'); itemElement.dataset.id = item.id; itemElement.dataset.type = item.data?.type || 'unknown';
+                    itemElement.classList.add('notification-item');
+                    itemElement.dataset.id = item.id;
+                    const notificationType = item.data?.type || 'unknown';
+                    itemElement.dataset.type = notificationType;
+
                     if (!item.is_read) { itemElement.classList.add('unread'); hasUnread = true; }
 
-                    let icon = 'notifications';
-                    switch (item.data?.type) {
-                        case 'geofence': icon = 'location_searching'; break;
-                        case 'battery': icon = 'battery_alert'; break;
-                        case 'welcome': icon = 'celebration'; break;
-                        case 'test': icon = 'science'; break;
+                    let icon = 'notifications'; // Default icon
+
+                    // --- Icon Determination Logic (Keep this) ---
+                    if (notificationType === 'geofence') {
+                        const eventType = item.data?.eventType;
+                        if (eventType === 'entry') { icon = 'input_circle'; }
+                        else if (eventType === 'exit') { icon = 'output_circle'; }
+                        else { icon = 'location_searching'; }
+                    } else {
+                        switch (notificationType) {
+                            case 'battery': icon = 'battery_alert'; break;
+                            case 'welcome': icon = 'celebration'; break;
+                            case 'test': icon = 'labs'; break;
+                            default: icon = 'notifications';
+                        }
                     }
+                    // --- --------------------------------- ---
 
-                    // --- Use formatted timestamp for display ---
                     const timestampISO = item.timestamp || '';
-                    // Use the pre-formatted timestamp from the backend if available, otherwise format locally
                     const displayTimestamp = item.timestamp_formatted || (timestampISO ? AppUtils.formatTime(new Date(timestampISO)) : 'Unknown time');
-                    // --- ----------------------------------- ---
 
+                    // --- START: Use material-symbols-outlined ---
                     itemElement.innerHTML = `
                         <div class="notification-icon">
-                            <span class="material-icons">${icon}</span>
+                            <span class="material-symbols-outlined">${icon}</span>
                         </div>
                         <div class="notification-content">
                             <div class="notification-title">${item.title || 'Notification'}</div>
@@ -795,13 +852,16 @@ window.AppUI = {
                         </div>
                         <div class="notification-actions">
                             <button class="mark-read-unread-button" title="${item.is_read ? 'Mark as Unread' : 'Mark as Read'}" data-id="${item.id}" data-current-status="${item.is_read}">
-                                <span class="material-icons">${item.is_read ? 'mark_chat_unread' : 'mark_chat_read'}</span>
+                                <span class="material-symbols-outlined">${item.is_read ? 'mark_chat_unread' : 'mark_chat_read'}</span>
                             </button>
                             <button class="delete-notification-button" title="Delete Notification" data-id="${item.id}">
-                                <span class="material-icons">delete_outline</span>
+                                <span class="material-symbols-outlined">delete_outline</span>
                             </button>
                         </div>
                     `;
+                    // --- END: Use material-symbols-outlined ---
+
+                    // Attach listeners
                     itemElement.querySelector('.mark-read-unread-button').addEventListener('click', (e) => { e.stopPropagation(); this.handleMarkNotificationReadUnread(item.id, !item.is_read); });
                     itemElement.querySelector('.delete-notification-button').addEventListener('click', (e) => { e.stopPropagation(); this.handleDeleteNotification(item.id, item.title); });
                     listContainer.appendChild(itemElement);
@@ -1308,7 +1368,7 @@ window.AppUI = {
 
         try {
             const shares = AppState.getUserActiveShares(); // Get data directly from state
-             console.log("[UI Render Shares (Devices)] Data from state:", shares);
+            console.log("[UI Render Shares (Devices)] Data from state:", shares);
 
             if (!Array.isArray(shares)) { throw new Error("Invalid shares data in state."); }
 
@@ -1349,7 +1409,7 @@ window.AppUI = {
                         // *** Read state directly from the button's data attribute ON CLICK ***
                         const currentButtonStatus = e.currentTarget.dataset.active === 'true';
                         this.handleToggleShareStatus(share.share_id, currentButtonStatus);
-                     });
+                    });
                     item.querySelector('.edit-share-button').addEventListener('click', (e) => { e.stopPropagation(); this.openEditShareDialog(share); });
                     item.querySelector('.copy-share-button-list').addEventListener('click', (e) => { e.stopPropagation(); this.copyTextToClipboard(share.share_url, e.currentTarget); });
                     listContainer.appendChild(item);

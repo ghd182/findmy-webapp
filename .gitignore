@@ -115,3 +115,6 @@ dmypy.json
 *.yaml
 codebase.txt
 codebase.py
+codebase_log.log
+codebase_findmy.txt
+codebase*.txt

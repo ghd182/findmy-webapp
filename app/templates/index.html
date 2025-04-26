@@ -1,55 +1,25 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Find My Location</title>
-    <meta name="csrf-token" content="{{ csrf_token() }}"> {# Flask-WTF CSRF Token #}
-    <link rel="stylesheet" id="leaflet-css" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- Load CSS FIRST -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <!-- Preload Fonts (Optional but recommended) -->
-    <!-- <link rel="preload" href="https://fonts.gstatic.com/s/materialicons/v142/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2"
-        as="font" type="font/woff2" crossorigin="anonymous">
-    <link rel="preload"
-        href="https://fonts.gstatic.com/s/materialsymboloutlined/v189/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oFsI.woff2"
-        as="font" type="font/woff2" crossorigin="anonymous"> -->
-    <!-- Load Icons CSS Async -->
-    <link rel="stylesheet" id="material-icons-css" href="https://fonts.googleapis.com/icon?family=Material+Icons"
-        media="print" onload="this.media='all'" />
-    <link rel="stylesheet" id="material-symbols-css"
-        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
-        media="print" onload="this.media='all'" />
-    <noscript>
-        <link rel="stylesheet" href="{{ url_for('static', filename='styles/material-icons/material-icons.css') }}">
-        <link rel="stylesheet"
-            href="{{ url_for('static', filename='styles/material-symbols/material-symbols-outlined.css') }}">
-    </noscript>
-    <style>
-        /* --- Inline critical styles or CSS Var definitions if needed for FOUC prevention --- */
-        /* Example: Ensure loading class hides content initially */
-        body.app-loading .app-bar,
-        body.app-loading #main-content,
-        body.app-loading .bottom-nav {
-            opacity: 0;
-            visibility: hidden;
-        }
+    <title>Find My Location</title> {# Or use a dynamic title if needed #}
 
-        /* --- Add any other absolutely critical above-the-fold styles --- */
-    </style>
-    <!-- Manifest and Icons (served via Public blueprint) -->
+    {# CSRF Token (Essential for POST/PUT/DELETE requests) #}
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+
+    {# PWA & Mobile Meta Tags #}
     <link rel="manifest" href="{{ url_for('public.manifest') }}">
-    <meta name="theme-color" content="#FCFCFF" id="meta-theme-color"> {# Default light surface from BLUE theme #}
+    <meta name="theme-color" content="#FCFCFF" id="meta-theme-color"> {# Light theme default, updated by JS #}
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
-    <link rel="icon" href="{{ url_for('public.favicon') }}" sizes="any">
+    <link rel="icon" href="{{ url_for('public.favicon') }}" sizes="any"> {# Favicon via public blueprint #}
     <link rel="icon" href="{{ url_for('static', filename='icons/favicon.svg') }}" type="image/svg+xml">
 
-
+    {# Early Theme Application Script (Prevents light/dark FOUC) #}
     <script>
         (function () {
             const DEFAULT_THEME_MODE = 'system'; const DEFAULT_COLOR = '#4285F4'; // Default Blue
@@ -62,25 +32,88 @@
             let metaTag = document.getElementById('meta-theme-color');
             if (!metaTag) { metaTag = document.createElement('meta'); metaTag.name = 'theme-color'; metaTag.id = 'meta-theme-color'; document.head.appendChild(metaTag); }
             metaTag.setAttribute('content', metaColor);
-            // Temporary primary color (will be refined by AppTheme later)
+            // Apply preliminary color - JS will refine later
             if (/^#[0-9a-fA-F]{6}$/.test(userColor)) { document.documentElement.style.setProperty('--m3-sys-color-primary', userColor); }
             else { document.documentElement.style.setProperty('--m3-sys-color-primary', DEFAULT_COLOR); }
             console.log('[Early Theme] Applied:', isDark ? 'dark' : 'light', 'mode. Prelim color:', userColor);
         })();
     </script>
-    <!-- === End Early Theme Script === -->
 
-    <!-- Backend Config Injection (Keep as before) -->
+    <!-- {# --- FONT PRELOADING (for LOCAL fonts) --- #}
+    {# Preload LOCAL Material Symbols font file #}
+    <link rel="preload"
+        href="{{ url_for('static', filename='fonts/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oFsI.woff2') }}" as="font"
+        type="font/woff2" crossorigin="anonymous">
+    {# Preload LOCAL Material Icons font file #}
+    <link rel="preload" href="{{ url_for('static', filename='fonts/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2') }}" as="font"
+        type="font/woff2" crossorigin="anonymous">
+
+    {# --- CSS LOADING (Synchronous for critical CSS) --- #}
+    {# Load Leaflet CSS (from CDN) - Still ok to load sync here #}
+    <link rel="stylesheet" id="leaflet-css" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    {# Load LOCAL Material Symbols CSS - *Load Synchronously* #}
+    <link rel="stylesheet" id="material-symbols-css"
+        href="{{ url_for('static', filename='styles/material-symbols/material-symbols-outlined.css') }}">
+
+    {# Load LOCAL Material Icons CSS - *Load Synchronously* #}
+    <link rel="stylesheet" id="material-icons-css"
+        href="{{ url_for('static', filename='styles/material-icons/material-icons.css') }}">
+
+    {# Load Your Main Stylesheet - Load Synchronously #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+ -->
+
+    {# --- FONT PRELOADING (Local Files) --- #}
+    <link rel="preload"
+        href="{{ url_for('static', filename='fonts/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oFsI.woff2') }}" as="font"
+        type="font/woff2" crossorigin="anonymous">
+    <link rel="preload" href="{{ url_for('static', filename='fonts/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2') }}" as="font"
+        type="font/woff2" crossorigin="anonymous">
+
+
+    {# Load Leaflet CSS #}
+    <link rel="stylesheet" id="leaflet-css" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    {# Load LOCAL Font CSS Synchronously #}
+    <link rel="stylesheet" id="material-symbols-css"
+        href="{{ url_for('static', filename='styles/material-symbols/material-symbols-outlined.css') }}">
+    <link rel="stylesheet" id="material-icons-css"
+        href="{{ url_for('static', filename='styles/material-icons/material-icons.css') }}">
+
+    {# Load Your Main Stylesheet #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+
+
+
+    {# Inline Critical CSS (Optional, if style.css is very large) #}
+    <style>
+        body.app-loading .app-bar,
+        body.app-loading #main-content,
+        body.app-loading .bottom-nav {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        /* Add other very critical above-the-fold styles here if needed */
+    </style>
+
+    {# Backend Config Injection Script (Place before app JS) #}
     <script>
         window.VAPID_PUBLIC_KEY = '{{ VAPID_PUBLIC_KEY }}' || null;
         window.LOW_BATTERY_THRESHOLD = parseInt('{{ LOW_BATTERY_THRESHOLD }}') || 15;
         window.APP_VERSION = "{{ APP_VERSION }}";
+        // Pass badge URLs needed by the Service Worker or potentially JS fallbacks
         window.DEFAULT_NOTIFICATION_ICON_URL = "{{ DEFAULT_NOTIFICATION_ICON_URL or '/static/icons/favicon.svg' }}";
-        window.WELCOME_NOTIFICATION_ICON_URL = "{{ WELCOME_NOTIFICATION_ICON_URL or '/static/icons/favicon.svg' }}";
-        window.GEOFENCE_BADGE_URL = "{{ GEOFENCE_BADGE_URL or '/static/icons/badge-icon.png' }}";
-        window.BATTERY_BADGE_URL = "{{ BATTERY_BADGE_URL or '/static/icons/badge-icon.png' }}";
-        window.TEST_ICON_BADGE_URL = "{{ TEST_ICON_BADGE_URL or '/static/icons/favicon.svg' }}";
-        window.DEFAULT_BADGE_URL = "{{ DEFAULT_BADGE_URL or '/static/icons/badge-icon.png' }}";
+        window.WELCOME_NOTIFICATION_ICON_URL = "{{ WELCOME_NOTIFICATION_ICON_URL or DEFAULT_NOTIFICATION_ICON_URL }}";
+        window.TEST_NOTIFICATION_ICON_URL = "{{ TEST_NOTIFICATION_ICON_URL or DEFAULT_NOTIFICATION_ICON_URL }}";
+        window.DEFAULT_NOTIFICATION_BADGE_URL = "{{ DEFAULT_NOTIFICATION_BADGE_PATH or '/static/icons/badge-icon.png' }}";
+        window.GEOFENCE_ENTRY_BADGE_URL = "{{ GEOFENCE_ENTRY_BADGE_PATH or DEFAULT_NOTIFICATION_BADGE_PATH }}";
+        window.GEOFENCE_EXIT_BADGE_URL = "{{ GEOFENCE_EXIT_BADGE_PATH or DEFAULT_NOTIFICATION_BADGE_PATH }}";
+        window.BATTERY_LOW_BADGE_URL = "{{ BATTERY_LOW_BADGE_PATH or DEFAULT_NOTIFICATION_BADGE_PATH }}";
+        window.TEST_BADGE_URL = "{{ TEST_BADGE_PATH or DEFAULT_NOTIFICATION_BADGE_PATH }}";
+        window.WELCOME_BADGE_URL = "{{ WELCOME_BADGE_PATH or DEFAULT_NOTIFICATION_BADGE_PATH }}";
     </script>
 </head>
 
@@ -1001,7 +1034,7 @@
             <span class="material-icons nav-icon">location_searching</span> <!-- Changed icon -->
             <span class="nav-label">Geofences</span>
         </a>
-        
+
         <!-- Settings -->
         <!-- <a href="#" class="nav-item nav-link" data-page="settings">
             <span class="material-icons nav-icon">settings</span>

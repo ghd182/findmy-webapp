@@ -57,17 +57,17 @@ class NotificationService:
         )
         # Specific Badge Paths
         self.geofence_entry_badge_path = config.get(
-            "GEOFENCE_ENTRY_BADGE_PATH", "img/wifi_tethering_16dp.png"
+            "GEOFENCE_ENTRY_BADGE_PATH", "img/input_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
         )
         self.geofence_exit_badge_path = config.get(
-            "GEOFENCE_EXIT_BADGE_PATH", "img/crisis_alert_16dp.png"
+            "GEOFENCE_EXIT_BADGE_PATH", "img/output_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
         )
         self.battery_low_badge_path = config.get(
-            "BATTERY_LOW_BADGE_PATH", "img/battery_alert_16dp.png"
+            "BATTERY_LOW_BADGE_PATH", "img/battery_alert_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
         )
-        self.test_badge_path = config.get("TEST_BADGE_PATH", "img/labs_16dp.png")
+        self.test_badge_path = config.get("TEST_BADGE_PATH", "img/labs_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png")
         self.welcome_badge_path = config.get(
-            "WELCOME_BADGE_PATH", "img/notifications_16dp.png"
+            "WELCOME_BADGE_PATH", "img/celebration_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
         )
 
         if not (self.vapid_private_key_str and self.vapid_claims_email_config):

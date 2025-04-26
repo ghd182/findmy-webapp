@@ -18,7 +18,7 @@ window.AppState = {
     locationHistory: [],
     savedPlaces: [],
     currentTheme: 'system',
-    userColor: '#6750A4', // Default color
+    userColor: '#4285F4', // Default color
     currentViewedDeviceId: null,
     isShowingAllDevices: false,
     showDeviceHistory: false,
@@ -82,7 +82,7 @@ window.AppState = {
     // NEW function to set preferences fetched from API
     setCurrentUserPreferences: function (prefs) {
         this.currentTheme = prefs?.theme_mode || 'system';
-        this.userColor = prefs?.theme_color || (window.AppTheme ? AppTheme.DEFAULT_SOURCE_COLOR : '#6750A4');
+        this.userColor = prefs?.theme_color || (window.AppTheme ? AppTheme.DEFAULT_SOURCE_COLOR : '#4285F4');
         console.log(`Preferences set from API: Mode=${this.currentTheme}, Color=${this.userColor}`);
     },
 

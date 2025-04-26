@@ -111,3 +111,7 @@ celerybeat-schedule
 # Process ID files
 *.pid
 codebase.txt
+codebase.py
+codebase_log.log
+codebase_findmy.txt
+codebase*.txt

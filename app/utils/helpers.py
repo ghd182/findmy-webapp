@@ -18,7 +18,7 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-DEFAULT_SOURCE_COLOR = '#6750A4'
+DEFAULT_SOURCE_COLOR = '#4285F4'
 
 
 def haversine(lat1, lon1, lat2, lon2):

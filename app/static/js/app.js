@@ -16,7 +16,6 @@ async function loadLocalModuleFallback(localPath, checkObject) {
     if (!isUtilLoaded) {
         console.warn(`CDN module failed to define ${checkObject} correctly or is incomplete. Loading local fallback: ${localPath}`);
         try {
-            // Dynamically import the local script
             const fallbackModule = await import(localPath);
 
             // Re-assign functions to the global object
@@ -37,44 +36,32 @@ async function loadLocalModuleFallback(localPath, checkObject) {
 
         } catch (error) {
             console.error(`Failed to load local fallback module ${checkObject} from ${localPath}:`, error);
-
+       
             // --- START: Cloudflare Access CORS Error Detection ---
-            const isCorsError = error instanceof TypeError && error.message.includes('Failed to fetch');
-            const isCloudflare = error.message.includes('cloudflareaccess.com') ||
-                (error.stack && error.stack.includes('cloudflareaccess')); // Check stack too
-            const looksLikeCors = error.message.includes('CORS') || error.message.includes('Access-Control-Allow-Origin');
-
-            if (isCorsError && isCloudflare && looksLikeCors) {
-                console.warn("Detected potential Cloudflare Access block preventing resource load.");
-                // Ensure AppUI is available before calling
-                if (window.AppUI && typeof window.AppUI.showConfirmationDialog === 'function') {
-                    AppUI.showConfirmationDialog(
-                        "Authentication Required",
-                        "Access to essential resources seems blocked, possibly by Cloudflare Access. You might need to re-authenticate with Cloudflare.<br><br>Do you want to log out of the FindMy App now to proceed with Cloudflare login?",
-                        () => { // onConfirm: Logout of the FindMy app
-                            console.log("User confirmed logout due to Cloudflare Access block.");
-                            window.location.href = '/logout'; // Direct redirect to logout
-                        },
-                        () => { // onCancel: User chose not to logout
-                            console.log("User cancelled logout despite Cloudflare Access block.");
-                            if (window.AppUI) AppUI.showErrorDialog(
-                                "Authentication Needed",
-                                "App resources might be blocked until you re-authenticate with Cloudflare Access. Functionality may be limited. Reloading the page might trigger the Cloudflare login."
-                            );
-                        }
-                    );
+            const isCorsFetchError = error instanceof TypeError && error.message.includes('Failed to fetch');
+            const isCloudflareAccessUrlInError = error.message.includes('cloudflareaccess.com');
+       
+            if (isCorsFetchError && isCloudflareAccessUrlInError) {
+                console.warn("[Fallback Load] Detected potential Cloudflare Access CORS block for static asset.", error);
+                // Call the UI prompt function
+                if (window.AppUI && typeof window.AppUI.showCloudflareReauthPrompt === 'function') {
+                     // Check if prompt is already shown
+                     const existingPrompt = document.getElementById('confirmation-dialog-overlay');
+                      if (!existingPrompt || !existingPrompt.classList.contains('show')) {
+                          AppUI.showCloudflareReauthPrompt(localPath); // Show prompt
+                      } else {
+                          console.log("[Fallback Load] Cloudflare prompt already visible, skipping new one.");
+                      }
                 } else {
-                    // Fallback if AppUI isn't ready (shouldn't happen ideally)
-                    alert("Authentication Required: Access to resources blocked, possibly by Cloudflare Access. Please re-authenticate with Cloudflare. You may need to log out of this app first.");
+                    alert("Your security session may have expired blocking essential resources. Please reload the page to re-authenticate."); // Fallback alert
                 }
-                // Error handled by dialog, prevent further propagation that might break init
+                // Error handled by dialog, prevent further propagation
                 return; // Stop further processing in this catch block
-            } else {
-                // If it's not the Cloudflare error, handle as a generic loading failure.
-                console.error(`Generic error loading fallback ${checkObject}:`, error);
-                // App initialization will proceed, but M3ColorUtils might be missing.
             }
             // --- END: Cloudflare Access CORS Error Detection ---
+       
+            // Handle other fallback loading errors
+            console.error(`Generic error loading fallback ${checkObject}:`, error);
         }
     } else {
         console.log(`CDN module ${checkObject} loaded successfully.`);
@@ -1438,9 +1425,59 @@ async function initializeApp() {
     }
     // --- End Initial Navigation ---
 
-    // --- Service Worker Registration & Other Setup ---
+    // --- Service Worker Registration & Message Listener ---
     if (window.AppNotifications) {
-        AppNotifications.registerServiceWorker().then(() => console.log("SW reg sequence complete.")).catch(error => console.error("SW reg failed:", error));
+        AppNotifications.registerServiceWorker()
+            .then(() => console.log("SW reg sequence complete."))
+            .catch(error => console.error("SW reg failed:", error));
+
+        // *** ADD LISTENER HERE ***
+        // Listen for messages from the Service Worker AFTER initiating registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                console.log('[App] Received message from SW:', event.data);
+
+                // --- Cloudflare Auth Handling ---
+                if (event.data && event.data.type === 'CLOUDFLARE_AUTH_REQUIRED') {
+                    console.warn('[App] Received Cloudflare Auth required message from SW.');
+                    const existingPrompt = document.getElementById('confirmation-dialog-overlay');
+                    // Only show prompt if one isn't already visible
+                    if (!existingPrompt || !existingPrompt.classList.contains('show')) {
+                        if (window.AppUI && typeof window.AppUI.showCloudflareReauthPrompt === 'function') {
+                            // Show the specific prompt to reload for Cloudflare
+                            AppUI.showCloudflareReauthPrompt(event.data.url || 'a required resource');
+                        } else {
+                            console.error("[App] AppUI or showCloudflareReauthPrompt not available when needed!");
+                            // Fallback alert (less ideal)
+                            alert("Your security session may have expired. Please reload the page to re-authenticate.");
+                        }
+                    } else {
+                        console.log("[App] Cloudflare prompt already visible, ignoring duplicate message.");
+                    }
+                }
+                // --- SW Update Handling ---
+                else if (event.data && event.data.type === 'SW_UPDATE') {
+                    console.log('[Client] SW Update Available message received.');
+                    if (window.AppUI && typeof window.AppUI.showUpdateAvailablePrompt === 'function') {
+                        AppUI.showUpdateAvailablePrompt(event.source); // Pass the worker source if needed
+                    } else {
+                        if (confirm("A new version is available. Refresh now?")) { window.location.reload(); }
+                    }
+                }
+                // --- Focus Device Handling ---
+                else if (event.data?.type === 'focusDevice' && event.data.deviceId) {
+                    console.log(`[Client] Received focus message for device ${event.data.deviceId}`);
+                    if (window.AppMap && AppState.mapReady) {
+                        AppMap.viewDeviceOnMap(event.data.deviceId);
+                    } else { console.warn("[Client] Map not ready, cannot focus device from SW message immediately."); }
+                }
+                // --- Add other message type handlers here ---
+
+            });
+            console.log("[App] Service Worker message listener attached."); // Log attachment
+        }
+        // *** END LISTENER ADDITION ***
+
     } else {
         console.error("AppNotifications not found!");
     }
