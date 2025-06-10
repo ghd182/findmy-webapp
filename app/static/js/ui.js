@@ -1,42 +1,164 @@
-// File: app/static/js/ui.js
+// app/static/js/ui.js
 
 window.AppUI = {
 
+    handleLoadingError: function (error, context = 'generic') {
+        console.error('[HandleLoadingError]', context, error);
+
+        const fullScreenErrorOverlay = document.getElementById('full-screen-error-overlay');
+        const fullScreenErrorMessage = document.getElementById('full-screen-error-message');
+        const devicesErrorMessageElement = document.getElementById('devices-error-message');
+
+        // Clear previous errors
+        if (fullScreenErrorOverlay && fullScreenErrorMessage) {
+            fullScreenErrorOverlay.style.display = 'none';
+            fullScreenErrorMessage.innerHTML = '';
+        }
+        if (devicesErrorMessageElement) {
+            devicesErrorMessageElement.textContent = '';
+            devicesErrorMessageElement.style.display = 'none';
+        }
+
+        let title, message, displayMessage;
+
+        // Ensure error object is somewhat valid
+        if (!error) {
+            error = { code: 'UNKNOWN_ERROR', message: 'An unknown error occurred.' };
+        } else {
+            if (!error.code) error.code = 'UNKNOWN_ERROR';
+            if (!error.message) error.message = 'An error occurred without a specific message.';
+        }
+
+
+        switch (error.code) {
+            case 'NETWORK_ERROR':
+                title = "Network Error";
+                message = error.message || "No internet connection or server unreachable. Please check your network and try again.";
+                if (context === 'initial_load' && fullScreenErrorOverlay && fullScreenErrorMessage) {
+                    fullScreenErrorMessage.innerHTML = '<h2>' + AppUtils.escapeHtml(title) + '</h2><p>' + AppUtils.escapeHtml(message) + '</p><button onclick="window.location.reload()">Reload App</button>';
+                    fullScreenErrorOverlay.style.display = 'flex';
+                } else if (devicesErrorMessageElement && (context === 'device_refresh' || context === 'api_call')) {
+                    devicesErrorMessageElement.textContent = title + ': ' + message;
+                    devicesErrorMessageElement.style.display = 'block';
+                } else {
+                    this.showErrorDialog(title, message);
+                }
+                break;
+
+            case 'CLOUDFLARE_AUTH_REQUIRED':
+                // The AppApi._fetch already handles showing the reauth prompt.
+                // This case is here if handleLoadingError is called directly with this code.
+                // data.url might come from the error object if AppApi added it.
+                this.showCloudflareReauthPrompt(error.data?.url || error.message || 'a required resource');
+                return; // Return immediately
+
+            case 'CSRF_ERROR_HANDLED':
+                // The AppApi._fetch already handles showing a CSRF dialog.
+                // This case is for completeness or if called directly.
+                this.showErrorDialog(
+                    "Security Token Error",
+                    error.message || "Your security token has expired or is invalid. Please <strong>reload the page</strong> and try the action again."
+                );
+                return; // Return immediately
+
+            case 'HTTP_ERROR_401':
+            case 'HTTP_ERROR_403':
+                title = "Access Denied";
+                message = error.message || "Your session may have expired or you lack permission for this action.";
+                if (context === 'initial_load' && fullScreenErrorOverlay && fullScreenErrorMessage) {
+                    fullScreenErrorMessage.innerHTML = '<h2>' + AppUtils.escapeHtml(title) + '</h2><p>' + AppUtils.escapeHtml(message) + '</p><p>Please try <a href="/logout">logging out</a> and back in.</p><button onclick="window.location.href=\'/logout\'">Logout</button>';
+                    fullScreenErrorOverlay.style.display = 'flex';
+                } else {
+                    this.showErrorDialog(title, message + ' You might need to <a href="/logout">log out</a> and log back in.');
+                }
+                break;
+
+            case 'APP_UPDATE_REQUIRED': // Future Placeholder
+                title = "Update Required";
+                message = error.message || "A new version of the app is available. Please refresh the page to update.";
+                this.showConfirmationDialog(title, message, () => window.location.reload(), null, "Refresh Now", "Later");
+                break;
+
+            default:
+                // Server Errors and other specific HTTP errors
+                if (/^(HTTP_ERROR_(4\d\d|5\d\d)|SERVER_UNEXPECTED_RESPONSE_)/.test(error.code)) {
+                    title = "Server Error";
+                    displayMessage = "The server encountered an issue. Please try again later.";
+                    // Use error.message if it's more specific and not a generic fetch/http error string
+                    if (error.message && !error.message.toLowerCase().includes('http error') && !error.message.toLowerCase().includes('failed to fetch')) {
+                        displayMessage = error.message;
+                    }
+                    if (context === 'initial_load' && fullScreenErrorOverlay && fullScreenErrorMessage) {
+                        fullScreenErrorMessage.innerHTML = '<h2>' + AppUtils.escapeHtml(title) + '</h2><p>' + AppUtils.escapeHtml(displayMessage) + '</p><button onclick="window.location.reload()">Try Reloading</button>';
+                        fullScreenErrorOverlay.style.display = 'flex';
+                    } else if (devicesErrorMessageElement && (context === 'device_refresh' || context === 'api_call')) {
+                        devicesErrorMessageElement.textContent = title + ': ' + displayMessage;
+                        devicesErrorMessageElement.style.display = 'block';
+                    } else {
+                        this.showErrorDialog(title, displayMessage);
+                    }
+                } else { // Default for Unknown Error Code or No Code
+                    title = "Application Error";
+                    message = error.message || "An unexpected error occurred. Please try reloading the app.";
+                    if (context === 'initial_load' && fullScreenErrorOverlay && fullScreenErrorMessage) {
+                        fullScreenErrorMessage.innerHTML = '<h2>' + AppUtils.escapeHtml(title) + '</h2><p>' + AppUtils.escapeHtml(message) + '</p><button onclick="window.location.reload()">Reload App</button>';
+                        fullScreenErrorOverlay.style.display = 'flex';
+                    } else if (devicesErrorMessageElement && (context === 'device_refresh' || context === 'api_call')) {
+                        devicesErrorMessageElement.textContent = title + ': ' + message;
+                        devicesErrorMessageElement.style.display = 'block';
+                    } else {
+                        this.showErrorDialog(title, message);
+                    }
+                }
+                break;
+        }
+        // TODO: Ensure #full-screen-error-overlay and its contents are styled appropriately in style.css 
+        // for proper display (e.g., position: fixed, top: 0, left: 0, width: 100%, height: 100%, 
+        // background: var(--surface-color), z-index: 10000, display: flex, flex-direction: column, 
+        // align-items: center, justify-content: center, text-align: center).
+    },
 
     /**
-     * Displays a modal dialog prompting the user to re-authenticate with Cloudflare Access.
-     * @param {string} failedUrl - The URL that failed to load (for context, not redirection).
-     */
+ * Displays a modal dialog prompting the user to re-authenticate with Cloudflare Access.
+ * @param {string} failedUrl - The URL that failed to load (for context, not redirection).
+ */
     showCloudflareReauthPrompt: function (failedUrl) {
         console.log("[UI] Showing Cloudflare re-authentication prompt.");
         const title = "Authentication Required";
-        const message = `Your access session seems to have expired, preventing the app from loading necessary resources (like ${failedUrl ? `<code>${AppUtils.escapeHtml(failedUrl)}</code>` : 'assets or data'}).<br><br>Please re-authenticate with the access gateway to continue. Press the button below to initiate this.`;
+        // Provide a user-friendly message explaining the likely cause
+        const message = `Your access session seems to have expired, preventing the app from loading necessary resources (like ${failedUrl ? `<code>${AppUtils.escapeHtml(failedUrl)}</code>` : 'assets or data'}).<br><br>Please re-authenticate with the access gateway to continue. Reloading the page should initiate this.`;
 
+        // Use your existing confirmation dialog structure
         this.showConfirmationDialog(
             title,
             message,
             () => { // onConfirm: User clicks "Re-authenticate"
-                console.log("[UI] User clicked Re-authenticate. Redirecting to /auth/reauth for Cloudflare interception...");
-                
-                // *** Redirect to the new, uncached route ***
-                window.location.href = '/auth/reauth'; // Use the correct path registered in Flask
-                // window.location.reload(true);
-                
+                console.log("[UI] User clicked Re-authenticate. Reloading page...");
+                // Reload the current page. Cloudflare Access should intercept this
+                // if the session is expired. Using true forces a server check.
+                window.location.reload(true);
+                // Alternative: Redirect to root, might be cleaner sometimes
+                // window.location.href = '/';
             },
             () => { // onCancel: User clicks "Cancel"
                 console.log("[UI] User cancelled Cloudflare re-authentication.");
+                // Optional: Show a less intrusive warning that the app might not work correctly
                 this.showErrorDialog("Authentication Needed", "The app may not function correctly until you re-authenticate. Reload the page when ready.", 5000);
             },
-            "Re-authenticate", // Custom confirm button text
+            "Reload & Re-authenticate", // Custom confirm button text
             "Cancel" // Custom cancel button text
         );
 
-        // Customize dialog appearance (keep existing)
+        // Customize the confirmation dialog slightly for this specific case
         const dialog = document.getElementById('confirmation-dialog');
         const dialogTitle = document.getElementById('confirmation-dialog-title');
+        // Find the icon span within the header (adjust selector if needed)
         const iconSpan = dialog?.querySelector('.dialog-header .material-icons');
-        if (dialogTitle) dialogTitle.textContent = title;
+
+        if (dialogTitle) dialogTitle.textContent = title; // Ensure title is set
+        // Use a relevant icon for security/authentication
         if (iconSpan) iconSpan.textContent = 'vpn_key';
+        // You might want to style the confirm button differently if needed using CSS
     },
 
 
@@ -86,6 +208,19 @@ window.AppUI = {
         if (dialogId === 'add-place-dialog' || dialogId === 'geofence-dialog') {
             setTimeout(() => this.setupDialogSearch(dialogId), 50);
         }
+        if (dialogId === 'config-import-dialog') { this.resetImportDialog(); }
+    },
+
+    closeDialog: function (dialogId) {
+        console.log("[UI] Closing dialog:", dialogId);
+        const overlay = document.getElementById(dialogId + '-overlay');
+        const dialog = document.getElementById(dialogId);
+        if (!overlay || !dialog) return;
+        overlay.classList.remove('show');
+        this._releaseFocus(dialog);
+        if (dialogId === 'add-place-dialog') AppMap.destroyPlacePickerDialogMap();
+        if (dialogId === 'geofence-dialog') AppMap.destroyGeofenceDialogMap();
+        if (dialogId === 'add-place-dialog' || dialogId === 'geofence-dialog') { this.cleanupDialogSearch(dialogId); this.hideSearchResults('place-picker-search-results'); this.hideSearchResults('geofence-picker-search-results'); }
         if (dialogId === 'config-import-dialog') { this.resetImportDialog(); }
     },
 
@@ -341,8 +476,8 @@ window.AppUI = {
             this.openDialog('share-link-dialog');
 
             // 4. Refresh UI lists using the NEWLY updated state
-            this.renderDevicePageSharesList(); 
-            this.renderActiveSharesList();     
+            this.renderDevicePageSharesList(); // <<< Now uses updated state
+            this.renderActiveSharesList();     // <<< Also refresh settings page list
             AppActions.refreshDevices();       // Refresh device list for share icon status
 
         } catch (error) {
@@ -519,8 +654,8 @@ window.AppUI = {
                     this.showConfirmationDialog("Share Deleted", result.message || "Share link permanently deleted.");
 
                     // 4. Refresh UI lists using the NEWLY updated state
-                    this.renderDevicePageSharesList(); 
-                    this.renderActiveSharesList();     
+                    this.renderDevicePageSharesList(); // <<< Refresh the list on the Devices page
+                    this.renderActiveSharesList();     // <<< Also refresh the list on the Settings page
 
                     // 5. Refresh the main device list (to update share icons)
                     AppActions.refreshDevices();
@@ -873,7 +1008,7 @@ window.AppUI = {
             // Visually update the item without full refresh
             if (itemElement) {
                 itemElement.classList.toggle('unread', !markAsRead);
-                const iconEl = button.querySelector('.material-symbols-outlined'); // Use correct icon class
+                const iconEl = button.querySelector('.material-icons');
                 const titleEl = itemElement.querySelector('.notification-title');
                 if (iconEl) iconEl.textContent = markAsRead ? 'mark_chat_unread' : 'mark_chat_read';
                 if (button) button.title = markAsRead ? 'Mark as Unread' : 'Mark as Read';
@@ -942,7 +1077,7 @@ window.AppUI = {
         unreadItems.forEach(itemElement => {
             itemElement.classList.remove('unread');
             const button = itemElement.querySelector('.mark-read-unread-button');
-            const iconEl = button?.querySelector('.material-symbols-outlined'); // Use correct icon class
+            const iconEl = button?.querySelector('.material-icons');
             const titleEl = itemElement.querySelector('.notification-title');
             if (iconEl) iconEl.textContent = 'mark_chat_unread';
             if (button) button.title = 'Mark as Unread';
@@ -1002,7 +1137,7 @@ window.AppUI = {
         this.openDialog('device-menu-dialog');
     },
 
-  openMoreMenu: function () {
+    openMoreMenu: function () {
         const menu = document.getElementById('more-menu-dialog');
         const overlay = document.getElementById('more-menu-dialog-overlay');
         const button = document.getElementById('more-button');
@@ -1013,21 +1148,23 @@ window.AppUI = {
 
         const rect = button.getBoundingClientRect();
         const items = [
-            { label: "Update Positions", icon: "refresh", action: () => AppActions.refreshDevices(true) }, // Keep this action
-            { type: 'divider' },
+            // { label: "Refresh Devices", icon: "refresh", action: () => { AppActions.refreshDevices(true); } }, // Manual refresh optional here
+            // { type: 'divider' }, 
             { label: "Add Saved Place", icon: "add_location", action: this.openAddPlaceDialog.bind(this) },
             { label: "Import/Export", icon: "import_export", action: () => this.changePage('settings', 'settings-import-export') },
+            { label: "Update Positions", icon: "refresh", action: () => /* i need to trigger the fetch new positions button AppActions.fetchNewPositions() or something similar */ AppActions.refreshDevices(true) },
             { label: "Settings", icon: "settings", action: () => this.changePage('settings') },
             { label: "Help & Feedback", icon: "help_outline", action: () => this.openDialog('help-dialog') },
             { type: 'divider' },
-            { label: "Logout", icon: "logout", action: () => { window.location.href = '/auth/logout'; } }
+            { label: "Logout", icon: "logout", action: () => { window.location.href = '/logout'; } }
         ];
 
         const content = menu.querySelector('.dialog-content');
         if (!content) { console.error("[UI Error] Dialog content area not found in more-menu-dialog"); return; }
-        content.innerHTML = '';
+        content.innerHTML = ''; // Clear previous items
 
         items.forEach(item => {
+            // (Keep the item creation logic exactly as before)
             if (item.type === 'divider') {
                 const divider = document.createElement('hr');
                 divider.style.margin = '8px 0';
@@ -1054,19 +1191,26 @@ window.AppUI = {
             content.appendChild(menuItem);
         });
 
+        // Position the menu
+        // menu.style.top = `${rect.bottom + 8}px`;
+        // menu.style.right = `${window.innerWidth - rect.right}px`;
+        // menu.style.left = 'auto';
+
+        // Show both overlay AND menu
         overlay.classList.add('show');
-        menu.classList.add('show');
+        menu.classList.add('show'); // <<< ADD THIS LINE
+
         this._trapFocus(menu);
-        console.log("More menu opened.");
+        console.log("More menu opened, overlay and menu should be visible.");
     },
 
     closeMoreMenu: function () {
         const overlay = document.getElementById('more-menu-dialog-overlay');
         const menu = document.getElementById('more-menu-dialog');
         if (overlay) overlay.classList.remove('show');
-        if (menu) menu.classList.remove('show');
+        if (menu) menu.classList.remove('show'); // <<< ADD THIS LINE
         if (menu) this._releaseFocus(menu);
-        console.log("More menu closed.");
+        console.log("More menu closed, overlay and menu should be hidden.");
     },
 
     // --- Drawer ---
@@ -1086,196 +1230,82 @@ window.AppUI = {
         document.getElementById('menu-button')?.focus();
     },
 
-
-    // --- Navigation Setup (Bottom Nav + Pages) ---
-    setupNavigation: function () {
-        const bottomNav = document.querySelector('.bottom-nav');
-        const pages = document.querySelectorAll('#main-content > div[id$="-page"]');
-
-        if (!bottomNav) {
-            console.error("[UI Setup Nav] Bottom nav element not found!");
-            return;
-        }
-
-        // --- Check if running in Android wrapper ---
-        // Add a more robust check with logging
-        let isAndroidApp = false; // Default to false
-        try {
-            isAndroidApp = typeof window.Android?.isRunningInAndroidApp === 'function' && window.Android.isRunningInAndroidApp();
-        } catch (e) {
-            console.error("[UI Setup Nav] Error checking Android interface:", e);
-            isAndroidApp = false; // Assume not Android on error
-        }
-        console.log(`%c[UI Setup Nav] isRunningInAndroidApp check returned: ${isAndroidApp}`, "color: blue; font-weight: bold;"); // Log the result clearly
-
-        // --- Define base navigation items ---
-        const baseNavItems = [
-            { id: 'notifications-history', icon: 'notifications', label: 'Alerts' },
-            { id: 'index', icon: 'map', label: 'Map' },
-            { id: 'shared', icon: 'devices', label: 'Devices' },
-            { id: 'geofences', icon: 'location_searching', label: 'Geofences' }
-        ];
-
-        // --- Conditionally add the scanner item only if *not* in the Android app ---
-        const finalNavItems = isAndroidApp
-            ? baseNavItems // Use base items if in Android app
-            : [ // Prepend scanner item if *not* in Android app
-                { id: 'scanner', icon: 'radar', label: 'Scanner' },
-                ...baseNavItems
-            ];
-        console.log(`[UI Setup Nav] Final nav items count: ${finalNavItems.length}`); // Log count
-
-
-        bottomNav.innerHTML = ''; // Clear existing nav items
-
-        // Determine the current page to make active initially
-        const validPageIds = finalNavItems.map(item => item.id);
-        const storedPageId = AppState.getLastActivePageId();
-        // Ensure the stored page is valid for the *current* context (Android/Web)
-        const effectivePageId = validPageIds.includes(storedPageId) ? storedPageId : 'index';
-
-        console.log(`[UI Setup Nav] Initial Page Check: Stored='${storedPageId}', Effective='${effectivePageId}', Valid Pages=${validPageIds.join(',')}`);
-
-        finalNavItems.forEach(item => { // Use the filtered list
-            const navElement = document.createElement('a');
-            navElement.href = '#';
-            navElement.classList.add('nav-item', 'nav-link');
-            navElement.dataset.page = item.id;
-            navElement.setAttribute('role', 'tab');
-            navElement.setAttribute('aria-controls', `${item.id}-page`);
-            navElement.setAttribute('aria-label', item.label);
-
-            // --- Use material-symbols-outlined ---
-            navElement.innerHTML = `
-                <span class="material-symbols-outlined nav-icon">${item.icon}</span>
-                <span class="nav-label">${item.label}</span>
-            `;
-            // --- ----------------------------- ---
-
-            if (item.id === effectivePageId) {
-                navElement.classList.add('active');
-                navElement.setAttribute('aria-selected', 'true');
-            } else {
-                navElement.setAttribute('aria-selected', 'false');
-            }
-            bottomNav.appendChild(navElement);
-        });
-
-        // Hide/show pages based on validity and effective initial page
-        pages.forEach(page => {
-            const pageId = page.id.replace('-page', '');
-            // Check if the page ID exists in the *final* navItems for the current context
-            const pageIsValidForContext = finalNavItems.some(navItem => navItem.id === pageId);
-            page.style.display = pageIsValidForContext ? (pageId === effectivePageId ? 'block' : 'none') : 'none';
-            if (!pageIsValidForContext) {
-                console.log(`[UI Setup Nav] Hiding page '${pageId}' as it's not valid in this context (isAndroid=${isAndroidApp})`);
-            }
-        });
-
-        // Ensure AppState is updated if redirection occurred
-        if (effectivePageId !== storedPageId) {
-            console.log(`[UI Setup Nav] Stored page '${storedPageId}' invalid/redirected in this context. Setting state to '${effectivePageId}'.`);
-            AppState.saveLastActivePageId(effectivePageId);
-        }
-
-        console.log("[UI Setup Nav] Navigation setup complete.");
-    }, // End setupNavigation
-
-
-
     // --- Page Navigation ---
     changePage: function (pageId, sectionId = null) {
-        console.log(`[UI] changePage called with pageId: "${pageId}"`);
+        console.log(`[UI] changePage called with pageId: "${pageId}"`); // Keep log
         const mainContent = document.getElementById('main-content');
-        const isAndroidApp = window.Android && typeof window.Android.isRunningInAndroidApp === 'function' && window.Android.isRunningInAndroidApp();
+        const pages = ['index', 'shared', 'places', 'history', 'geofences', 'settings', 'notifications-history', 'scanner']; // <-- ADD 'scanner'
 
-        // Define valid pages dynamically based on environment
-        const validPages = ['index', 'shared', /*'places', 'history',*/ 'geofences', 'settings', 'notifications-history'];
-        if (!isAndroidApp) {
-            validPages.push('scanner'); // Add scanner only if not in Android web browser
-        }
+        // --- Stop Scanner if navigating away ---
+        if (AppState.lastActivePageId === 'scanner' && pageId !== 'scanner' && window.Scanner) { Scanner.stopScan("Navigated away from Scanner tab."); }
+        // --- --------------------------------- ---
 
-        // Redirect away from scanner if accessed in Android app
-        if (pageId === 'scanner' && isAndroidApp) {
-            console.warn("[UI] Attempted to navigate to web scanner inside Android app. Redirecting to map.");
-            pageId = 'index'; // Redirect to default page (map)
-        }
-
-        // Validate the final pageId against the valid pages for the current environment
-        if (!validPages.includes(pageId)) {
-            console.warn(`[UI] Invalid page ID '${pageId}' for current environment (isAndroid=${isAndroidApp}). Defaulting to index.`);
+        if (pages.includes(pageId)) {
+            AppState.saveLastActivePageId(pageId);
+        } else {
+            console.warn(`[UI] Attempted to navigate to invalid page ID: ${pageId}. Not saving state. Defaulting to index.`);
             pageId = 'index';
         }
 
-        // Stop web scanner if navigating away from it (and not in Android)
-        const previousPageId = AppState.getLastActivePageId(); // Get the page we are *leaving*
-        if (previousPageId === 'scanner' && pageId !== 'scanner' && window.Scanner && !isAndroidApp) {
-            console.log("[UI ChangePage] Navigating away from web scanner, stopping scan.");
-            Scanner.stopScan("Navigated away from Scanner tab.");
-        }
-
-        AppState.saveLastActivePageId(pageId); // Save the *final* (potentially redirected) page ID
-
-        // Hide all pages first
-        document.querySelectorAll('#main-content > div[id$="-page"]').forEach(page => {
-            page.style.display = 'none';
+        pages.forEach(id => { const pageElement = document.getElementById(id + '-page'); if (pageElement) pageElement.style.display = 'none'; });
+        document.querySelectorAll('.nav-link').forEach(l => {
+            l.classList.remove('active');
+            if (l.getAttribute('data-page') === pageId) {
+                l.classList.add('active');
+            }
         });
 
-        // Show the target page
         const targetPage = document.getElementById(pageId + '-page');
         if (targetPage) {
             targetPage.style.display = 'block';
             if (mainContent) { mainContent.scrollTop = 0; }
             else { console.warn("main-content element not found for scrolling."); }
 
-            // Activate the correct nav item in bottom nav
-            document.querySelectorAll('.nav-link').forEach(l => {
-                l.classList.toggle('active', l.getAttribute('data-page') === pageId);
-                l.setAttribute('aria-selected', l.getAttribute('data-page') === pageId);
-            });
-
-            // Page-specific actions
+            // Handle page-specific actions
             if (pageId === 'index') {
                 if (AppState.getMap() && AppState.mapReady) {
                     AppMap.invalidateMapSize(); // Invalidate size when switching TO map
                     AppMap.updateMapView();
                 } else if (!AppState.getMap()) {
-                    console.log("[UI ChangePage] Map not initialized, calling initMap().");
-                    AppMap.initMap(); // Initialize map only if it doesn't exist
+                    // Initialize map only if it doesn't exist and we are navigating TO the map page
+                    AppMap.initMap();
                 }
-            } else if (pageId === 'shared') {
-                console.log("[UI ChangePage] Rendering lists for 'shared' page.");
-                this.renderDevicesList(AppState.getCurrentDeviceData());
-                this.renderDevicePageSharesList();
             }
+            if (pageId === 'shared') {
+                console.log("[UI ChangePage] Navigated to 'shared' page.");
+                // --- Render BOTH lists using current state ---
+                this.renderDevicesList(AppState.getCurrentDeviceData());
+                this.renderDevicePageSharesList(); // <<< CALL NEW FUNCTION
+                // --- Optionally trigger a silent background refresh ---
+                // AppActions.refreshDevices(); // Maybe omit this on simple nav?
+            }
+            // else if (pageId === 'places') { this.renderSavedPlacesList(); }
+            // else if (pageId === 'history') { this.renderLocationHistory(); }
             else if (pageId === 'geofences') {
-                console.log("[UI ChangePage] Rendering lists for 'geofences' page.");
-                this.renderGlobalGeofences();
-                this.renderDeviceGeofenceLinks();
-                // Optionally trigger a refresh if data might be stale
-                // if (window.AppActions) AppActions.refreshGeofencesAndDevices();
+                // Refresh both geofences and device links when switching to this page
+                this.renderGlobalGeofences(); // Render known global fences first
+                this.renderDeviceGeofenceLinks(); // Render known links first
+                if (window.AppActions && typeof AppActions.refreshGeofencesAndDevices === 'function') {
+                    AppActions.refreshGeofencesAndDevices(); // Trigger background update
+                } else {
+                    console.error("AppActions.refreshGeofencesAndDevices not available.");
+                }
             }
             else if (pageId === 'settings') {
-                console.log("[UI ChangePage] Setting up 'settings' page.");
-                this.setupSettingsPage();
-                this.renderActiveSharesList(); // Re-render shares when navigating to settings
+                this.setupSettingsPage(); // Setup specific listeners/UI for settings
+                this.renderActiveSharesList(); // Render shares list when settings page is shown
                 if (sectionId) { setTimeout(() => this.scrollToSection(sectionId), 100); }
             }
-            else if (pageId === 'notifications-history') {
-                console.log("[UI ChangePage] Rendering 'notifications-history'.");
-                this.renderNotificationHistory();
-            }
-            // Init web scanner ONLY if not in Android app AND the page is 'scanner'
-            else if (pageId === 'scanner' && !isAndroidApp) {
-                console.log("[UI ChangePage] Initializing web scanner.");
-                if (window.Scanner) Scanner.initScannerPage(); else console.error("Scanner object not found");
-            }
+            else if (pageId === 'notifications-history') { this.renderNotificationHistory(); }
+            else if (pageId === 'scanner') { if (window.Scanner) Scanner.initScannerPage(); else console.error("Scanner object not found"); }
+            // --- END Scanner Init ---
+            // Removed places/history specific logic as they are gone from nav
         } else {
-            console.error("[UI] Target page element not found for ID:", pageId + '-page');
-            this.changePage('index'); // Fallback to index if target page doesn't exist
+            console.error("[UI] Target page not found:", pageId + '-page');
+            this.changePage('index');
         }
 
-        // Keep FAB hidden for now
+        // FAB visibility (keep hidden as places page is gone)
         const fab = document.getElementById('add-place-button');
         if (fab) fab.style.display = 'none';
     },
@@ -1285,12 +1315,15 @@ window.AppUI = {
         const lastPageId = AppState.getLastActivePageId();
         console.log(`[UI Debug] navigateToInitialPage: Read lastPageId = "${lastPageId}" (type: ${typeof lastPageId})`);
 
-        const validPages = ['index', 'shared', 'places', 'history', 'geofences', 'settings', 'notifications-history', 'scanner']; 
+        const validPages = ['index', 'shared', 'places', 'history', 'geofences', 'settings', 'notifications-history'];
         const isValid = lastPageId && typeof lastPageId === 'string' && validPages.includes(lastPageId);
         console.log(`[UI Debug] navigateToInitialPage: Is lastPageId valid? ${isValid}`);
 
         const initialPage = isValid ? lastPageId : 'index';
+        // --- CORRECTED LOG ---
         console.log(`[UI] Navigating to initial page: ${initialPage} (From stored: "${lastPageId}")`);
+        // --- --------------- ---
+
         this.changePage(initialPage);
     },
 
@@ -1298,26 +1331,23 @@ window.AppUI = {
     updateRelativeTimes: function () {
         const timeElements = document.querySelectorAll('.relative-time[data-timestamp]');
         if (!timeElements || timeElements.length === 0) return;
-        // console.log(`[UI Update Relative] Updating ${timeElements.length} elements.`); // Can be noisy
+
+        // console.log(`[UI] Updating ${timeElements.length} relative time elements.`); // Can be noisy
 
         timeElements.forEach(el => {
             const timestampISO = el.dataset.timestamp;
             if (!timestampISO) {
+                // Maybe set to 'Never' or 'Unknown' if timestamp is missing/invalid initially
                 if (el.textContent !== 'Never') el.textContent = 'Never';
                 return;
             }
+
             try {
                 const date = new Date(timestampISO);
                 if (!isNaN(date)) {
-                    // --- Calculate BOTH absolute and relative times ---
-                    const absoluteStr = AppUtils.formatTime(date); // Get localized absolute time string
-                    const relativeStr = AppUtils.formatTimeRelative(date); // Get relative time string
-                    // --- Construct the combined string ---
-                    const combinedTimeStr = `${absoluteStr} (${relativeStr})`;
-
-                    // --- Update the element content ---
-                    if (el.textContent !== combinedTimeStr) {
-                        el.textContent = combinedTimeStr;
+                    const relativeStr = AppUtils.formatTimeRelative(date);
+                    if (el.textContent !== relativeStr) {
+                        el.textContent = relativeStr;
                     }
                 } else {
                     if (el.textContent !== 'Invalid Time') el.textContent = 'Invalid Time';
@@ -1329,12 +1359,16 @@ window.AppUI = {
         });
     },
 
+
+
+
+
     scrollToSection: function (sectionId) {
         const sectionElement = document.getElementById(sectionId);
         if (sectionElement) {
             console.log(`[UI] Scrolling to section: #${sectionId}`);
             sectionElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            sectionElement.style.outline = '2px solid var(--m3-sys-color-primary)'; // Use CSS variable
+            sectionElement.style.outline = '2px solid var(--primary-color)';
             setTimeout(() => { sectionElement.style.outline = 'none'; }, 2500);
         } else { console.warn(`[UI] Section element not found: #${sectionId}`); }
     },
@@ -1345,7 +1379,7 @@ window.AppUI = {
             const card = document.getElementById(`device-link-card-${deviceId}`);
             if (card) {
                 card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                card.style.outline = '2px solid var(--m3-sys-color-primary)'; // Use CSS variable
+                card.style.outline = '2px solid var(--primary-color)';
                 setTimeout(() => { card.style.outline = 'none'; }, 2000);
             } else { console.warn(`[UI] Device card device-link-card-${deviceId} not found after page change.`); }
         }, 300);
@@ -1353,38 +1387,45 @@ window.AppUI = {
 
     // --- List Rendering ---
     renderDevicesList: function (devices) {
+        // Get references (keep this part)
         const listElement = document.getElementById('shared-devices-list');
         const listContainer = document.getElementById('shared-devices-list-container');
         const loadingIndicator = document.getElementById('devices-loading-indicator');
         const noDevicesMessage = document.getElementById('no-devices-message');
         const errorMessageElement = document.getElementById('devices-error-message');
 
-        console.log(`[RenderDevicesList] Called. Received ${Array.isArray(devices) ? devices.length : 'INVALID'} devices.`);
+        console.log(`[RenderDevicesList] Called. Received ${Array.isArray(devices) ? devices.length : 'INVALID'} devices. List Element: ${listElement ? 'Found' : 'Missing'}, Container: ${listContainer ? 'Found' : 'Missing'}`);
         if (!listElement || !listContainer || !loadingIndicator || !noDevicesMessage || !errorMessageElement) {
             console.error("[RenderDevicesList] Critical UI elements missing. Aborting render.");
             return;
         }
 
+        // Clear previous state (keep this)
         loadingIndicator.style.display = 'none';
         errorMessageElement.style.display = 'none';
-        listElement.innerHTML = '';
+        listElement.innerHTML = ''; // Clear previous items
 
+
+        // --- START: Simplified Visibility Logic ---
         if (!devices || !Array.isArray(devices) || devices.length === 0) {
+            console.log("[RenderDevicesList] No devices to render. Showing 'no devices' message.");
             noDevicesMessage.innerHTML = `No devices configured or found yet. Add device files in Settings or wait for the next automatic refresh.`;
             noDevicesMessage.style.display = 'block';
-            listElement.style.display = 'none';
-            listContainer.style.display = 'block';
-            return;
+            listElement.style.display = 'none'; // Hide the list itself
+            listContainer.style.display = 'block'; // Show the container (which holds the message)
+            return; // Exit early
         }
 
+        // If we have devices, hide the 'no devices' message and ensure list/container are visible
         noDevicesMessage.style.display = 'none';
-        listContainer.style.display = 'block';
-        listElement.style.display = 'block';
+        listContainer.style.display = 'block'; // Show the container
+        listElement.style.display = 'block';   // Show the list
 
+        console.log("[RenderDevicesList] Rendering device items...");
         let itemsRendered = 0;
         devices.forEach((device, index) => {
             try {
-                const displayInfo = AppState.getDeviceDisplayInfo(device.id); // Use AppState getter
+                const displayInfo = AppState.getDeviceDisplayInfo(device.id);
                 const deviceElement = document.createElement('div');
                 deviceElement.classList.add('shared-device');
                 deviceElement.setAttribute('tabindex', '0');
@@ -1392,77 +1433,27 @@ window.AppUI = {
                 const locationStatusText = (displayInfo.lat != null && displayInfo.lng != null) ? displayInfo.status : "Location Unknown";
                 deviceElement.setAttribute('aria-label', `Device: ${displayInfo.name}, Status: ${locationStatusText}`);
                 deviceElement.dataset.deviceId = device.id;
-
                 let batteryIcon = 'battery_unknown'; let batteryClass = ''; let batteryTooltip = '';
-                if (displayInfo.batteryLevel != null) {
-                    const level = displayInfo.batteryLevel; batteryTooltip = `${level.toFixed(0)}%`;
-                    if (level > 95) batteryIcon = 'battery_full'; else if (level > 80) batteryIcon = 'battery_6_bar'; else if (level > 60) batteryIcon = 'battery_5_bar'; else if (level > 40) batteryIcon = 'battery_4_bar'; else if (level > 25) batteryIcon = 'battery_3_bar'; else if (level >= AppConfig.LOW_BATTERY_THRESHOLD) batteryIcon = 'battery_alert'; else { batteryIcon = 'battery_0_bar'; batteryClass = 'error'; }
-                } else if (displayInfo.batteryStatus !== 'Unknown') {
-                    batteryTooltip = displayInfo.batteryStatus; if (displayInfo.batteryStatus === 'Low' || displayInfo.batteryStatus === 'Very Low') { batteryIcon = 'battery_alert'; batteryClass = 'error'; }
-                }
+                if (displayInfo.batteryLevel != null) { const level = displayInfo.batteryLevel; batteryTooltip = `${level.toFixed(0)}%`; if (level > 95) batteryIcon = 'battery_full'; else if (level > 80) batteryIcon = 'battery_6_bar'; else if (level > 60) batteryIcon = 'battery_5_bar'; else if (level > 40) batteryIcon = 'battery_4_bar'; else if (level > 25) batteryIcon = 'battery_3_bar'; else if (level >= AppConfig.LOW_BATTERY_THRESHOLD) batteryIcon = 'battery_alert'; else { batteryIcon = 'battery_0_bar'; batteryClass = 'error'; } }
+                else if (displayInfo.batteryStatus !== 'Unknown') { batteryTooltip = displayInfo.batteryStatus; if (displayInfo.batteryStatus === 'Low' || displayInfo.batteryStatus === 'Very Low') { batteryIcon = 'battery_alert'; batteryClass = 'error'; } }
                 const batteryIndicator = batteryTooltip ? `<span class="material-symbols-outlined ${batteryClass}" style="font-size: 18px; vertical-align: middle; font-variation-settings: 'FILL' 1;" title="${batteryTooltip}">${batteryIcon}</span>` : '';
-
                 const iconHtml = displayInfo.svg_icon || `<div class="device-icon-fallback">?</div>`;
                 const isCurrentlyVisible = displayInfo.isVisible;
                 const visibilityToggleHtml = `<label class="toggle-switch device-visibility-toggle" style="margin-left: 16px;" title="Show/Hide on Map"><input type="checkbox" data-device-id="${device.id}" ${isCurrentlyVisible ? 'checked' : ''}><span class="toggle-slider"></span></label>`;
-
-                let displayStatus = displayInfo.status || 'Unknown Status';
-                if (displayInfo.lat == null && displayInfo.lng == null && displayInfo.status === 'Location Unknown') { displayStatus = 'Awaiting first location...'; }
-                else { displayStatus = displayStatus.replace(/ - Batt:.*$/, ''); } // Remove battery info from main status
-
+                let displayStatus = displayInfo.status || 'Unknown Status'; if (displayInfo.lat == null && displayInfo.lng == null && displayInfo.status === 'Location Unknown') { displayStatus = 'Awaiting first location...'; } else { displayStatus = displayStatus.replace(/ - Batt:.*$/, ''); }
                 const shareIndicatorHtml = device.is_shared ? `<span class="material-icons share-indicator" title="Shared" style="font-size: 16px; vertical-align: middle; margin-left: 4px; opacity: 0.7; color: var(--m3-sys-color-secondary);">share</span>` : '';
-
-                // --- Network Seen Time ---
-                const networkTimestampISO = device.rawLocation?.timestamp || '';
-                const networkRelativeTimeStr = networkTimestampISO ? AppUtils.formatTimeRelative(new Date(networkTimestampISO)) : 'Never';
-                const networkAbsoluteTimeStr = networkTimestampISO ? AppUtils.formatTime(new Date(networkTimestampISO)) : ''; // Get absolute local time
-
-                // --- Local Seen Time (Add Absolute Time to Title) ---
-                // const localTimestampISO = device.last_seen_local || ''; // Get from device data
-                // let localSeenHtml = ''; // Initialize empty
-                // if (localTimestampISO) {
-                //     const localDate = new Date(localTimestampISO);
-                //     const localRelativeTimeStr = AppUtils.formatTimeRelative(localDate);
-                // // *** MODIFICATION: Use formatTimeWithTimezone for tooltip ***
-                // const localAbsoluteTimeStr = AppUtils.formatTimeWithTimezone(localDate); // e.g., "May 4, 2025, 10:49 PM CEST"
-                // localSeenHtml = `
-                //     <div class="device-status" style="font-size: var(--body-small-size); opacity: 0.7;">
-                //         <span class="material-icons" style="font-size: 1em; vertical-align: middle;" title="Last seen nearby by native scanner">radar</span>
-                //         <span class="relative-time" data-timestamp="${localTimestampISO}" title="${localAbsoluteTimeStr} (UTC: ${localTimestampISO})">${localRelativeTimeStr}</span>
-                //     </div>`;
-                // }
-                // // *** END MODIFICATION ***
-
-                // --- Local Seen Time (NEW) ---
-                const localTimestampISO = device.last_seen_local || ''; // Get from device data
-                let localSeenHtml = ''; // Initialize empty
-                if (localTimestampISO) {
-                    const localRelativeTimeStr = AppUtils.formatTimeRelative(new Date(localTimestampISO));
-                    localSeenHtml = `
-                        <div class="device-status" style="font-size: var(--body-small-size); opacity: 0.7;" title="Last seen nearby by native scanner">
-                            <span class="material-icons" style="font-size: 1em; vertical-align: middle;">radar</span>
-                            <span class="relative-time" data-timestamp="${localTimestampISO}">${localRelativeTimeStr}</span>
-                        </div>`;
-                }
-                // --- End Local Seen Time ---
-
-                const addressTitle = displayInfo.address || '';
-
-                // --- Update innerHTML to include localSeenHtml ---
+                const timestampISO = device.rawLocation?.timestamp || ''; const relativeTimeStr = timestampISO ? AppUtils.formatTimeRelative(new Date(timestampISO)) : 'Never'; const addressTitle = displayInfo.address || '';
                 deviceElement.innerHTML = `
                    <div class="device-icon">${iconHtml}</div>
                    <div class="device-info">
-                       <div class="device-name">${AppUtils.escapeHtml(displayInfo.name)} ${batteryIndicator} ${shareIndicatorHtml}</div>
-                       <div class="device-status" style="font-size: var(--body-small-size); opacity: 0.7;" title="${AppUtils.escapeHtml(addressTitle)}">
-                           <span class="material-icons" style="font-size: 1em; vertical-align: middle;">public</span>
-                           <span class="relative-time" data-timestamp="${networkTimestampISO}" title="${networkAbsoluteTimeStr} (UTC: ${networkTimestampISO})">${networkRelativeTimeStr}</span>
+                       <div class="device-name">${displayInfo.name}</div>
+                       <div class="device-status" title="${addressTitle}">
+                           <span class="relative-time" data-timestamp="${timestampISO}">${relativeTimeStr}</span> ${batteryIndicator} ${shareIndicatorHtml}
                        </div>
-                       ${localSeenHtml}
-                       <div class="device-status" style="font-size: var(--body-small-size); opacity: 0.7;">${AppUtils.escapeHtml(displayInfo.model) || 'Accessory/Tag'}</div>
+                       <div class="device-status" style="font-size: var(--body-small-size); opacity: 0.7;">${displayInfo.model || 'Accessory/Tag'}</div>
                    </div>
                    ${visibilityToggleHtml}
-                   <span class="material-icons device-menu" data-device-index="${index}" tabindex="0" role="button" aria-label="Device options for ${AppUtils.escapeHtml(displayInfo.name)}">more_vert</span>`;
-                // --- End innerHTML Update ---
+                   <span class="material-icons device-menu" data-device-index="${index}" tabindex="0" role="button" aria-label="Device options for ${displayInfo.name}">more_vert</span>`;
 
                 listElement.appendChild(deviceElement);
                 itemsRendered++;
@@ -1471,9 +1462,12 @@ window.AppUI = {
             }
         });
 
+        // --- REMOVE the delayed check and forced style ---
+        // --- END Simplified Visibility Logic ---
+
         console.log(`[RenderDevicesList] Finished rendering. ${itemsRendered} items added.`);
         this.updateRelativeTimes(); // Update relative times after rendering
-    },
+    }, // End renderDevicesList
 
     renderDevicePageSharesList: function () {
         const listContainer = document.getElementById('devices-page-active-shares-list');
@@ -1575,73 +1569,26 @@ window.AppUI = {
 
         geofences.forEach(gf => {
             const item = document.createElement('div'); item.className = 'settings-item geofence-list-item'; item.setAttribute('tabindex', '0'); item.setAttribute('role', 'button'); item.setAttribute('aria-label', `Geofence: ${gf.name}, click to edit`); item.dataset.geofenceId = gf.id;
-            item.innerHTML = `<span class="material-icons drawer-item-icon" style="margin-right: 16px;">location_searching</span> <div class="settings-item-text"> <div class="settings-item-title">${gf.name}</div> <div class="settings-item-description"> Radius: ${gf.radius}m | Center: ${gf.lat.toFixed(4)}°, ${gf.lng.toFixed(4)}° </div> </div> <span class="material-icons geofence-edit" title="Edit Geofence" data-geofence-id="${gf.id}" style="margin-left: auto; cursor: pointer; opacity: 0.6;" tabindex="0" role="button" aria-label="Edit ${gf.name}">edit</span> <span class="material-icons geofence-remove" title="Remove Geofence" data-geofence-id="${gf.id}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--m3-sys-color-error);" tabindex="0" role="button" aria-label="Remove ${gf.name}">delete_outline</span>`;
+            item.innerHTML = `<span class="material-icons drawer-item-icon" style="margin-right: 16px;">location_searching</span> <div class="settings-item-text"> <div class="settings-item-title">${gf.name}</div> <div class="settings-item-description"> Radius: ${gf.radius}m | Center: ${gf.lat.toFixed(4)}°, ${gf.lng.toFixed(4)}° </div> </div> <span class="material-icons geofence-edit" title="Edit Geofence" data-geofence-id="${gf.id}" style="margin-left: auto; cursor: pointer; opacity: 0.6;" tabindex="0" role="button" aria-label="Edit ${gf.name}">edit</span> <span class="material-icons geofence-remove" title="Remove Geofence" data-geofence-id="${gf.id}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--error-color);" tabindex="0" role="button" aria-label="Remove ${gf.name}">delete_outline</span>`;
             listContainer.appendChild(item);
         });
     },
 
     renderDeviceGeofenceLinks: function () {
-        const container = document.getElementById('device-geofence-links-list');
-        const loadingIndicator = document.getElementById('device-links-loading');
-        const noDevicesMsg = document.getElementById('links-no-devices-message');
-
-        if (!container || !loadingIndicator || !noDevicesMsg) {
-            console.error("[UI Render Links] Geofence links UI elements missing.");
-            return;
-        }
-
-        loadingIndicator.style.display = 'block';
-        container.innerHTML = '';
-        noDevicesMsg.style.display = 'none';
-
-        const devices = AppState.getCurrentDeviceData(); // Get the list of devices
-        const globalGeofences = AppState.getGlobalGeofences(); // Get global geofences
-
-        console.log(`[UI Render Links] Rendering links for ${devices.length} devices.`);
-
-        if (devices.length === 0) {
-            noDevicesMsg.style.display = 'block';
-            loadingIndicator.style.display = 'none';
-            return;
-        }
-
-        devices.forEach(device => { // Iterate through the device list from AppState
-            const displayInfo = AppState.getDeviceDisplayInfo(device.id);
-            const iconHtml = displayInfo.svg_icon || `<div class="device-icon-fallback">?</div>`;
-            const deviceCard = document.createElement('div');
-            deviceCard.className = 'card device-geofence-card';
-            deviceCard.id = `device-link-card-${device.id}`;
-
-            console.log(`[UI Render Links - ${device.id}] Data used for rendering (fetched inside loop):`, JSON.stringify(displayInfo.geofences));
-
-            const linkedItemsHtml = (displayInfo.geofences || []).map(linkedGf => {
-                const notifyEntry = linkedGf.notify_on_entry === true;
-                const notifyExit = linkedGf.notify_on_exit === true;
-                console.log(`[UI Render Links - ${device.id}] Processing GF ${linkedGf.id}: notify_on_entry=${notifyEntry}, notify_on_exit=${notifyExit}`);
-                const entryCheckedAttr = notifyEntry ? 'checked' : ''; const exitCheckedAttr = notifyExit ? 'checked' : '';
-                return `
-                    <div class="geofence-link-item" data-geofence-id="${linkedGf.id}">
-                        <div class="geofence-link-info">
-                            <div class="geofence-link-name">${AppUtils.escapeHtml(linkedGf.name)}</div>
-                            <div class="geofence-link-details">Radius: ${linkedGf.radius}m</div>
-                        </div>
-                        <div class="geofence-link-toggles">
-                            <label class="geofence-link-toggle-label" title="Notify on Entry"> <input type="checkbox" data-notify-type="entry" ${entryCheckedAttr}> Entry </label>
-                            <label class="geofence-link-toggle-label" title="Notify on Exit"> <input type="checkbox" data-notify-type="exit" ${exitCheckedAttr}> Exit </label>
-                            <span class="material-icons geofence-remove" title="Unlink Geofence" data-geofence-id="${linkedGf.id}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--m3-sys-color-error);" tabindex="0" role="button" aria-label="Unlink ${AppUtils.escapeHtml(linkedGf.name)}">link_off</span>
-                        </div>
-                    </div>`;
-            }).join('');
-
+        const container = document.getElementById('device-geofence-links-list'); const loadingIndicator = document.getElementById('device-links-loading'); const noDevicesMsg = document.getElementById('links-no-devices-message');
+        if (!container || !loadingIndicator || !noDevicesMsg) return; const devices = AppState.getCurrentDeviceData(); const globalGeofences = AppState.getGlobalGeofences();
+        loadingIndicator.style.display = 'none'; container.innerHTML = '';
+        if (devices.length === 0) { noDevicesMsg.style.display = 'block'; return; } noDevicesMsg.style.display = 'none';
+        devices.forEach(device => {
+            const displayInfo = AppState.getDeviceDisplayInfo(device.id); const iconHtml = displayInfo.svg_icon || `<div class="device-icon-fallback">?</div>`;
+            const deviceCard = document.createElement('div'); deviceCard.className = 'card device-geofence-card'; deviceCard.id = `device-link-card-${device.id}`;
+            const linkedItemsHtml = (displayInfo.geofences || []).map(linkedGf => `<div class="geofence-link-item" data-geofence-id="${linkedGf.id}"><div class="geofence-link-info"><div class="geofence-link-name">${linkedGf.name}</div><div class="geofence-link-details">Radius: ${linkedGf.radius}m</div></div><div class="geofence-link-toggles"><label class="geofence-link-toggle-label" title="Notify on Entry"><input type="checkbox" data-notify-type="entry" ${linkedGf.notify_on_entry ? 'checked' : ''}> Entry</label><label class="geofence-link-toggle-label" title="Notify on Exit"><input type="checkbox" data-notify-type="exit" ${linkedGf.notify_on_exit ? 'checked' : ''}> Exit</label><span class="material-icons geofence-remove" title="Unlink Geofence" data-geofence-id="${linkedGf.id}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--error-color);" tabindex="0" role="button" aria-label="Unlink ${linkedGf.name}">link_off</span></div></div>`).join('');
             const linkedIds = new Set((displayInfo.geofences || []).map(gf => gf.id)); const availableGeofences = globalGeofences.filter(gf => !linkedIds.has(gf.id));
-            const addOptionsHtml = availableGeofences.length > 0 ? availableGeofences.map(gf => `<option value="${gf.id}">${AppUtils.escapeHtml(gf.name)}</option>`).join('') : '<option value="" disabled>No other geofences available</option>';
-            const addSectionHtml = `<div style="display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--m3-sys-color-outline-variant);"><select class="add-geofence-select" style="flex-grow: 1; padding: 8px; border-radius: 8px; border: 1px solid var(--m3-sys-color-outline); background-color: var(--m3-sys-color-surface); color: var(--m3-sys-color-on-surface);"><option value="" disabled selected>-- Link a Geofence --</option>${addOptionsHtml}</select><button class="button link-geofence-button" style="padding: 8px 16px;" ${availableGeofences.length === 0 ? 'disabled' : ''}><span class="material-icons" style="font-size: 18px; vertical-align: bottom;">link</span></button></div><p id="link-error-${device.id}" style="color: var(--m3-sys-color-error); font-size: var(--body-small-size); margin-top: 4px; display: none;"></p>`;
-            deviceCard.innerHTML = `<div class="card-title" style="display: flex; align-items: center;"><div class="device-icon" style="width: 36px; height: 36px; margin-right: 12px;">${iconHtml}</div><span style="flex-grow: 1;">${AppUtils.escapeHtml(displayInfo.name)}</span><button class="button save-links-button" data-device-id="${device.id}" style="margin-left: auto; padding: 8px 12px; display: none;"><span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Save Changes</button></div><div class="linked-geofences-list">${linkedItemsHtml || '<p class="no-geofences-message" style="padding: 8px 0; font-style: italic; opacity: 0.7;">No geofences linked yet.</p>'}</div>${addSectionHtml}`;
+            const addOptionsHtml = availableGeofences.length > 0 ? availableGeofences.map(gf => `<option value="${gf.id}">${gf.name}</option>`).join('') : '<option value="" disabled>No other geofences available</option>';
+            const addSectionHtml = `<div style="display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--outline-variant-color);"><select class="add-geofence-select" style="flex-grow: 1; padding: 8px; border-radius: 8px; border: 1px solid var(--outline-color); background-color: var(--surface-color); color: var(--on-surface-color);"><option value="" disabled selected>-- Link a Geofence --</option>${addOptionsHtml}</select><button class="button link-geofence-button" style="padding: 8px 16px;" ${availableGeofences.length === 0 ? 'disabled' : ''}><span class="material-icons" style="font-size: 18px; vertical-align: bottom;">link</span></button></div><p id="link-error-${device.id}" style="color: var(--error-color); font-size: var(--body-small-size); margin-top: 4px; display: none;"></p>`;
+            deviceCard.innerHTML = `<div class="card-title" style="display: flex; align-items: center;"><div class="device-icon" style="width: 36px; height: 36px; margin-right: 12px;">${iconHtml}</div><span style="flex-grow: 1;">${displayInfo.name}</span><button class="button save-links-button" data-device-id="${device.id}" style="margin-left: auto; padding: 8px 12px; display: none;"><span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">save</span> Save Changes</button></div><div class="linked-geofences-list">${linkedItemsHtml || '<p class="no-geofences-message" style="padding: 8px 0; font-style: italic; opacity: 0.7;">No geofences linked yet.</p>'}</div>${addSectionHtml}`;
             container.appendChild(deviceCard);
-
         });
-
-        loadingIndicator.style.display = 'none';
     },
 
     renderAddGeofenceDropdown: function (deviceCardElement, deviceId) {
@@ -1649,7 +1596,7 @@ window.AppUI = {
         if (!selectElement || !linkButton) return; const currentLinkedItems = deviceCardElement.querySelectorAll('.geofence-link-item');
         const linkedIds = new Set(Array.from(currentLinkedItems).map(item => item.dataset.geofenceId)); const globalGeofences = AppState.getGlobalGeofences();
         const availableGeofences = globalGeofences.filter(gf => !linkedIds.has(gf.id));
-        const addOptionsHtml = availableGeofences.length > 0 ? availableGeofences.map(gf => `<option value="${gf.id}">${AppUtils.escapeHtml(gf.name)}</option>`).join('') : '<option value="" disabled>No other geofences available</option>';
+        const addOptionsHtml = availableGeofences.length > 0 ? availableGeofences.map(gf => `<option value="${gf.id}">${gf.name}</option>`).join('') : '<option value="" disabled>No other geofences available</option>';
         selectElement.innerHTML = `<option value="" disabled selected>-- Link a Geofence --</option> ${addOptionsHtml}`; linkButton.disabled = availableGeofences.length === 0;
     },
 
@@ -1678,21 +1625,17 @@ window.AppUI = {
     },
 
     // --- UI State Updates ---
-    setTheme: function (themePreference) {
-        // DELEGATE all theme application logic to AppTheme
-        console.log("[UI] Setting theme preference via AppTheme:", themePreference);
-        AppState.currentTheme = themePreference; // Update state
-        localStorage.setItem('theme', themePreference); // Save preference
-        AppTheme.applyTheme(AppState.userColor, themePreference); // Apply with current color
-
-        // Update UI elements (radio buttons) if needed - AppTheme.initialize might cover this
-        document.querySelectorAll('input[name="theme"]').forEach(radio => {
-            radio.checked = (radio.value === AppState.currentTheme);
-        });
-        // Also update dialog radios if they exist
-        document.querySelectorAll('input[name="theme-dialog"]').forEach(radio => {
-            radio.checked = (radio.value === AppState.currentTheme);
-        });
+    setTheme: function (themeName) {
+        console.log("[UI] Setting theme:", themeName); AppState.currentTheme = themeName; AppState.saveTheme();
+        const body = document.body; const metaThemeColor = document.getElementById('meta-theme-color'); body.classList.remove('dark-theme', 'light-theme');
+        let isDark = false;
+        if (themeName === 'dark') { body.classList.add('dark-theme'); isDark = true; }
+        else if (themeName === 'light') { body.classList.add('light-theme'); }
+        else { if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) { body.classList.add('dark-theme'); isDark = true; } else { body.classList.add('light-theme'); } }
+        if (metaThemeColor) metaThemeColor.setAttribute('content', isDark ? '#1E1B22' : '#FDFCFE'); // Match CSS background
+        AppMap.updateMapThemeStyle(isDark); document.querySelectorAll('input[name="theme"]').forEach(r => r.checked = (r.value === AppState.currentTheme));
+        document.querySelectorAll('input[name="theme-dialog"]').forEach(r => r.checked = (r.value === AppState.currentTheme));
+        AppMap.redrawGeofenceLayer();
     },
 
     updateShowAllButtonState: function () {
@@ -1709,7 +1652,11 @@ window.AppUI = {
         const isActive = AppState.showDeviceHistory; // Read from state
         button.classList.toggle('active', isActive);
         button.setAttribute('aria-pressed', isActive.toString());
-        sliderContainer.classList.toggle('visible', isActive); // Use state to toggle visibility class
+
+        // --- FIX: Toggle slider visibility based on state ---
+        sliderContainer.classList.toggle('visible', isActive);
+        // --- END FIX ---
+
         console.log(`[UI Update] Show History Button Active: ${isActive}, Slider Visible: ${isActive}`);
     },
 
@@ -1724,6 +1671,8 @@ window.AppUI = {
         } else {
             console.warn("[UI Update] History slider element not found when trying to set value.");
         }
+        // --- END FIX ---
+
         if (label) {
             if (hours < 24) { label.textContent = `Last ${hours}h`; }
             else if (hours === 24) { label.textContent = `Last 24h`; }
@@ -1731,16 +1680,29 @@ window.AppUI = {
         }
     },
 
+    setTheme: function (themePreference) {
+        // DELEGATE all theme application logic to AppTheme
+        console.log("[UI] Setting theme preference via AppTheme:", themePreference);
+        AppState.currentTheme = themePreference; // Update state
+        localStorage.setItem('theme', themePreference); // Save preference
+        AppTheme.applyTheme(AppState.userColor, themePreference); // Apply with current color
+
+        // Update UI elements (radio buttons) if needed - AppTheme.initialize might cover this
+        document.querySelectorAll('input[name="theme"]').forEach(radio => {
+            radio.checked = (radio.value === AppState.currentTheme);
+        });
+    },
+
     setupSettingsPage: function () {
         const versionElement = document.getElementById('app-version');
         if (versionElement) versionElement.textContent = `Version ${AppConfig.APP_VERSION}`;
 
-        // --- Theme (Use AppTheme initializer) ---
-        if (window.AppTheme && typeof window.AppTheme.initializeTheme === 'function') {
-            // AppTheme.initializeTheme(); // Initialization should happen ONCE in app.js
-        } else {
-            console.error("AppTheme.initializeTheme not available during settings setup.");
-        }
+        // --- Theme (Unchanged) ---
+        const colorPicker = document.getElementById('theme-color-picker');
+        if (colorPicker) colorPicker.value = AppState.userColor;
+        document.querySelectorAll('input[name="theme"]').forEach(radio => {
+            radio.checked = (radio.value === AppState.currentTheme);
+        });
 
         // --- Toggles (Unchanged) ---
         const historyToggle = document.getElementById('location-history-toggle');
@@ -1761,7 +1723,6 @@ window.AppUI = {
         if (deviceFileInput) deviceFileInput.value = '';
         if (deviceFileListDisplay) deviceFileListDisplay.innerHTML = '';
         if (uploadButtonInitialRef) uploadButtonInitialRef.disabled = true;
-
 
         deviceFileInput?.addEventListener('change', () => {
             const currentUploadButton = document.getElementById('upload-file-button');
@@ -1808,40 +1769,23 @@ window.AppUI = {
                         AppUI.showConfirmationDialog("Upload Complete", result.message || "Files processed.", async () => { await AppActions.refreshDevices(); });
                     } else if (result.details?.errors?.length > 0) {
                         AppUI.showErrorDialog("Upload Failed", result.message || "Some files failed to upload.");
-                        await AppActions.refreshDevices(); // Refresh even on failure to merge potential successes
+                        await AppActions.refreshDevices();
                     }
                     if (deviceFileInput) deviceFileInput.value = '';
                     if (deviceFileListDisplay) deviceFileListDisplay.innerHTML = '';
-                    newUploadButton.disabled = true; // Keep disabled after upload attempt
+                    newUploadButton.disabled = true;
+                    newUploadButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">upload_file</span> Upload Selected Files`;
                 } catch (error) {
                     console.error('[UI] Device upload failed:', error);
                     if (statusEl) { statusEl.textContent = `Upload failed: ${error.message}`; statusEl.style.color = 'var(--m3-sys-color-error)'; }
                     AppUI.showErrorDialog("Upload Failed", `Could not upload files.<br>Details: ${error.message}`);
-                } finally {
-                    // Always reset button text, keep disabled if no files selected after attempt
-                    if (newUploadButton) {
-                        newUploadButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">upload_file</span> Upload Selected Files`;
-                        newUploadButton.disabled = !deviceFileInput?.files || deviceFileInput.files.length === 0;
-                    }
+                    newUploadButton.disabled = true;
+                    newUploadButton.innerHTML = `<span class="material-icons" style="font-size: 18px; vertical-align: bottom; margin-right: 4px;">upload_file</span> Upload Selected Files`;
                 }
             });
             uploadButtonInitialRef.parentNode.replaceChild(newUploadButton, uploadButtonInitialRef);
         }
         // --- End device file upload setup ---
-
-        const exportPartsSelectionDiv = document.getElementById('export-parts-selection');
-        if (exportPartsSelectionDiv) {
-            exportPartsSelectionDiv.innerHTML = `
-                <h4 class="settings-section-title" style="margin-bottom: 8px;">Select Parts to Export</h4>
-                <label> <input type="checkbox" name="export_part" value="devices" checked> Device Configs <span>(Server)</span> </label>
-                <label> <input type="checkbox" name="export_part" value="geofences" checked> Geofences <span>(Server)</span> </label>
-                <label> <input type="checkbox" name="export_part" value="shares" checked> Shared Links <span>(Server)</span> </label>
-                <label> <input type="checkbox" name="export_part" value="clientSettings" checked> UI & Map Settings <span>(Client)</span> </label>
-                <label> <input type="checkbox" name="export_part" value="savedPlaces" checked> Saved Places <span>(Client)</span> </label>
-                <label> <input type="checkbox" name="export_part" value="locationHistory" checked> Location History <span>(Client)</span> </label>
-                <label> <input type="checkbox" name="export_part" value="deviceVisibility" checked> Device Visibility <span>(Client)</span> </label>
-            `;
-        }
 
         // --- Config Import/Export Listener Setup (REVISED) ---
         const exportButton = document.getElementById('export-config-button');
@@ -2275,18 +2219,30 @@ window.AppUI = {
     },
 
     // --- Import/Export UI Handlers (Modified) ---
+    // This function now *only* updates the UI with the file name.
+    // The processing logic is moved to AppActions.handleImportFileSelected.
     handleImportFileSelection: function (event) {
         console.log("[UI] Handling import file selection change (UI update only).");
         const fileInput = event.target;
-        const selectedFileList = document.getElementById('selected-import-file-list'); // Use settings page ID
+        const selectedFileList = document.getElementById('selected-import-file-list');
+        const confirmButton = document.getElementById('confirm-import-button');
+        const partsSelection = document.getElementById('import-parts-selection');
+        const statusMessage = document.getElementById('import-status-message');
+
+        // Reset UI elements first
         if (selectedFileList) selectedFileList.textContent = '';
+        if (partsSelection) partsSelection.style.display = 'none';
+        if (confirmButton) confirmButton.style.display = 'none';
+        if (statusMessage) statusMessage.textContent = '';
+
         if (fileInput.files && fileInput.files.length > 0) {
             const file = fileInput.files[0];
             if (selectedFileList) selectedFileList.textContent = `Selected: ${file.name}`;
-            AppActions.handleImportFileSelected(file); // Trigger action processing
+            // --- The actual processing is now triggered by the event listener in setupSettingsPage ---
+            // --- which calls AppActions.handleImportFileSelected(file) ---
         } else {
-            console.log("[UI] No file selected on settings page, resetting UI.");
-            this.resetImportDialog();
+            console.log("[UI] No file selected, resetting import dialog UI.");
+            this.resetImportDialog(); // Reset fully if selection is cleared
         }
     },
 

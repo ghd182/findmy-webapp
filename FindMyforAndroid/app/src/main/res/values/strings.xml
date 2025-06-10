@@ -1,0 +1,64 @@
+<!-- File: app/src/main/res/values/strings.xml -->
+<!-- Language: XML -->
+<resources>
+    <string name="app_name">FindMy Android</string>
+    <string name="title_webapp">Web App</string>
+    <string name="title_scanner">Scanner</string>
+
+    <!-- Notification Channel (Existing) -->
+    <string name="default_notification_channel_id" translatable="false">findmy_alerts_channel_v1</string>
+    <string name="notification_channel_name">FindMy Alerts</string>
+    <string name="notification_channel_description">Notifications for device status and geofences</string>
+
+    <!-- Scanner Fragment Strings -->
+    <string name="scanner_button_link">Link Account</string>
+    <string name="scanner_button_unlink">Unlink Account</string>
+    <string name="scanner_button_link_action">Link</string>
+    <string name="scanner_button_unlink_action">Unlink</string>
+    <string name="scanner_button_cancel">Cancel</string>
+    <string name="scanner_status_idle_default">Status: Idle. Link account to start.</string>
+    <string name="scanner_switch_enable_background">Enable Periodic Background Scanning</string>
+    <string name="scanner_interval_hint">Interval (sec, min %1$d)</string>
+    <string name="scanner_interval_hint_default">Interval (sec, min 900)</string>
+    <string name="scanner_interval_button_set">Set</string>
+    <string name="scanner_detected_devices_title">Detected Devices (Last Scan Cycle)</string>
+    <string name="scanner_detected_devices_title_all">All Configured Devices</string>
+    <string name="scanner_no_results">No devices found in the last scan.</string>
+    <string name="scanner_toast_link_first">Please link account first.</string>
+    <string name="scanner_toast_invalid_interval">Invalid interval. Enter numbers only.</string>
+    <string name="scanner_dialog_link_title">Link Web Account</string>
+    <string name="scanner_dialog_unlink_title">Unlink Account?</string>
+    <string name="scanner_dialog_unlink_message">This will remove the API token and stop background scanning. Are you sure?</string>
+    <string name="scanner_toast_credentials_required">Username and password required.</string>
+    <string name="scanner_toast_bt_unavailable">Bluetooth hardware not available.</string>
+    <string name="scanner_toast_bt_required">Bluetooth is required for scanning.</string>
+    <string name="scanner_toast_bt_required_for_scan_now">Bluetooth must be enabled to start a scan.</string>
+    <string name="scanner_toast_bt_connect_perm_needed">Bluetooth Connect permission is required to enable Bluetooth.</string>
+    <string name="scanner_toast_bt_connect_perm_needed_detail">Bluetooth Connect permission missing. Please grant it via app settings or re-enable Bluetooth manually.</string>
+    <string name="scanner_toast_bt_permission_issue">Permission issue enabling Bluetooth. Please ensure permissions are granted.</string>
+    <string name="scanner_toast_bt_request_failed">Could not request to enable Bluetooth.</string>
+    <string name="scanner_dialog_username_hint">WebApp Username</string>
+    <string name="scanner_dialog_password_hint">WebApp Password</string>
+    <string name="scanner_button_scan_now">Scan Now</string>
+
+    <!-- Scanner Info/Empty State Strings -->
+    <string name="scanner_info_link_account">Please link your account to view and scan for devices.</string>
+    <string name="scanner_info_no_devices_configured">No devices are configured for your account yet. Link your account to load them.</string>
+    <string name="scanner_info_scan_to_find">Press \'Scan Now\' to find your devices or enable background scanning.</string>
+    <string name="scanner_status_loading_devices">Loading device configuration...</string>
+    <string name="scanner_info_link_account_status">Status: Not Linked.</string>
+    <string name="scanner_info_no_devices_configured_status">Status: Linked. No devices configured.</string>
+    <string name="scanner_status_linked_ready">Status: Linked. Ready.</string>
+
+    <!-- <<< START ADDED STRINGS FOR ADAPTER >>> -->
+    <string name="scanner_details_rssi_value">RSSI: %1$d dBm</string>
+    <string name="scanner_details_rssi_na">RSSI: N/A</string>
+    <string name="scanner_details_line">%1$s • Batt: %2$s • Type: %3$s</string>
+    <string name="scanner_last_seen_never">Never Scanned</string>
+    <string name="time_just_now">Just now</string>
+    <string name="time_seconds_ago">%1$ds ago</string>
+    <string name="time_minutes_ago">%1$dm ago</string>
+    <string name="time_hours_ago">%1$dh ago</string>
+    <!-- <<< END ADDED STRINGS FOR ADAPTER >>> -->
+
+</resources>

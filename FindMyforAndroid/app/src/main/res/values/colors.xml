@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <!-- Use your app's primary color or a distinct notification color -->
+    <color name="notification_color">#FF4285F4</color> <!-- Example: Google Blue -->
+    <color name="colorPrimary">#FF4285F4</color> <!-- Define if not already present -->
+
+
+    <!-- Default icon tint (adapt to your theme) -->
+    <color name="icon_tint_default">#FF808080</color> <!-- Example Grey -->
+
+    <!-- RSSI Colors -->
+    <color name="rssi_strong">#FF00C853</color> <!-- Green -->
+    <color name="rssi_medium">#FFFFA726</color> <!-- Orange -->
+    <color name="rssi_weak">#FFD84315</color>   <!-- Deep Orange -->
+    <color name="rssi_very_weak">#FF757575</color> <!-- Grey -->
+
+    <!-- <<< START ADDED BATTERY COLORS >>> -->
+    <color name="battery_low_color">#FFD32F2F</color> <!-- Red -->
+    <color name="battery_medium_color">#FFFFC107</color> <!-- Amber -->
+    <color name="battery_normal_color">#FF4CAF50</color> <!-- Green (for high/full) -->
+    <color name="battery_unknown_color">#FF9E9E9E</color> <!-- Grey (for unknown) -->
+    <!-- <<< END ADDED BATTERY COLORS >>> -->
+</resources>

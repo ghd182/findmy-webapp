@@ -1,0 +1,12 @@
+<!-- File: app/src/main/res/drawable/ic_baseline_battery_alert_24.xml -->
+<!-- Language: XML -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M15.5,4L14,4v-0.5C14,2.67 13.33,2 12.5,2h-1C10.67,2 10,2.67 10,3.5L10,4L8.5,4C7.67,4 7,4.67 7,5.5v16c0,0.83 0.67,1.5 1.5,1.5h7c0.83,0 1.5,-0.67 1.5,-1.5v-16C17,4.67 16.33,4 15.5,4zM13,18h-2v-2h2v2zM13,14h-2v-4h2v4z"/>
+</vector>

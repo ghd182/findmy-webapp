@@ -48,10 +48,42 @@ window.AppApi = {
             const isJson = contentType && contentType.includes("application/json");
 
             if (!response.ok) {
-                let errorData; let errorMessage = `HTTP error ${response.status}`;
-                if (isJson) { try { errorData = await response.json(); errorMessage = errorData.error || errorData.description || errorData.message || errorMessage; } catch (e) { errorMessage = `${errorMessage} (Failed to parse JSON error response)`; errorData = { message: errorMessage }; } }
-                else { try { const text = await response.text(); errorMessage = `${errorMessage}: ${text.substring(0, 150)}...`; } catch (e) { /* ignore */ } errorData = { message: errorMessage }; }
-                const error = new Error(errorMessage); error.status = response.status; error.code = errorData?.code || `HTTP_${response.status}`; error.data = errorData;
+                let errorData = {};
+                let errorMessage = "Server returned an error. Please try again later."; // Default user-friendly message
+                let errorCode;
+
+                if (isJson) {
+                    try {
+                        errorData = await response.json();
+                        // Use server-provided message if available, otherwise keep default
+                        if (errorData.error || errorData.description || errorData.message) {
+                            errorMessage = errorData.error || errorData.description || errorData.message;
+                        }
+                        // Preserve server-provided code, otherwise generate one
+                        errorCode = errorData.code || `HTTP_ERROR_${response.status}`;
+                    } catch (e) {
+                        // Failed to parse JSON error response
+                        errorMessage = "Server returned an error, and the error details could not be parsed. Please try again later.";
+                        errorCode = `SERVER_UNEXPECTED_RESPONSE_${response.status}`;
+                        errorData = { message: `Failed to parse JSON error response from server. Status: ${response.status}` };
+                    }
+                } else {
+                    // Non-JSON response
+                    errorCode = `SERVER_UNEXPECTED_RESPONSE_${response.status}`;
+                    try {
+                        const text = await response.text();
+                        // Append text for debugging, but primary message remains user-friendly
+                        errorData = { message: `Server returned non-JSON error. Status: ${response.status}. Response: ${text.substring(0, 200)}...` };
+                        // Don't override the user-friendly errorMessage with raw text here unless specifically desired
+                        // For now, we keep the generic one and log the details.
+                    } catch (e) {
+                        errorData = { message: `Server returned non-JSON error and response body could not be read. Status: ${response.status}` };
+                    }
+                }
+                const error = new Error(errorMessage);
+                error.status = response.status;
+                error.code = errorCode;
+                error.data = errorData; // Store original/parsed error data
                 console.error(`API Error ${error.status} (${error.code || 'N/A'}) on ${url}: ${error.message}`, error.data);
 
                 // --- Specific CSRF Error Handling (keep this) ---
@@ -75,17 +107,17 @@ window.AppApi = {
             // Check if the error message contains the Cloudflare URL OR if the SW sent our specific code
             const isCloudflareAccessUrlInError = error.message.includes('cloudflareaccess.com');
             const isCloudflareCode = error.code === 'CLOUDFLARE_AUTH_REQUIRED'; // Check code from SW
-        
+
             if ((isCorsFetchError && isCloudflareAccessUrlInError) || isCloudflareCode) {
                 console.warn("[API Fetch] Detected potential Cloudflare Access block.", error);
                 if (window.AppUI && typeof window.AppUI.showCloudflareReauthPrompt === 'function') {
                     // Check if prompt is already shown to prevent duplicates
                     const existingPrompt = document.getElementById('confirmation-dialog-overlay');
-                     if (!existingPrompt || !existingPrompt.classList.contains('show')) {
-                         AppUI.showCloudflareReauthPrompt(originalRequestUrl);
-                     } else {
-                         console.log("[API Fetch] Cloudflare prompt already visible, skipping new one.");
-                     }
+                    if (!existingPrompt || !existingPrompt.classList.contains('show')) {
+                        AppUI.showCloudflareReauthPrompt(originalRequestUrl);
+                    } else {
+                        console.log("[API Fetch] Cloudflare prompt already visible, skipping new one.");
+                    }
                 } else {
                     // Fallback if UI isn't ready
                     alert("Your security session may have expired. Please reload the page to re-authenticate.");
@@ -94,20 +126,28 @@ window.AppApi = {
                 return Promise.reject({ code: 'CLOUDFLARE_AUTH_REQUIRED', message: 'Cloudflare Access re-authentication needed.' });
             }
             // --- END: Cloudflare Access Error Detection ---
-    
+
             // Handle other errors (CSRF Handled, Network Errors etc.)
             if (error.code === 'CSRF_ERROR_HANDLED') {
                 return Promise.reject(error); // Don't re-handle
             }
             // If it wasn't Cloudflare, treat TypeError as likely network issue
             if (!error.status && error instanceof TypeError) {
-                 error.message = `Network error or server unreachable fetching ${originalRequestUrl}. Are you offline?`;
-                 error.code = 'NETWORK_ERROR';
-             } else if (!error.status) { // Other non-HTTP errors
-                error.message = `Error fetching ${originalRequestUrl}: ${error.message}`;
-                error.code = error.code || 'FETCH_ERROR';
+                // Refined TypeError handling
+                error.message = "Network request failed. This could be due to no internet connection, a DNS issue, or the server being temporarily unavailable. Please check your connection and try again.";
+                error.code = 'NETWORK_ERROR';
+            } else if (!error.status) { // Other non-HTTP errors, ensure they have a code
+                error.message = error.message || `An unexpected error occurred while trying to fetch data from ${originalRequestUrl}.`;
+                error.code = error.code || 'FETCH_ERROR'; // Assign a generic code if none exists
             }
-            console.error(`[API Fetch Catch] Unhandled Error: ${error.code || 'N/A'} - ${error.message}`); // Log other errors
+            // Ensure all errors thrown from here have a code and message
+            if (!error.code) {
+                error.code = 'UNKNOWN_FETCH_ERROR';
+            }
+            if (!error.message) {
+                error.message = 'An unknown error occurred.';
+            }
+            console.error(`[API Fetch Catch] Unhandled Error: ${error.code} - ${error.message}`, error); // Log other errors
             throw error; // Re-throw other errors
         }
     }, // End _fetch

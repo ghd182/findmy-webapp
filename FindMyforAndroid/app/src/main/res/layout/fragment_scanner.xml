@@ -1,0 +1,159 @@
+<!-- File: app/src/main/res/layout/fragment_scanner.xml -->
+<!-- Language: XML -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    tools:context=".fragment.ScannerFragment"
+    android:background="?attr/colorSurfaceContainer">
+
+    <!-- Status and Linking Section -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:id="@+id/scanner_fragment_status_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            tools:text="Status: Idle. Link account to start."
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:layout_marginEnd="8dp"/>
+
+        <Button
+            android:id="@+id/scanner_fragment_link_button"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/scanner_button_link" /> <!-- Use string resource -->
+    </LinearLayout>
+
+    <!-- Background Scan Switch and Interval -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="8dp">
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/scanner_fragment_scan_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/scanner_switch_enable_background"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:enabled="false"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/scanner_fragment_interval_layout"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                app:errorEnabled="false" >
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/scanner_fragment_interval_edittext"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    tools:text="900"
+                    android:hint="@string/scanner_interval_hint_default"
+                    android:imeOptions="actionDone"
+                    android:enabled="false"/>
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <Button
+                android:id="@+id/scanner_fragment_set_interval_button"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/scanner_interval_button_set"
+                android:enabled="false"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Force Scan Button -->
+    <!-- <<< START MODIFIED SECTION FOR FORCE SCAN BUTTON (Workaround) >>> -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/scanner_fragment_force_scan_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/scanner_button_scan_now"
+        app:icon="@android:drawable/ic_menu_search"
+        app:iconPadding="8dp"
+        android:layout_marginBottom="16dp"
+        android:enabled="false"
+        app:backgroundTint="?attr/colorSecondaryContainer"
+        android:textColor="?attr/colorOnSecondaryContainer"
+        app:iconTint="?attr/colorOnSecondaryContainer"
+        />
+    <!-- <<< END MODIFIED SECTION FOR FORCE SCAN BUTTON (Workaround) >>> -->
+
+    <!-- Scan Results Area Title -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/scanner_detected_devices_title_all"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:layout_marginBottom="4dp"/>
+
+    <!-- Progress Bar for Active Scan -->
+    <ProgressBar
+        android:id="@+id/scanner_fragment_scan_active_progress_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:indeterminate="true"
+        android:visibility="gone"
+        tools:visibility="visible"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Progress Bar for Loading Initial Device List -->
+    <ProgressBar
+        android:id="@+id/scanner_fragment_loading_devices_progress_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:indeterminate="true"
+        android:visibility="gone"
+        tools:visibility="gone"
+    android:layout_marginBottom="8dp" />
+
+
+    <TextView
+        android:id="@+id/scanner_fragment_no_results_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/scanner_info_link_account"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:gravity="center"
+        android:visibility="gone"
+        tools:visibility="visible"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="24dp"/>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/scanner_fragment_recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+        tools:listitem="@layout/list_item_scan_result"
+        android:visibility="visible"/> <!-- Initially visible, content visibility managed by adapter/noResultsText -->
+
+</LinearLayout>
