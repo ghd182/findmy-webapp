@@ -95,10 +95,31 @@ window.AppState = {
     getCurrentDeviceData: function () { return this.currentDeviceData; },
     setCurrentDeviceData: function (data) {
         if (Array.isArray(data)) {
-            this.currentDeviceData = data.map(device => ({...device, reports: Array.isArray(device.reports) ? device.reports : [] }));
+            // *** ADDED: Log the incoming data and specifically the geofences part ***
+            console.log("[AppState] setCurrentDeviceData called with data:", data);
+            if (data.length > 0 && data[0].geofences) {
+                console.log(`[AppState] Geofences for first device (${data[0].id}) before state update:`, JSON.stringify(data[0].geofences));
+            }
+            // *** ----------------------------------------------------------------- ***
+
+            // Ensure 'reports' is always an array, even if missing/null in input data
+            this.currentDeviceData = data.map(device => ({
+                ...device,
+                reports: Array.isArray(device.reports) ? device.reports : []
+            }));
             this.lastDeviceUpdateTime = new Date(); // Update timestamp
-            // DO NOT set isInitialLoad to false here, let _updateDeviceUI handle it after first SUCCESSFUL update
-        } else { console.error("Invalid device data format:", data); }
+
+            // *** ADDED: Log the data *after* setting it in state ***
+            if (this.currentDeviceData.length > 0 && this.currentDeviceData[0].geofences) {
+                console.log(`[AppState] Geofences for first device (${this.currentDeviceData[0].id}) *after* state update:`, JSON.stringify(this.currentDeviceData[0].geofences));
+            }
+            // *** -------------------------------------------------- ***
+
+            // DO NOT set isInitialLoad to false here, let _updateDeviceUI handle it
+        } else {
+            console.error("[AppState] Invalid device data format received in setCurrentDeviceData:", data);
+            this.currentDeviceData = []; // Reset to empty array on invalid data
+        }
     },
 
     getGlobalGeofences: function () { return this.globalGeofenceData; },
@@ -132,21 +153,20 @@ window.AppState = {
 
         if (!deviceApiData) {
             console.warn(`Device data for ${deviceId} not found in current API data.`);
-            // Generate fallback SVG here if data is missing
             const fallbackSvg = AppUtils.generateDeviceIconSVG('❓', defaultColor);
             return {
                 id: deviceId, name: deviceId, label: '❓', color: defaultColor,
-                svg_icon: fallbackSvg, // Use generated fallback
+                svg_icon: fallbackSvg,
                 geofences: [], isVisible: isVisible, lat: null, lng: null,
                 rawLocation: null,
-                reports: [], // Ensure reports exists
+                reports: [],
                 model: 'Unknown', status: 'Unknown',
-                batteryLevel: null, batteryStatus: 'Unknown', locationTimestamp: null, address: 'Unknown'
+                batteryLevel: null, batteryStatus: 'Unknown', locationTimestamp: null, address: 'Unknown',
+                last_seen_local: null 
             };
         }
 
         const color = deviceApiData.color || defaultColor;
-        // Use svg_icon from API data, generate fallback if missing
         const svg_icon = deviceApiData.svg_icon || AppUtils.generateDeviceIconSVG(deviceApiData.label || '❓', color);
 
         return {
@@ -155,19 +175,21 @@ window.AppState = {
             label: deviceApiData.label || '❓',
             color: color,
             svg_icon: svg_icon,
-            geofences: Array.isArray(deviceApiData.geofences) ? deviceApiData.geofences : [], // Ensure geofences is an array
+            geofences: Array.isArray(deviceApiData.geofences) ? deviceApiData.geofences : [],
             isVisible: isVisible,
             lat: deviceApiData.lat,
             lng: deviceApiData.lng,
             rawLocation: deviceApiData.rawLocation,
-            reports: Array.isArray(deviceApiData.reports) ? deviceApiData.reports : [], // Ensure reports is an array
+            reports: Array.isArray(deviceApiData.reports) ? deviceApiData.reports : [],
             status: deviceApiData.status || 'Unknown',
             model: deviceApiData.model || 'Unknown',
             batteryLevel: deviceApiData.batteryLevel,
             batteryStatus: deviceApiData.batteryStatus || 'Unknown',
             locationTimestamp: deviceApiData.locationTimestamp,
-            address: deviceApiData.address || 'Unknown'
+            address: deviceApiData.address || 'Unknown',
+            last_seen_local: deviceApiData.last_seen_local || null 
         };
+        
     },
 
     // --- START: New Share Methods ---

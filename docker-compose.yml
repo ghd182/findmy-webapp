@@ -1,89 +1,84 @@
-# docker-compose.yml
+# File: docker-compose.yml
+# Purpose: Define services for local development/testing using Docker Compose.
 
 services:
   findmyapp:
-    # Build the image using the Dockerfile in the current directory
+    # Build the image using the Dockerfile in the current directory (Flask WebApp)
     build:
       context: .
       dockerfile: Dockerfile
-    # Specify the target platform
-    platform: linux/arm64/v8
-    # Optional: Explicitly name the image built by compose
+    # Optional: Specify target platform if needed (e.g., for Apple Silicon or Raspberry Pi)
+    # platform: linux/arm64/v8
+    # Optional: Use a pre-built image name
     image: ghd182/findmy-webapp:latest
-    # Sets a specific container name
     container_name: findmyapp
-    # Restart policy
     restart: unless-stopped
     ports:
       # Map host port 5000 to container port 5000
-      # Change host port (left side) if 5000 is already in use on your Pi
+      # Change host port (left side) if 5000 is occupied on your system
       - "5000:5000"
     volumes:
-      # Mount the local ./data directory into the container for persistence
-      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
-      # Example for user 'pi': /home/username/findmy-app/data:/app/data
+      # Mount local ./data directory for persistent storage (DB, user files, cache)
+      # CRITICAL: Ensure this directory exists and has correct permissions on the host.
       - ./data:/app/data
-      # Mount the .env file for configuration secrets
-      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
-      # Example for user 'pi': /home/username/findmy-app/.env:/app/.env
+      # Optional: Mount .env file for development overrides (less common now with seeds)
       # - ./.env:/app/.env
-      # Mount the private key file if needed by your app (e.g., VAPID requires it)
-      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
-      # Example for user 'pi': /home/username/findmy-app/private_key.pem:/app/private_key.pem
-      # - ./private_key.pem:/app/private_key.pem # Uncomment if needed
-
-      # Mount the public key file if needed by your app
-      # IMPORTANT: Use ABSOLUTE path on your Raspberry Pi host when deploying via Portainer Stack editor
-      # Example for user 'pi': /home/username/findmy-app/public_key.pem:/app/public_key.pem
-      # - ./public_key.pem:/app/public_key.pem # Uncomment if needed
     environment:
       # --- Core Flask/App Settings ---
-      # IMPORTANT for production
+      # Set to 'development' for debugging
       FLASK_ENV: production
-      # Or DEBUG, WARNING, ERROR
+      # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
       LOG_LEVEL: INFO
-      # Set your timezone
+      # Set to your local timezone (e.g., America/New_York)
       TZ: Europe/Amsterdam
-      # Override if needed
+      # Adjust based on server resources
       WAITRESS_THREADS: 8
 
-      # --- SEED Variables (DEFINE THESE WITH STRONG SECRETS!) ---
-      # These seeds will be used to generate the actual keys internally.
-      # KEEP THESE SEEDS SECRET!
-      SECRET_SEED: "your-very-long-random-secret-phrase-for-sessions-portainer"
-      FERNET_SEED: "another-different-long-random-secret-phrase-for-encryption-portainer"
-      VAPID_SEED: "a-third-unique-long-random-phrase-for-push-keys-portainer"
-      VAPID_CLAIMS_EMAIL: "mailto:user@email.com"
-    
-      
-      # You can override .env variables here if needed, but mounting .env is usually sufficient
-      # Example: Override log level
-      # LOG_LEVEL: DEBUG
-      # Set timezone if needed by scheduler/logs
-      # User default is 10 mins
-      DEFAULT_FETCH_INTERVAL_MINUTES: 15
-      # Override fetch interval
+      # --- SEED Variables (CRITICAL: Set strong, unique secrets!) ---
+      # These seeds generate the actual keys used by the application. Keep them secret!
+      # Use long, random phrases. Don't commit real secrets here in public repos.
+      # For Flask session signing
+      SECRET_SEED: "your-very-long-random-secret-phrase-for-sessions"
+      # For encrypting sensitive data (e.g., Apple password)
+      FERNET_SEED: "another-different-long-random-secret-phrase-for-encryption"
+      # For Web Push VAPID keys
+      VAPID_SEED: "a-third-unique-long-random-phrase-for-push-keys"
+      # REQUIRED for VAPID - set your contact email
+      VAPID_CLAIMS_EMAIL: "mailto:you@example.com"
+
+      # --- Anisette Server Configuration ---
+      # Points to the anisette service defined below within the Docker network
+      ANISETTE_SERVERS: "http://anisette:6969"
+
+      # --- Application Behaviour Configuration (Overrides) ---
+      # Default background fetch interval
+      DEFAULT_FETCH_INTERVAL_MINUTES: 30
+      # Actual interval used (can override default)
       FETCH_INTERVAL_MINUTES: 15
-      # Override battery threshold
-      LOW_BATTERY_THRESHOLD: 20
-      # Override notification cooldown (10 minutes)
+      # Battery level % for low battery alerts
+      LOW_BATTERY_THRESHOLD: 40
+      # Min seconds between same alert type (10 mins)
       NOTIFICATION_COOLDOWN_SECONDS: 600
-      # Override history retention
+      # How long to keep notification history
       NOTIFICATION_HISTORY_DAYS: 60
-      # Override location history fetch duration     
+      # How many days of location history to fetch/display
       HISTORY_DURATION_DAYS: 14
 
-    # --- Add dependency on the anisette service ---
+      # Native Scanner Scan Interval (Affects config sent TO Android app)
+      # Default 5 minutes (Android app should ideally poll config endpoint)
+      NATIVE_SCAN_INTERVAL_SECONDS: 300
+
     depends_on:
+      # Ensure anisette server starts before the web app attempts to use it
       - anisette
 
-  # --- NEW Anisette Server Service ---
+  # --- Anisette Server Service ---
   anisette:
-    image: dadoum/anisette-v3-server:latest # Use the official image
+    # Official Anisette server image
+    image: dadoum/anisette-v3-server:latest
     container_name: anisette-server
     restart: unless-stopped
-    # No ports needed here unless you want to access it directly from your host
-    # The findmyapp service will access it via the internal Docker network ('http://anisette:6969')
-    # platform: linux/arm64/v8 # Usually not needed, image is multi-arch
+    # No ports exposed externally by default
     # No volumes needed for basic operation
     # No environment variables needed for basic operation
+    # platform: linux/arm64/v8 # Usually not needed, image is multi-arch

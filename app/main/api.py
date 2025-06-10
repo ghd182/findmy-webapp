@@ -1,4 +1,6 @@
-# app/main/api.py
+# File: app/main/api.py
+# Purpose: Defines main API endpoints requiring user session authentication.
+
 import logging
 import time
 import re
@@ -6,20 +8,31 @@ import os
 import threading
 import traceback
 import shutil
-import uuid  # Added for share IDs
+import uuid
 from pathlib import Path
 from werkzeug.utils import secure_filename
 import json
+import base64
+import secrets
 
-from typing import List, Optional
-from datetime import datetime, timezone, timedelta  # Ensure timedelta is imported
+from typing import List, Optional, Dict, Any, Tuple, Set
+from datetime import datetime, timezone, timedelta
 from app.scheduler.tasks import run_fetch_for_user_task
-from app.utils.json_utils import save_json_atomic, load_json_file
+from app.utils.json_utils import (
+    load_json_file,
+)
 from app.utils.helpers import get_potential_mac_from_public_key
 
-from findmy.accessory import FindMyAccessory  # Import FindMyAccessory
-from findmy.keys import KeyPair  # Import KeyPair
-import base64  # Import base64
+# --- REMOVE token_required and get_current_api_user imports if no longer used HERE ---
+# from app.utils.auth_utils import token_required, get_current_api_user
+
+from findmy.accessory import FindMyAccessory
+from findmy.keys import KeyPair
+
+import secrets
+from werkzeug.security import (
+    check_password_hash,
+)
 
 from flask import (
     Blueprint,
@@ -31,17 +44,26 @@ from flask import (
     send_file,
     session,
     url_for,
+    g,  # Keep g if used by session auth
 )
+
+# --- Keep flask_login import for @login_required ---
 from flask_login import login_required, current_user
 
+# --- Keep limiter AND CSRF from app ---
+from app import limiter, csrf
+
+from app.models import (
+    Geofence,
+    Share,
+    Device,
+    User,
+)  # Removed ApiToken unless needed elsewhere
+
 # Import Services
-# Import UserDataService to load keys file content (if helper isn't sufficient)
 from app.services.user_data_service import UserDataService
 from app.services.notification_service import NotificationService
-
-# Import AppleDataService ONLY if we need its internal key loading helper
-from app.services.apple_data_service import AppleDataService  # Needs AppleDataService
-
+from app.services.apple_data_service import AppleDataService
 
 from findmy.reports import (
     AppleAccount,
@@ -51,7 +73,6 @@ from findmy.reports import (
     TrustedDeviceSecondFactorMethod,
 )
 
-
 # Import necessary utils
 from app.utils.helpers import (
     generate_geofence_id,
@@ -60,8 +81,6 @@ from app.utils.helpers import (
     get_available_anisette_server,
     encrypt_password,
 )
-
-
 from app.utils.data_formatting import (
     format_latest_report_for_api,
     _parse_battery_info,
@@ -80,6 +99,7 @@ def allowed_file(filename, allowed_set=ALLOWED_EXTENSIONS):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_set
 
 
+# --- get_current_advertisement_keys Route (Keep as is) ---
 @bp.route("/user/current_advertisement_keys", methods=["GET"])
 @login_required
 def get_current_advertisement_keys():
@@ -88,51 +108,40 @@ def get_current_advertisement_keys():
     uds = UserDataService(current_app.config)
     expected_keys_and_macs = []
     processed_device_ids = set()
-
     try:
         user_data_dir = uds._get_user_data_dir(user_id)
         if not user_data_dir:
             return jsonify({"error": "User data directory not found."}), 500
         devices_config = uds.load_devices_config(user_id)
         now = datetime.now(timezone.utc)
-
-        # 1. Process .plist files
         log.debug(f"[API Keys] Processing .plist files for user '{user_id}'...")
+        creds_filename = uds.config.get(
+            "USER_APPLE_CREDS_FILENAME", "apple_credentials.json"
+        )
+        creds_stem = Path(creds_filename).stem
         for plist_file in user_data_dir.glob("*.plist"):
             device_id = plist_file.stem
-            if (
-                not device_id
-                or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem
-            ):
+            if not device_id or device_id == creds_stem:
                 continue
             if device_id in processed_device_ids:
                 continue
             log.debug(
                 f"[API Keys] -- Found plist: {plist_file.name} (Device ID: {device_id})"
             )
-
             try:
                 with plist_file.open("rb") as f:
                     accessory = FindMyAccessory.from_plist(f)
-                # --- Get keys for a slightly wider window for robustness ---
-                # reconstruct all the 7 days interval for .plist devices
-                time_window_past = (
-                    now - 7 * 24 * 4 * accessory.interval
-                )  # Go back one interval
-                time_window_future = now + accessory.interval  # Go forward one interval
+                time_window_past = now - timedelta(days=7)
+                time_window_future = now + timedelta(days=1)
                 current_keys: set[KeyPair] = accessory.keys_between(
                     time_window_past, time_window_future
-                )  # Use keys_between
-                # current_keys: set[KeyPair] = accessory.keys_at(now) # Original line
-                # --- ---------------------------------------------------- ---
-
+                )
                 device_display_name = devices_config.get(device_id, {}).get(
                     "name", device_id
                 )
                 log.debug(
                     f"[API Keys] -- Generated {len(current_keys)} potential keys for '{device_id}' around {now.isoformat()}"
                 )
-
                 for key_pair in current_keys:
                     adv_key_bytes = key_pair.adv_key_bytes
                     adv_key_b64 = (
@@ -141,13 +150,9 @@ def get_current_advertisement_keys():
                         .rstrip("=")
                     )
                     potential_mac = get_potential_mac_from_public_key(adv_key_bytes)
-
-                    # --- *** ADD DETAILED LOG for plist keys/macs *** ---
                     log.debug(
                         f"[API Keys] ---- Device: {device_id} | Type: {key_pair.key_type.name} | KeyB64: {adv_key_b64} | MAC: {potential_mac}"
                     )
-                    # --- ******************************************** ---
-
                     expected_keys_and_macs.append(
                         {
                             "device_id": device_id,
@@ -162,14 +167,10 @@ def get_current_advertisement_keys():
                 log.warning(
                     f"User '{user_id}': Error processing plist {plist_file.name} for keys: {e}",
                     exc_info=True,
-                )  # Add exc_info
-
-        # 2. Process .keys files (keep existing logic)
+                )
         log.debug(f"[API Keys] Processing .keys files for user '{user_id}'...")
 
-        def _load_private_keys_from_keys_file(
-            keys_file_path: Path,
-        ) -> List[str]:  # ... same helper ...
+        def _load_private_keys_from_keys_file(keys_file_path: Path) -> List[str]:
             private_keys = []
             if not keys_file_path.exists():
                 return []
@@ -203,17 +204,13 @@ def get_current_advertisement_keys():
 
         for keys_file in user_data_dir.glob("*.keys"):
             device_id = keys_file.stem
-            if (
-                not device_id
-                or device_id == Path(uds.config["USER_APPLE_CREDS_FILENAME"]).stem
-            ):
+            if not device_id or device_id == creds_stem:
                 continue
             if device_id in processed_device_ids:
                 continue
             log.debug(
                 f"[API Keys] -- Found keys file: {keys_file.name} (Device ID: {device_id})"
             )
-
             try:
                 private_keys_b64 = _load_private_keys_from_keys_file(keys_file)
                 if not private_keys_b64:
@@ -232,13 +229,9 @@ def get_current_advertisement_keys():
                             .rstrip("=")
                         )
                         potential_mac = get_potential_mac_from_public_key(adv_key_bytes)
-
-                        # --- *** ADD DETAILED LOG for keys file keys/macs *** ---
                         log.debug(
                             f"[API Keys] ---- Device: {device_id} | Type: STATIC_KEYS_FILE | KeyB64: {adv_key_b64_urlsafe} | MAC: {potential_mac}"
                         )
-                        # --- ********************************************** ---
-
                         expected_keys_and_macs.append(
                             {
                                 "device_id": device_id,
@@ -259,19 +252,19 @@ def get_current_advertisement_keys():
                 log.warning(
                     f"User '{user_id}': Error processing keys file {keys_file.name} for scanner: {e}"
                 )
-
         log.info(
             f"User '{user_id}': Providing {len(expected_keys_and_macs)} potential keys/MACs."
         )
         return jsonify({"keys_and_macs": expected_keys_and_macs})
-
     except Exception as e:
         log.exception(f"Error fetching current keys/MACs for user '{user_id}'")
         return jsonify({"error": "Server error fetching expected keys."}), 500
 
 
+# --- /files/upload Route (Keep as is) ---
 @bp.route("/files/upload", methods=["POST"])
 @login_required
+@limiter.limit("200 per hour")  # Rate limit file uploads
 def upload_device_file():
     user_id = current_user.id
     log.info(f"API POST /files/upload called by user '{user_id}'")
@@ -288,7 +281,12 @@ def upload_device_file():
             500,
         )
 
-    results = {"success": [], "errors": []}
+    results = {
+        "success": [],
+        "errors": [],
+        "fetch_triggered": None,
+        "fetch_error": None,
+    }
     config_needs_reload = False
     trigger_fetch = False
     for file_storage in uploaded_files:
@@ -309,6 +307,7 @@ def upload_device_file():
             log.warning(f"User '{user_id}' upload attempt: {msg}")
             results["errors"].append({"filename": original_filename, "error": msg})
             continue
+
         save_path = user_data_dir / filename
         log.info(
             f"User '{user_id}': Saving uploaded '{original_filename}' as '{filename}'"
@@ -333,55 +332,49 @@ def upload_device_file():
 
     if config_needs_reload:
         try:
-            uds.load_devices_config(user_id)
-            log.info(f"User '{user_id}': Devices config reloaded after uploads.")
+            uds.load_devices_config(user_id)  # Trigger DB merge
+            log.info(f"User '{user_id}': Devices config checked/merged after uploads.")
+
             if trigger_fetch and not results["errors"]:
                 log.info(
                     f"Triggering immediate fetch for user '{user_id}' after file upload."
                 )
                 try:
-                    apple_id, apple_password = uds.load_apple_credentials(user_id)
+                    apple_id, apple_password, _ = uds.load_apple_credentials_and_state(
+                        user_id
+                    )
                     if apple_id and apple_password:
+                        app_context = current_app._get_current_object()
                         immediate_fetch_thread = threading.Thread(
                             target=run_fetch_for_user_task,
-                            args=(
-                                user_id,
-                                apple_id,
-                                apple_password,
-                                current_app.config,
-                            ),
+                            args=(app_context, user_id),
                             name=f"ImmediateFetchUpload-{user_id}",
                             daemon=True,
                         )
                         immediate_fetch_thread.start()
                         results["fetch_triggered"] = True
+                        log.info(f"User '{user_id}': Immediate fetch thread started.")
                     else:
                         log.warning(
-                            f"User '{user_id}': Cannot trigger fetch after upload, creds missing."
+                            f"User '{user_id}': Cannot trigger fetch after upload, creds missing or invalid."
                         )
                         results["fetch_triggered"] = False
-                        results["fetch_error"] = "Credentials missing"
-                except ImportError:
-                    log.error(
-                        "Cannot import run_fetch_for_user_task for immediate trigger."
-                    )
-                    results["fetch_triggered"] = False
-                    results["fetch_error"] = "Server cannot trigger immediate fetch."
+                        results["fetch_error"] = "Credentials missing or invalid"
                 except Exception as fetch_trigger_err:
                     log.error(
-                        f"Failed to start immediate fetch for '{user_id}': {fetch_trigger_err}"
+                        f"Failed to start immediate fetch for '{user_id}': {fetch_trigger_err}",
+                        exc_info=True,
                     )
-                    log.error(traceback.format_exc())
                     results["fetch_triggered"] = False
                     results["fetch_error"] = str(fetch_trigger_err)
         except Exception as post_upload_err:
             log.error(
-                f"Error post-upload config reload for {user_id}: {post_upload_err}"
+                f"Error post-upload config reload/merge for {user_id}: {post_upload_err}"
             )
             results["errors"].append(
                 {
                     "filename": "N/A",
-                    "error": f"Server error during config reload: {post_upload_err}. Devices might not appear.",
+                    "error": f"Server error during config reload: {post_upload_err}. Devices might not appear immediately.",
                 }
             )
 
@@ -398,7 +391,8 @@ def upload_device_file():
         status_code = 400
     else:
         response_message = f"Upload complete: {len(results['success'])} succeeded, {len(results['errors'])} failed."
-        status_code = 200
+        status_code = 207  # Multi-status for partial success
+
     if results.get("fetch_triggered") is True:
         response_message += " Background fetch initiated."
     elif results.get("fetch_triggered") is False:
@@ -407,7 +401,7 @@ def upload_device_file():
     return jsonify({"message": response_message, "details": results}), status_code
 
 
-# --- Device API ---
+# --- /devices Route (Keep as is) ---
 @bp.route("/devices", methods=["GET"])
 @login_required
 def get_devices():
@@ -424,103 +418,95 @@ def get_devices():
         current_user_devices_config = uds.load_devices_config(user_id)
         all_user_geofences = uds.load_geofences_config(user_id)
         user_cache = uds.load_cache_from_file(user_id)
-        # --- Use the NEWLY ADDED method ---
-        active_shared_device_ids = uds.get_active_shared_device_ids_for_user(user_id)
-        # --- --------------------------- ---
 
-        if (
-            not user_cache
-            or "data" not in user_cache
-            or not isinstance(user_cache.get("data"), dict)
-        ):
-            error_detail = (
-                user_cache.get("error", "Cache is empty or invalid.")
-                if user_cache
-                else "Cache file not found or empty."
+        cache_has_data = user_cache and isinstance(user_cache.get("data"), dict)
+        cache_error_detail = (
+            user_cache.get("error") if user_cache else None
+        ) or "Cache missing or empty."
+
+        if not current_user_devices_config:
+            response_data["error"] = "No devices configured for this user."
+            response_data["code"] = "NO_DEVICES_CONFIGURED"
+            log.debug(
+                f"[API /devices Response Log - No Devices] User '{user_id}': {response_data}"
             )
-            log.warning(
-                f"User '{user_id}' /api/devices: Cache empty/invalid. Error: {error_detail}"
-            )
-            response_data["error"] = (
-                "Device data not available yet. Waiting for next background fetch."
-            )
-            response_data["code"] = "CACHE_EMPTY"
-            response_data["last_updated"] = (
-                user_cache.get("timestamp") if user_cache else None
-            )
-            response_data["fetch_errors"] = error_detail
-            for device_id, config_from_file in current_user_devices_config.items():
-                formatted_device = format_latest_report_for_api(
-                    user_id,
-                    device_id,
-                    None,
-                    config_from_file,
-                    all_user_geofences,
-                    current_app.config["LOW_BATTERY_THRESHOLD"],
-                )
-                formatted_device["is_shared"] = device_id in active_shared_device_ids
-                formatted_device["reports"] = []
-                response_data["devices"].append(formatted_device)
-            response_data["devices"].sort(
-                key=lambda d: d.get("name", d.get("id", "")).lower()
-            )
-            response_data["code"] = "CACHE_EMPTY_CONFIG_RETURNED"
-            return jsonify(response_data), 200
+            return jsonify(response_data), 404
 
         devices_list = []
-        device_data_dict_from_cache = user_cache.get("data", {})
-        processed_ids_from_cache = set()
+        processed_ids_from_config = set()
 
-        for device_id, device_info_from_cache in device_data_dict_from_cache.items():
-            if device_id not in current_user_devices_config:
-                continue
-            processed_ids_from_cache.add(device_id)
-            fresh_config = current_user_devices_config.get(device_id)
-            all_reports_for_device = device_info_from_cache.get("reports", [])
-            latest_report = (
-                all_reports_for_device[0] if all_reports_for_device else None
-            )
+        for device_id, config_from_db in current_user_devices_config.items():
+            processed_ids_from_config.add(device_id)
+            latest_report = None
+            all_reports_for_device = []
+            if cache_has_data:
+                device_data_from_cache = user_cache["data"].get(device_id)
+                if device_data_from_cache:
+                    all_reports_for_device = device_data_from_cache.get("reports", [])
+                    if all_reports_for_device:
+                        latest_report = all_reports_for_device[0]
+
+            # Format using config from DB (which now includes last_seen_local)
             formatted_device = format_latest_report_for_api(
                 user_id,
                 device_id,
                 latest_report,
-                fresh_config,
+                config_from_db,
                 all_user_geofences,
                 current_app.config["LOW_BATTERY_THRESHOLD"],
             )
-            formatted_device["is_shared"] = device_id in active_shared_device_ids
+            # Add 'last_seen_local' directly from the config dict loaded from DB
+            formatted_device["last_seen_local"] = config_from_db.get(
+                "last_seen_local"
+            )  # Already ISO string or None
+            formatted_device["is_shared"] = uds.is_device_shared(user_id, device_id)
             formatted_device["reports"] = all_reports_for_device
-            devices_list.append(formatted_device)
 
-        for device_id, config_from_file in current_user_devices_config.items():
-            if device_id not in processed_ids_from_cache:
-                formatted_device = format_latest_report_for_api(
-                    user_id,
-                    device_id,
-                    None,
-                    config_from_file,
-                    all_user_geofences,
-                    current_app.config["LOW_BATTERY_THRESHOLD"],
-                )
-                formatted_device["is_shared"] = device_id in active_shared_device_ids
-                formatted_device["reports"] = []
-                devices_list.append(formatted_device)
+            log.debug(
+                f"[API /devices Formatting Log] Device '{device_id}': Formatted linked_geofences: {formatted_device.get('geofences')}"
+            )
+            devices_list.append(formatted_device)
 
         devices_list.sort(key=lambda d: d.get("name", d.get("id", "")).lower())
         response_data["devices"] = devices_list
-        response_data["last_updated"] = user_cache.get("timestamp")
-        response_data["fetch_errors"] = user_cache.get("error")
-        response_data["code"] = "OK"
+        response_data["last_updated"] = (
+            user_cache.get("timestamp") if user_cache else None
+        )
+        response_data["fetch_errors"] = (
+            user_cache.get("error") if user_cache else cache_error_detail
+        )
+        response_data["code"] = (
+            "OK" if cache_has_data else "CACHE_EMPTY_CONFIG_RETURNED"
+        )
+
+        log.debug(
+            f"[API /devices Response Log] User '{user_id}': Sending final data structure:"
+        )
+        log.debug(
+            f"  Response Keys: {list(response_data.keys())}, Device Count: {len(response_data.get('devices', []))}"
+        )
+        if response_data.get("devices"):
+            log.debug(
+                f"  First Device Keys: {list(response_data['devices'][0].keys()) if response_data['devices'] else 'N/A'}"
+            )
+            log.debug(
+                f"  First Device last_seen_local: {response_data['devices'][0].get('last_seen_local') if response_data['devices'] else 'N/A'}"
+            )
         return jsonify(response_data), status_code
 
     except Exception as e:
         log.exception(f"Error in GET /api/devices for '{user_id}'")
-        return (
-            jsonify({"error": "Server Error", "message": "Error fetching devices."}),
-            500,
+        error_response = {
+            "error": "Server Error",
+            "message": f"Error fetching devices: {e}",
+        }
+        log.debug(
+            f"[API /devices Response Log - Error] User '{user_id}': {error_response}"
         )
+        return jsonify(error_response), 500
 
 
+# --- /devices/<id> PUT Route (Keep as is) ---
 @bp.route("/devices/<string:device_id>", methods=["PUT"])
 @login_required
 def update_device_display_config(device_id):
@@ -532,23 +518,24 @@ def update_device_display_config(device_id):
         log.warning(f"User '{user_id}' PUT /devices/{device_id}: Invalid request.")
         abort(400, description="Invalid request data.")
     try:
-        config_data = uds.load_devices_config(user_id)
-        all_user_geofences = uds.load_geofences_config(user_id)
-        if device_id not in config_data:
+        devices_config = uds.load_devices_config(user_id)
+        if device_id not in devices_config:
             log.warning(f"User '{user_id}' PUT /devices/{device_id}: Device not found.")
             abort(404, description="Device not found.")
-        device_config = config_data[device_id]
+        existing_config = devices_config.get(device_id, {})
+        payload_to_save = {}
         updated_fields_count = 0
         allowed_fields = ["name", "label", "color"]
+
         if "name" in data:
             new_name = str(data["name"]).strip() if data["name"] else device_id
-            if new_name != device_config.get("name"):
-                device_config["name"] = new_name
+            if new_name != existing_config.get("name"):
+                payload_to_save["name"] = new_name
                 updated_fields_count += 1
         if "label" in data:
-            new_label = str(data["label"]).strip()[:2] if data["label"] else "❓"
-            if new_label != device_config.get("label", "❓"):
-                device_config["label"] = new_label
+            new_label = str(data["label"]).strip()[:5] if data["label"] else "❓"
+            if new_label != existing_config.get("label", "❓"):
+                payload_to_save["label"] = new_label
                 updated_fields_count += 1
         if "color" in data:
             new_color = data["color"]
@@ -558,25 +545,21 @@ def update_device_display_config(device_id):
                 r"^#[0-9a-fA-F]{6}$", new_color
             ):
                 abort(400, description="Invalid color format.")
-            if new_color != device_config.get("color"):
-                device_config["color"] = new_color
+            if new_color != existing_config.get("color"):
+                payload_to_save["color"] = new_color
                 updated_fields_count += 1
 
-        ignored_fields = [k for k in data if k not in allowed_fields]
-        if ignored_fields:
-            log.warning(
-                f"User '{user_id}', Device '{device_id}': PUT ignored fields: {ignored_fields}."
-            )
-
         if updated_fields_count > 0:
-            uds.save_devices_config(user_id, config_data)
+            uds.save_devices_config(user_id, {device_id: payload_to_save})
             log.info(f"User '{user_id}': Saved display config for '{device_id}'.")
-            config_data = uds.load_devices_config(user_id)
-            device_config = config_data.get(device_id, device_config)
+            updated_device_config = uds.load_devices_config(user_id).get(device_id)
+            if not updated_device_config:
+                raise RuntimeError("Failed to reload device config after save.")
         else:
             log.debug(
                 f"User '{user_id}', Device '{device_id}': No display changes detected."
             )
+            updated_device_config = existing_config
 
         latest_report_from_cache = None
         user_cache = uds.load_cache_from_file(user_id)
@@ -586,13 +569,17 @@ def update_device_display_config(device_id):
                 latest_report_from_cache = cached_device_data["reports"][0]
 
         is_shared = uds.is_device_shared(user_id, device_id)
+        all_user_geofences = uds.load_geofences_config(user_id)
         formatted_device = format_latest_report_for_api(
             user_id,
             device_id,
             latest_report_from_cache,
-            device_config,
+            updated_device_config,
             all_user_geofences,
             current_app.config["LOW_BATTERY_THRESHOLD"],
+        )
+        formatted_device["last_seen_local"] = updated_device_config.get(
+            "last_seen_local"
         )
         formatted_device["is_shared"] = is_shared
         if user_cache and user_cache.get("data") and user_cache["data"].get(device_id):
@@ -601,7 +588,6 @@ def update_device_display_config(device_id):
             )
         else:
             formatted_device["reports"] = []
-
         return jsonify(formatted_device), 200
     except ValueError as ve:
         abort(400, description=str(ve))
@@ -613,86 +599,84 @@ def update_device_display_config(device_id):
         abort(500, description="Unexpected error.")
 
 
+# --- /devices/<id>/geofence_links PUT Route (Keep as is) ---
 @bp.route("/devices/<string:device_id>/geofence_links", methods=["PUT"])
 @login_required
 def update_device_geofence_links(device_id):
+    from app import db  # Keep db import if used directly, though UDS abstracts most
+
     user_id = current_user.id
-    log.debug(f"API PUT /devices/{device_id}/geofence_links by '{user_id}'")
+    # +++ ADDED PAYLOAD LOGGING +++
     data = request.get_json()
+    log.debug(
+        f"API PUT /devices/{device_id}/geofence_links by '{user_id}'. Received payload: {data}"
+    )
+    # +++ ----------------------- +++
     uds = UserDataService(current_app.config)
+
     if (
-        not data
+        not data  # Check if data itself is None or empty
         or "linked_geofences" not in data
         or not isinstance(data["linked_geofences"], list)
         or not device_id
     ):
+        log.warning(
+            f"User '{user_id}': Invalid payload for PUT /devices/{device_id}/geofence_links. Raw data: {request.data[:200]}"  # Log raw data on error
+        )
         abort(400, description="Invalid payload: 'linked_geofences' array required.")
     try:
-        devices_config = uds.load_devices_config(user_id)
-        all_user_geofences_map = uds.load_geofences_config(user_id)
-        if device_id not in devices_config:
-            abort(404, description="Device not found.")
-        device_config = devices_config[device_id]
-        all_user_geofences_ids = set(all_user_geofences_map.keys())
-        validated_new_links = []
-        linked_ids_in_payload = set()
-        for link_data in data["linked_geofences"]:
-            if not isinstance(link_data, dict) or "id" not in link_data:
-                raise ValueError("Invalid link structure")
-            gf_id = link_data.get("id")
-            if (
-                not isinstance(gf_id, str)
-                or not gf_id
-                or gf_id not in all_user_geofences_ids
-            ):
-                raise ValueError(f"Invalid or unknown geofence ID '{gf_id}'.")
-            if gf_id in linked_ids_in_payload:
-                log.warning(f"Duplicate geofence ID '{gf_id}' in payload")
-                continue
-            validated_link = {
-                "id": gf_id,
-                "notify_entry": bool(link_data.get("notify_entry", False)),
-                "notify_exit": bool(link_data.get("notify_exit", False)),
-            }
-            validated_new_links.append(validated_link)
-            linked_ids_in_payload.add(gf_id)
-        device_config["linked_geofences"] = validated_new_links
-        try:
-            uds.save_devices_config(user_id, devices_config)
-            log.info(
-                f"User '{user_id}': Updated geofence links for '{device_id}'. Links: {validated_new_links}"
-            )
-        except Exception as e:
-            log.exception(
-                f"User '{user_id}', Device '{device_id}': Error saving device config after updating links."
-            )
-            abort(500, description="Failed to save device config.")
-        resolved_response_links = []
-        for link in validated_new_links:
-            gf_definition = all_user_geofences_map.get(link["id"])
-            if gf_definition:
-                resolved_response_links.append(
-                    {
-                        **gf_definition,
-                        "notify_on_entry": link["notify_entry"],
-                        "notify_on_exit": link["notify_exit"],
-                    }
-                )
-        return jsonify({"linked_geofences": resolved_response_links}), 200
-    except ValueError as ve:
-        abort(400, description=str(ve))
-    except IOError as ioe:
-        log.error(
-            f"IOError processing PUT /devices/{device_id}/geofence_links for '{user_id}': {ioe}"
+        device_exists = (
+            db.session.query(Device.id)
+            .filter_by(id=device_id, user_username=user_id)
+            .first()
         )
-        abort(500, description="Server error saving config.")
+        if not device_exists:
+            log.warning(
+                f"User '{user_id}': Attempted to update links for non-existent device '{device_id}'."
+            )
+            abort(404, description="Device not found.")
+
+        # Construct the config part to save, only including linked_geofences
+        config_to_save = {device_id: {"linked_geofences": data["linked_geofences"]}}
+        uds.save_devices_config(
+            user_id, config_to_save
+        )  # This will now use the modified UDS
+
+        log.info(
+            f"User '{user_id}': Successfully initiated save for geofence links for '{device_id}'."
+        )
+
+        # Reload the full device config to get the final state for the response
+        updated_full_config = uds.load_devices_config(user_id)
+        device_config_for_response = updated_full_config.get(device_id)
+
+        if not device_config_for_response:
+            log.error(
+                f"Failed to reload config for device {device_id} after saving links!"
+            )
+            return (
+                jsonify(
+                    {"message": "Links saved, but failed to confirm updated state."}
+                ),
+                207,
+            )
+
+        resolved_response_links = device_config_for_response.get("linked_geofences", [])
+        return jsonify({"linked_geofences": resolved_response_links}), 200
+
+    except ValueError as ve:
+        log.warning(
+            f"User '{user_id}' PUT /devices/{device_id}/geofence_links: Validation error: {ve}"
+        )
+        abort(400, description=str(ve))
     except Exception as e:
         log.exception(
             f"Error in PUT /api/devices/{device_id}/geofence_links for '{user_id}'"
         )
-        abort(500, description="Unexpected error.")
+        abort(500, description="Unexpected error saving links.")
 
 
+# --- /devices/<id> DELETE Route (Keep as is) ---
 @bp.route("/devices/<string:device_id>", methods=["DELETE"])
 @login_required
 def delete_device(device_id):
@@ -702,14 +686,13 @@ def delete_device(device_id):
     try:
         success, message = uds.delete_device_and_data(user_id, device_id)
         status_code = 200 if success else 500
-        if not success and (
-            "Could not access data directory" in message
-            or "Path or lock not found" in message
-        ):
+        if not success and "not found" in message:
+            status_code = 404
+        elif not success:
             status_code = 500
         response_data = {"message": message}
         if not success:
-            response_data["error"] = "Deletion failed or completed with errors."
+            response_data["error"] = "Deletion failed or item not found."
         log.info(
             f"API DELETE /devices/{device_id} result for '{user_id}': Status={status_code}, Msg={message}"
         )
@@ -729,7 +712,7 @@ def delete_device(device_id):
         )
 
 
-# --- Geofence CRUD ---
+# --- Geofence Routes (Keep as is) ---
 @bp.route("/geofences", methods=["GET"])
 @login_required
 def get_all_geofences():
@@ -740,7 +723,7 @@ def get_all_geofences():
         geofences_list = sorted(
             list(all_user_geofences.values()), key=lambda g: g.get("name", "").lower()
         )
-        return jsonify(geofences_list or [])  # Return [] if no geofences
+        return jsonify(geofences_list or [])
     except Exception as e:
         log.exception(f"Error loading geofences for '{user_id}'")
         return (
@@ -752,6 +735,8 @@ def get_all_geofences():
 @bp.route("/geofences", methods=["POST"])
 @login_required
 def create_geofence():
+    from app import db
+
     user_id = current_user.id
     log.debug(f"API POST /geofences by '{user_id}'")
     data = request.get_json()
@@ -773,26 +758,35 @@ def create_geofence():
             or not (-180 <= new_lng <= 180)
         ):
             raise ValueError("Invalid data: Check name, radius (>0), lat/lng.")
-        all_user_geofences = uds.load_geofences_config(user_id)
-        if any(
-            gf["name"].lower() == new_name.lower() for gf in all_user_geofences.values()
-        ):
+        conflict = db.session.execute(
+            db.select(Geofence.id).filter_by(user_username=user_id, name=new_name)
+        ).first()
+        if conflict:
             abort(409, description=f"Geofence name '{new_name}' already exists.")
         new_id = generate_geofence_id()
-        new_gf_data_for_save = {
+        new_gf_obj = Geofence(
+            id=new_id,
+            user_username=user_id,
+            name=new_name,
+            latitude=new_lat,
+            longitude=new_lng,
+            radius=new_radius,
+        )
+        db.session.add(new_gf_obj)
+        db.session.commit()
+        created_gf_with_id = {
+            "id": new_id,
             "name": new_name,
             "lat": new_lat,
             "lng": new_lng,
             "radius": new_radius,
         }
-        all_user_geofences[new_id] = {**new_gf_data_for_save, "id": new_id}
-        uds.save_geofences_config(user_id, all_user_geofences)
-        created_gf_with_id = {**new_gf_data_for_save, "id": new_id}
         log.info(f"User '{user_id}': Created new geofence: {created_gf_with_id}")
         return jsonify(created_gf_with_id), 201
     except ValueError as ve:
         abort(400, description=f"Invalid data: {ve}")
     except Exception as e:
+        db.session.rollback()
         log.exception(f"User '{user_id}': Error creating geofence")
         return (
             jsonify({"error": "Server Error", "message": "Internal server error."}),
@@ -803,68 +797,77 @@ def create_geofence():
 @bp.route("/geofences/<string:geofence_id>", methods=["PUT"])
 @login_required
 def update_geofence(geofence_id):
+    from app import db
+
     user_id = current_user.id
     log.debug(f"API PUT /geofences/{geofence_id} by '{user_id}'")
     data = request.get_json()
-    uds = UserDataService(current_app.config)
     if not data:
         abort(400, description="Request body empty.")
     try:
-        all_user_geofences = uds.load_geofences_config(user_id)
-        if geofence_id not in all_user_geofences:
+        geofence = db.session.execute(
+            db.select(Geofence).filter_by(id=geofence_id, user_username=user_id)
+        ).scalar_one_or_none()
+        if not geofence:
             abort(404, description="Geofence not found.")
-        original_gf = all_user_geofences[geofence_id]
-        updated_gf_data = original_gf.copy()
         updated_fields_count = 0
         if "name" in data:
             new_name = str(data["name"]).strip()
             if not new_name:
                 raise ValueError("Name cannot be empty.")
-            if new_name.lower() != original_gf["name"].lower() and any(
-                gf["name"].lower() == new_name.lower() and gf_id != geofence_id
-                for gf_id, gf in all_user_geofences.items()
-            ):
+            conflict = db.session.execute(
+                db.select(Geofence.id).filter(
+                    Geofence.user_username == user_id,
+                    Geofence.id != geofence_id,
+                    Geofence.name == new_name,
+                )
+            ).first()
+            if conflict:
                 abort(409, description=f"Geofence name '{new_name}' already exists.")
-            if new_name != original_gf.get("name"):
-                updated_gf_data["name"] = new_name
+            if new_name != geofence.name:
+                geofence.name = new_name
                 updated_fields_count += 1
         if "lat" in data:
             new_lat = float(data["lat"])
             if not (-90 <= new_lat <= 90):
                 raise ValueError("Invalid latitude.")
-            if new_lat != original_gf.get("lat"):
-                updated_gf_data["lat"] = new_lat
+            if new_lat != geofence.latitude:
+                geofence.latitude = new_lat
                 updated_fields_count += 1
         if "lng" in data:
             new_lng = float(data["lng"])
             if not (-180 <= new_lng <= 180):
                 raise ValueError("Invalid longitude.")
-            if new_lng != original_gf.get("lng"):
-                updated_gf_data["lng"] = new_lng
+            if new_lng != geofence.longitude:
+                geofence.longitude = new_lng
                 updated_fields_count += 1
         if "radius" in data:
             new_radius = float(data["radius"])
             if new_radius <= 0:
                 raise ValueError("Radius must be positive.")
-            if new_radius != original_gf.get("radius"):
-                updated_gf_data["radius"] = new_radius
+            if new_radius != geofence.radius:
+                geofence.radius = new_radius
                 updated_fields_count += 1
-
         if updated_fields_count > 0:
-            all_user_geofences[geofence_id] = updated_gf_data
-            uds.save_geofences_config(user_id, all_user_geofences)
+            db.session.commit()
             log.info(f"User '{user_id}': Updated geofence {geofence_id}")
         else:
             log.debug(
                 f"User '{user_id}', Geofence '{geofence_id}': No changes detected."
             )
-
-        # Return the potentially updated geofence data including its ID
-        final_gf_data = {**updated_gf_data, "id": geofence_id}
+        final_gf_data = {
+            "id": geofence.id,
+            "name": geofence.name,
+            "lat": geofence.latitude,
+            "lng": geofence.longitude,
+            "radius": geofence.radius,
+        }
         return jsonify(final_gf_data), 200
     except ValueError as ve:
+        db.session.rollback()
         abort(400, description=f"Invalid data: {ve}")
     except Exception as e:
+        db.session.rollback()
         log.exception(f"User '{user_id}': Error updating geofence {geofence_id}")
         return (
             jsonify({"error": "Server Error", "message": "Internal server error."}),
@@ -875,37 +878,24 @@ def update_geofence(geofence_id):
 @bp.route("/geofences/<string:geofence_id>", methods=["DELETE"])
 @login_required
 def delete_geofence(geofence_id):
+    from app import db
+
     user_id = current_user.id
     log.debug(f"API DELETE /geofences/{geofence_id} by '{user_id}'")
     uds = UserDataService(current_app.config)
-    notifier = NotificationService(current_app.config, uds)
     try:
-        all_user_geofences = uds.load_geofences_config(user_id)
-        if geofence_id not in all_user_geofences:
+        geofence = db.session.execute(
+            db.select(Geofence).filter_by(id=geofence_id, user_username=user_id)
+        ).scalar_one_or_none()
+        if not geofence:
             abort(404, description="Geofence not found.")
-        deleted_name = all_user_geofences[geofence_id].get("name", geofence_id)
+        deleted_name = geofence.name
         log.info(
-            f"User '{user_id}': Deleting geofence '{deleted_name}' ({geofence_id})"
+            f"User '{user_id}': Deleting geofence '{deleted_name}' ({geofence_id}) from DB"
         )
-        del all_user_geofences[geofence_id]
-        uds.save_geofences_config(user_id, all_user_geofences)
-        devices_config = uds.load_devices_config(user_id)
-        updated_devices = False
-        for device_id, config in devices_config.items():
-            original_links = config.get("linked_geofences", [])
-            updated_links = [
-                link for link in original_links if link.get("id") != geofence_id
-            ]
-            if len(updated_links) < len(original_links):
-                config["linked_geofences"] = updated_links
-                updated_devices = True
-                log.info(
-                    f"User '{user_id}': Unlinked '{geofence_id}' from '{device_id}'."
-                )
-        if updated_devices:
-            uds.save_devices_config(user_id, devices_config)
-        notifier.cleanup_stale_geofence_states_for_geofence(user_id, geofence_id)
-        notifier.cleanup_stale_notification_times_for_geofence(user_id, geofence_id)
+        uds._handle_geofence_deletion_dependencies(user_id, {geofence_id})
+        db.session.delete(geofence)
+        db.session.commit()
         log.info(
             f"User '{user_id}': Deleted geofence '{deleted_name}' ({geofence_id}) and cleaned up state/links."
         )
@@ -914,8 +904,10 @@ def delete_geofence(geofence_id):
             200,
         )
     except ValueError as ve:
-        abort(400, description=f"Invalid data: {ve}")
+        db.session.rollback()
+        abort(400, description=f"Invalid data during delete: {ve}")
     except Exception as e:
+        db.session.rollback()
         log.exception(f"User '{user_id}': Error deleting geofence {geofence_id}")
         return (
             jsonify({"error": "Server Error", "message": "Internal server error."}),
@@ -923,9 +915,9 @@ def delete_geofence(geofence_id):
         )
 
 
-# --- Push Subscription API ---
+# --- VAPID/Push Routes (Keep as is) ---
 @bp.route("/vapid_public_key", methods=["GET"])
-@login_required  # Require login to get the key? Or make public? Let's keep it logged in for now.
+@login_required
 def get_vapid_public_key():
     log.debug("API GET /vapid_public_key called.")
     if (
@@ -937,31 +929,75 @@ def get_vapid_public_key():
     return jsonify({"publicKey": current_app.config["VAPID_PUBLIC_KEY"]})
 
 
+# --- /subscribe Route (Keep as is - Note CSRF Exempt) ---
 @bp.route("/subscribe", methods=["POST"])
 @login_required
+@limiter.limit("500 per hour")
+@csrf.exempt  # Keep exempt
 def subscribe():
     user_id = current_user.id
-    log.debug(f"API POST /subscribe by '{user_id}'")
+    log.debug(f"API POST /subscribe by '{user_id}' (CSRF Exempt)")
     uds = UserDataService(current_app.config)
     notifier = NotificationService(current_app.config, uds)
+
     if not current_app.config["VAPID_ENABLED"]:
+        log.warning(f"User '{user_id}': Subscription attempt failed - VAPID disabled.")
         abort(503, description="Push notifications disabled.")
-    subscription_data = request.get_json()
+
+    request_payload = request.get_json()
+    if not request_payload or not isinstance(request_payload, dict):
+        log.warning(
+            f"User '{user_id}': Subscription attempt failed - Invalid JSON payload: {request.data[:100]}"
+        )
+        abort(400, description="Invalid request payload format. Expecting JSON object.")
+
+    # --- Extract subscription and fcm_token from payload ---
+    subscription_data = request_payload.get("subscription")
+    fcm_token = request_payload.get("fcm_token")  # Optional FCM token
+    log.debug(
+        f"User '{user_id}': Received subscription data: {str(subscription_data)[:100]}..., FCM Token: {'Present' if fcm_token else 'None'}"
+    )
+    # --- ----------------------------------------------- ---
+
+    # --- Validate the *extracted* subscription_data ---
     if not notifier.is_valid_subscription(subscription_data):
+        log.warning(
+            f"User '{user_id}': Subscription attempt failed - Invalid subscription object structure in payload."
+        )
         abort(400, description="Invalid subscription data.")
+    # --- ------------------------------------------ ---
+
     endpoint = subscription_data["endpoint"]
     new_subscription = False
     try:
+        # Load existing subscriptions
         user_subscriptions = uds.load_subscriptions(user_id)
+
+        # --- Save extracted subscription_data ---
         if endpoint not in user_subscriptions:
             log.info(f"User '{user_id}': New push subscription: {endpoint[:50]}...")
             user_subscriptions[endpoint] = subscription_data
-            uds.save_subscriptions(user_id, user_subscriptions)
             new_subscription = True
         else:
-            log.info(f"User '{user_id}': Subscription exists: {endpoint[:50]}...")
+            log.info(
+                f"User '{user_id}': Subscription exists: {endpoint[:50]}... Updating."
+            )
+            user_subscriptions[endpoint] = subscription_data
+        # --- ---------------------------------- ---
+
+        # --- TODO: Save FCM Token if present and valid ---
+        if fcm_token and isinstance(fcm_token, str) and len(fcm_token) > 10:
+            log.info(
+                f"User '{user_id}': Received FCM token: {fcm_token[:10]}... (Save logic TODO)"
+            )
+            # Example DB save logic would go here (e.g., in PushSubscription model or separate table)
+        # --- ----------------------------------------- ---
+
+        uds.save_subscriptions(user_id, user_subscriptions)
+
         if new_subscription:
             notifier.send_welcome_notification(user_id, subscription_data)
+
         status_code = 201 if new_subscription else 200
         log.info(f"API POST /subscribe for '{user_id}': Responding {status_code}.")
         return jsonify({"message": "Subscription received."}), status_code
@@ -971,14 +1007,19 @@ def subscribe():
         )
         return (
             jsonify(
-                {"error": "Server Error", "message": "Failed to process subscription."}
+                {
+                    "error": "Server Error",
+                    "message": "Failed to process subscription.",
+                }
             ),
             500,
         )
 
 
+# --- /unsubscribe Route (Keep as is) ---
 @bp.route("/unsubscribe", methods=["POST"])
 @login_required
+@limiter.limit("500 per hour")
 def unsubscribe():
     user_id = current_user.id
     log.debug(f"API POST /unsubscribe by '{user_id}'")
@@ -1022,7 +1063,7 @@ def unsubscribe():
         )
 
 
-# --- Utils API ---
+# --- /utils/generate_icon Route (Keep as is) ---
 @bp.route("/utils/generate_icon", methods=["GET"])
 @login_required
 def generate_icon():
@@ -1042,7 +1083,7 @@ def generate_icon():
         abort(500, "Failed to generate icon")
 
 
-# --- Config Export/Import API ---
+# --- Config Routes (Keep as is) ---
 @bp.route("/config/get_part/<string:part_name>", methods=["GET"])
 @login_required
 def get_config_part(part_name):
@@ -1077,76 +1118,145 @@ def get_config_part(part_name):
 
 @bp.route("/config/import_apply", methods=["POST"])
 @login_required
+@limiter.limit("500 per hour")
 def config_import_apply():
+    from app import db
+
     user_id = current_user.id
     uds = UserDataService(current_app.config)
     data = request.get_json()
     if not data or not isinstance(data.get("parts"), dict):
         log.warning(f"User '{user_id}' import apply: Invalid request body.")
         abort(400, description="Invalid request: 'parts' dictionary required.")
+
     parts_to_import = data["parts"]
     results = {"success": [], "errors": []}
     config_changed = False
     log.info(
         f"User '{user_id}': Applying imported server config parts: {list(parts_to_import.keys())}"
     )
-    if "geofences" in parts_to_import:
-        geofence_data = parts_to_import["geofences"]
-        log.debug(f"User '{user_id}': Found 'geofences' part for import.")
-        if isinstance(geofence_data, dict):
-            try:
-                num_geofences = len(geofence_data)
-                log.info(
-                    f"User '{user_id}': Attempting to save {num_geofences} imported geofences."
+
+    try:  # Wrap processing in a single transaction
+        # --- Geofences ---
+        if "geofences" in parts_to_import:
+            geofence_data = parts_to_import["geofences"]
+            log.debug(f"User '{user_id}': Found 'geofences' part for import.")
+            if isinstance(geofence_data, dict):
+                try:
+                    num_geofences = len(geofence_data)
+                    log.info(
+                        f"User '{user_id}': Attempting to save {num_geofences} imported geofences."
+                    )
+                    uds.save_geofences_config(
+                        user_id, geofence_data
+                    )  # Uses DB, commits internally
+                    results["success"].append(f"Imported {num_geofences} geofences.")
+                    config_changed = True
+                    log.info(f"User '{user_id}': Successfully imported geofences.")
+                except Exception as e:
+                    log.error(
+                        f"User '{user_id}': Error importing geofences: {e}",
+                        exc_info=True,
+                    )
+                    results["errors"].append(
+                        f"Failed to import geofences: {str(e)[:100]}..."
+                    )
+            else:
+                log.warning(
+                    f"User '{user_id}': Invalid format for geofences data (not dict)."
                 )
-                uds.save_geofences_config(user_id, geofence_data)
-                results["success"].append(f"Imported {num_geofences} geofences.")
-                config_changed = True
-                log.info(f"User '{user_id}': Successfully imported geofences.")
-            except Exception as e:
-                log.error(
-                    f"User '{user_id}': Error importing geofences: {e}", exc_info=True
+                results["errors"].append("Invalid format for geofences data.")
+
+        # --- Devices ---
+        if "devices" in parts_to_import:
+            device_data = parts_to_import["devices"]
+            log.debug(f"User '{user_id}': Found 'devices' part for import.")
+            if isinstance(device_data, dict):
+                try:
+                    num_devices = len(device_data)
+                    log.info(
+                        f"User '{user_id}': Attempting to save {num_devices} imported device configurations."
+                    )
+                    uds.save_devices_config(
+                        user_id, device_data
+                    )  # Uses DB, commits internally
+                    results["success"].append(
+                        f"Imported {num_devices} device configurations."
+                    )
+                    config_changed = True
+                    log.info(
+                        f"User '{user_id}': Successfully imported device configurations."
+                    )
+                except Exception as e:
+                    log.error(
+                        f"User '{user_id}': Error importing devices config: {e}",
+                        exc_info=True,
+                    )
+                    results["errors"].append(
+                        f"Failed to import device configurations: {str(e)[:100]}..."
+                    )
+            else:
+                log.warning(
+                    f"User '{user_id}': Invalid format for devices data (not dict)."
+                )
+                results["errors"].append("Invalid format for devices data.")
+
+        # --- Shares (Stages changes, needs commit) ---
+        if "shares" in parts_to_import:
+            shares_data_list = parts_to_import["shares"]
+            log.debug(
+                f"User '{user_id}': Found 'shares' part for import ({len(shares_data_list) if isinstance(shares_data_list, list) else 'N/A'} items)."
+            )
+            if isinstance(shares_data_list, list):
+                try:
+                    num_shares_imported = uds.import_user_shares(
+                        user_id, shares_data_list
+                    )
+                    results["success"].append(
+                        f"Imported {num_shares_imported} shared links."
+                    )
+                    config_changed = True
+                    log.info(
+                        f"User '{user_id}': Successfully STAGED {num_shares_imported} shared links for commit."
+                    )
+                except Exception as e:
+                    log.error(
+                        f"User '{user_id}': Error importing/staging shared links: {e}",
+                        exc_info=True,
+                    )
+                    results["errors"].append(
+                        f"Failed to import shared links: {str(e)[:100]}..."
+                    )
+            else:
+                log.warning(
+                    f"User '{user_id}': Invalid format for shares data (not a list)."
                 )
                 results["errors"].append(
-                    f"Failed to import geofences: {str(e)[:100]}..."
+                    "Invalid format for shares data (expected list)."
                 )
+
+        # --- FINAL COMMIT (Needed for shares and potentially other changes) ---
+        if not results["errors"]:
+            db.session.commit()
+            log.info(f"User '{user_id}': Final commit successful for config import.")
         else:
-            log.warning(
-                f"User '{user_id}': Invalid format for geofences data (not dict)."
+            db.session.rollback()
+            log.error(
+                f"User '{user_id}': Config import encountered errors. Rolling back staged changes."
             )
-            results["errors"].append("Invalid format for geofences data.")
-    if "devices" in parts_to_import:
-        device_data = parts_to_import["devices"]
-        log.debug(f"User '{user_id}': Found 'devices' part for import.")
-        if isinstance(device_data, dict):
-            try:
-                num_devices = len(device_data)
-                log.info(
-                    f"User '{user_id}': Attempting to save {num_devices} imported device configurations."
-                )
-                uds.save_devices_config(user_id, device_data)
-                results["success"].append(
-                    f"Imported {num_devices} device configurations."
-                )
-                config_changed = True
-                log.info(
-                    f"User '{user_id}': Successfully imported device configurations."
-                )
-            except Exception as e:
-                log.error(
-                    f"User '{user_id}': Error importing devices config: {e}",
-                    exc_info=True,
-                )
-                results["errors"].append(
-                    f"Failed to import device configurations: {str(e)[:100]}..."
-                )
-        else:
-            log.warning(
-                f"User '{user_id}': Invalid format for devices data (not dict)."
-            )
-            results["errors"].append("Invalid format for devices data.")
+
+    except Exception as e:
+        # Catch any broader errors during the process
+        db.session.rollback()
+        log.exception(
+            f"User '{user_id}': Unexpected error during config import processing."
+        )
+        results["errors"].append(f"Unexpected server error: {str(e)[:100]}...")
+
+    # --- Response Logic (Keep existing) ---
     if config_changed and not results["errors"]:
         log.info(f"User '{user_id}': Import successful, configuration changed.")
+
     if not results["errors"]:
         log.info(f"User '{user_id}': Config import apply finished successfully.")
         return (
@@ -1179,7 +1289,7 @@ def config_import_apply():
         )
 
 
-# --- Test Notification API ---
+# --- Test Notification Route (Keep as is) ---
 @bp.route(
     "/devices/<string:device_id>/test_notification/<string:notification_type>",
     methods=["POST"],
@@ -1213,20 +1323,20 @@ def test_device_notification(device_id, notification_type):
             body = f"This is a test notification for entering '{test_gf_name}'."
             data_payload["geofenceName"] = test_gf_name
             data_payload["eventType"] = "entry"
-            notification_specific_type = "geofence"
+            notification_specific_type = "geofence_entry"
         elif notification_type == "geofence_exit":
             test_gf_name = "Test Area"
             title = f"{device_name} Exited {test_gf_name} (Test)"
             body = f"This is a test notification for exiting '{test_gf_name}'."
             data_payload["geofenceName"] = test_gf_name
             data_payload["eventType"] = "exit"
-            notification_specific_type = "geofence"
+            notification_specific_type = "geofence_exit"
         elif notification_type == "battery_low":
             test_level = current_app.config["LOW_BATTERY_THRESHOLD"] - 1
             title = f"{device_name} Battery Low (Test)"
             body = f"Test: Battery is low ({test_level}%)."
             data_payload["level"] = test_level
-            notification_specific_type = "battery"
+            notification_specific_type = "battery_low"
         elif notification_type == "generic_test":
             title = f"Test Notification for {device_name}"
             body = "This is a generic test push message."
@@ -1271,7 +1381,7 @@ def test_device_notification(device_id, notification_type):
         )
 
 
-# --- Notification History API ---
+# --- Notification History Routes (Keep as is) ---
 @bp.route("/notifications/history", methods=["GET"])
 @login_required
 def get_notification_history():
@@ -1279,7 +1389,7 @@ def get_notification_history():
     uds = UserDataService(current_app.config)
     try:
         history = uds.load_notification_history(user_id)
-        return jsonify(history or [])  # Ensure list is returned
+        return jsonify(history or [])
     except Exception as e:
         log.exception(f"Error getting notification history for user '{user_id}'")
         return (
@@ -1301,10 +1411,10 @@ def mark_notification_read(notification_id):
     log.info(f"API PUT /notifications/history/{notification_id}/read by '{user_id}'")
     try:
         success = uds.update_notification_read_status(user_id, notification_id, True)
-        if success:
-            return jsonify({"message": "Notification marked as read."}), 200
-        else:
-            return (
+        return jsonify({"message": "Notification marked as read."}), (
+            200
+            if success
+            else (
                 jsonify(
                     {
                         "error": "Not Found",
@@ -1313,6 +1423,7 @@ def mark_notification_read(notification_id):
                 ),
                 404,
             )
+        )
     except Exception as e:
         log.exception(
             f"Error marking notification read for user '{user_id}', id {notification_id}"
@@ -1336,10 +1447,10 @@ def mark_notification_unread(notification_id):
     log.info(f"API PUT /notifications/history/{notification_id}/unread by '{user_id}'")
     try:
         success = uds.update_notification_read_status(user_id, notification_id, False)
-        if success:
-            return jsonify({"message": "Notification marked as unread."}), 200
-        else:
-            return (
+        return jsonify({"message": "Notification marked as unread."}), (
+            200
+            if success
+            else (
                 jsonify(
                     {
                         "error": "Not Found",
@@ -1348,6 +1459,7 @@ def mark_notification_unread(notification_id):
                 ),
                 404,
             )
+        )
     except Exception as e:
         log.exception(
             f"Error marking notification unread for user '{user_id}', id {notification_id}"
@@ -1371,17 +1483,14 @@ def delete_notification(notification_id):
     log.info(f"API DELETE /notifications/history/{notification_id} by '{user_id}'")
     try:
         success = uds.delete_notification_history(user_id, notification_id)
-        if success:
-            return jsonify({"message": "Notification deleted."}), 200
-        else:
-            # If the specific ID wasn't found, it's still a "successful" deletion from the user's perspective
-            log.warning(
-                f"Attempted to delete non-existent notification {notification_id} for user {user_id}."
-            )
-            return (
+        return jsonify({"message": "Notification deleted."}), (
+            200
+            if success
+            else (
                 jsonify({"message": "Notification not found or already deleted."}),
                 200,
-            )  # Change to 200 maybe? Or keep 404? Let's try 200.
+            )
+        )
     except Exception as e:
         log.exception(
             f"Error deleting notification for user '{user_id}', id {notification_id}"
@@ -1401,21 +1510,17 @@ def delete_all_notifications():
     uds = UserDataService(current_app.config)
     log.warning(f"API DELETE /notifications/history (ALL) by '{user_id}'")
     try:
-        success = uds.delete_notification_history(
-            user_id, None
-        )  # Pass None to delete all
-        if success:
-            return jsonify({"message": "All notification history cleared."}), 200
-        else:
-            # This case likely means the file didn't exist or was invalid, but the outcome is cleared history
-            return (
+        success = uds.delete_notification_history(user_id, None)
+        return jsonify({"message": "All notification history cleared."}), (
+            200
+            if success
+            else (
                 jsonify(
-                    {
-                        "message": "Notification history already clear or file issue occurred."
-                    }
+                    {"message": "Notification history already clear or issue occurred."}
                 ),
                 200,
             )
+        )
     except Exception as e:
         log.exception(f"Error clearing notification history for user '{user_id}'")
         return (
@@ -1429,7 +1534,7 @@ def delete_all_notifications():
         )
 
 
-# --- User Preferences API ---
+# --- User Preference Routes (Keep as is) ---
 @bp.route("/user/preferences", methods=["GET"])
 @login_required
 def get_user_preferences():
@@ -1437,7 +1542,7 @@ def get_user_preferences():
     uds = UserDataService(current_app.config)
     try:
         prefs = uds.load_user_preferences(user_id)
-        return jsonify(prefs)  # Should already return {} if not found
+        return jsonify(prefs)
     except Exception as e:
         log.exception(f"Error getting preferences for user '{user_id}'")
         return (
@@ -1462,10 +1567,6 @@ def update_user_preferences():
     theme_mode = data.get("theme_mode")
     theme_color = data.get("theme_color")
     try:
-        if theme_mode not in ["system", "light", "dark"]:
-            raise ValueError("Invalid theme_mode.")
-        if not re.match(r"^#[0-9a-fA-F]{6}$", theme_color):
-            raise ValueError("Invalid theme_color format.")
         uds.save_user_preferences(user_id, theme_mode, theme_color)
         log.info(f"API PUT /user/preferences successful for '{user_id}'")
         return jsonify({"message": "Preferences updated successfully."}), 200
@@ -1476,10 +1577,7 @@ def update_user_preferences():
         log.error(f"User '{user_id}' PUT /user/preferences: Runtime error: {re_err}")
         return (
             jsonify(
-                {
-                    "error": "Conflict",
-                    "message": "Server error saving preferences (conflict).",
-                }
+                {"error": "Conflict", "message": "Server error saving preferences."}
             ),
             500,
         )
@@ -1493,23 +1591,20 @@ def update_user_preferences():
         )
 
 
-# --- Force Refresh API Endpoint ---
+# --- User Refresh Route (Keep as is) ---
 @bp.route("/user/refresh", methods=["POST"])
 @login_required
+@limiter.limit("500 per hour")
 def force_user_refresh():
     user_id = current_user.id
     log.info(f"API POST /user/refresh triggered for user '{user_id}'")
     uds = UserDataService(current_app.config)
-
     try:
-        # --- CORRECTED METHOD CALL ---
-        # Load ID, decrypted password, and state (ignore state for this function)
         apple_id, apple_password, _ = uds.load_apple_credentials_and_state(user_id)
-        # --- END CORRECTION ---
-
-        # Check if decrypted password was successfully loaded
         if not apple_id or not apple_password:
-            log.warning(f"User '{user_id}': Cannot force refresh, credentials missing or decryption failed.")
+            log.warning(
+                f"User '{user_id}': Cannot force refresh, credentials missing or decryption failed."
+            )
             return (
                 jsonify(
                     {
@@ -1517,29 +1612,24 @@ def force_user_refresh():
                         "message": "Apple credentials are not set or could not be decrypted.",
                     }
                 ),
-                403, # Forbidden is appropriate here
+                403,
             )
-
-        # Proceed with spawning the thread using the decrypted password
         log.info(f"Spawning immediate fetch task for user '{user_id}' via API request.")
+        app_context = current_app._get_current_object()
         immediate_fetch_thread = threading.Thread(
             target=run_fetch_for_user_task,
-            args=(user_id, apple_id, apple_password, current_app.config), # Pass decrypted password
+            args=(app_context, user_id),
             name=f"ApiForceFetch-{user_id}",
             daemon=True,
         )
         immediate_fetch_thread.start()
-
-        return jsonify({"message": "Background refresh initiated."}), 202  # Accepted
-
+        return jsonify({"message": "Background refresh initiated."}), 202
     except Exception as e:
-        # Log the full exception traceback for better debugging
         log.exception(f"Error initiating force refresh for user '{user_id}'")
         return (
             jsonify(
                 {
                     "error": "Server Error",
-                    # Provide a slightly more informative generic message
                     "message": f"Failed to initiate background refresh: {e}",
                 }
             ),
@@ -1547,9 +1637,10 @@ def force_user_refresh():
         )
 
 
-# --- Account Deletion API ---
+# --- User Delete Route (Keep as is) ---
 @bp.route("/user/delete", methods=["DELETE"])
 @login_required
+@limiter.limit("100 per hour")
 def delete_account():
     user_id = current_user.id
     log.warning(f"Received DELETE request for account '{user_id}'")
@@ -1558,12 +1649,11 @@ def delete_account():
         delete_successful = uds.delete_user_data(user_id)
         if delete_successful:
             log.info(f"Account data deletion successful for '{user_id}'.")
-            # --- REMOVED BACKEND LOGOUT ---
             return (
                 jsonify(
                     {
                         "message": f"Account '{user_id}' deletion process initiated successfully.",
-                        "action": "redirect_to_login",  # Hint for frontend
+                        "action": "redirect_to_login",
                     }
                 ),
                 200,
@@ -1591,19 +1681,16 @@ def delete_account():
         )
 
 
-# --- Share Management API Endpoints ---
+# --- Share Routes (Keep as is) ---
 @bp.route("/devices/<string:device_id>/share", methods=["POST"])
 @login_required
 def create_device_share(device_id):
     user_id = current_user.id
     uds = UserDataService(current_app.config)
-    devices_config = uds.load_devices_config(user_id)
-    if device_id not in devices_config:
-        abort(404, description="Device not found.")
     data = request.get_json() or {}
     duration_str = data.get("duration", "24h")
     note = data.get("note", "")[:100]
-    duration_hours = None
+    duration_hours: Optional[int] = None
     if duration_str == "indefinite":
         duration_hours = 0
     elif duration_str.endswith("h"):
@@ -1618,14 +1705,8 @@ def create_device_share(device_id):
             abort(400, description="Invalid duration number.")
     else:
         abort(400, description="Invalid duration unit ('h', 'd', 'indefinite').")
-
-    if (
-        duration_hours is not None
-        and (duration_hours < 0 or duration_hours > 30 * 24)
-        and duration_hours != 0
-    ):
+    if duration_hours is not None and (duration_hours < 0 or duration_hours > 30 * 24):
         abort(400, description="Duration out of range (1h-30d or indefinite).")
-
     log.info(
         f"User '{user_id}' request share for '{device_id}' (Duration: {duration_str})"
     )
@@ -1639,35 +1720,40 @@ def create_device_share(device_id):
             )
             return jsonify({**new_share, "share_url": share_url}), 201
         else:
-            # Assuming add_share returns None on internal failure
             return (
                 jsonify(
-                    {"error": "Server Error", "message": "Failed to create share link."}
+                    {
+                        "error": "Server Error",
+                        "message": "Failed to create share link (DB error or invalid input).",
+                    }
                 ),
                 500,
             )
+    except ValueError as ve:
+        log.warning(
+            f"Share creation failed for user {user_id}, device {device_id}: {ve}"
+        )
+        abort(400, description=str(ve))
     except Exception as e:
         log.exception(f"Error creating share for {device_id}")
-        return jsonify({"error": "Server Error", "message": f"Server error: {e}"}), 500
+        return (
+            jsonify(
+                {"error": "Server Error", "message": f"Unexpected server error: {e}"}
+            ),
+            500,
+        )
 
 
 @bp.route("/shares", methods=["GET"])
 @login_required
 def get_my_shares():
+    from app import db
+
     user_id = current_user.id
     uds = UserDataService(current_app.config)
     try:
-        user_shares = uds.get_user_shares(
-            user_id
-        )  # Note: Renamed variable from active_shares
-        devices_config = uds.load_devices_config(user_id)
+        user_shares = uds.get_user_shares(user_id)
         for share in user_shares:
-            device_conf = devices_config.get(share.get("device_id"))
-            share["device_name"] = (
-                device_conf.get("name", share.get("device_id", "Unknown"))
-                if device_conf
-                else "Unknown Device"
-            )
             try:
                 share["share_url"] = url_for(
                     "public.view_shared_device",
@@ -1676,7 +1762,7 @@ def get_my_shares():
                 )
             except Exception:
                 share["share_url"] = None
-        return jsonify(user_shares or [])  # Ensure JSON list return
+        return jsonify(user_shares or [])
     except Exception as e:
         log.exception(f"Error fetching shares for user '{user_id}'")
         return (
@@ -1688,6 +1774,8 @@ def get_my_shares():
 @bp.route("/shares/<string:share_id>/status", methods=["PUT"])
 @login_required
 def set_share_status(share_id):
+    from app import db
+
     user_id = current_user.id
     uds = UserDataService(current_app.config)
     data = request.get_json()
@@ -1695,22 +1783,21 @@ def set_share_status(share_id):
         abort(
             400, description="Invalid request body. Expecting {'active': true/false}."
         )
-
     new_status = data["active"]
     log.info(
         f"User '{user_id}' attempting to set share '{share_id}' status to {new_status}"
     )
-
     try:
         success = uds.toggle_share_status(share_id, user_id, new_status)
         if success:
             updated_share = uds.get_share(share_id)
             if updated_share:
-                devices_config = uds.load_devices_config(user_id)
-                device_conf = devices_config.get(updated_share.get("device_id"))
+                device_config = uds.load_devices_config(user_id).get(
+                    updated_share.get("device_id")
+                )
                 updated_share["device_name"] = (
-                    device_conf.get("name", updated_share.get("device_id", "Unknown"))
-                    if device_conf
+                    device_config.get("name", updated_share.get("device_id", "Unknown"))
+                    if device_config
                     else "Unknown Device"
                 )
                 try:
@@ -1719,7 +1806,21 @@ def set_share_status(share_id):
                     )
                 except Exception:
                     updated_share["share_url"] = None
-                updated_share["share_id"] = share_id
+                is_expired_check = False
+                expires_at_str = updated_share.get("expires_at")
+                if expires_at_str:
+                    try:
+                        expires_at_dt = datetime.fromisoformat(
+                            expires_at_str.replace("Z", "+00:00")
+                        )
+                        if expires_at_dt.tzinfo is None:
+                            expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
+                            is_expired_check = expires_at_dt < datetime.now(
+                                timezone.utc
+                            )
+                    except ValueError:
+                        pass
+                updated_share["is_expired"] = is_expired_check
                 return jsonify(updated_share), 200
             else:
                 return (
@@ -1750,6 +1851,8 @@ def set_share_status(share_id):
 @bp.route("/shares/<string:share_id>/duration", methods=["PUT"])
 @login_required
 def update_share_duration(share_id):
+    from app import db
+
     user_id = current_user.id
     uds = UserDataService(current_app.config)
     data = request.get_json()
@@ -1758,13 +1861,11 @@ def update_share_duration(share_id):
             400,
             description="Invalid request body. Expecting {'duration': '1h'/'24h'/'7d'/'indefinite'/etc}.",
         )
-
     duration_str = data["duration"]
     note = data.get("note", None)
     if note is not None:
         note = note.strip()[:100]
-
-    duration_hours = None
+    duration_hours: Optional[int] = None
     if duration_str == "indefinite":
         duration_hours = 0
     elif duration_str.endswith("h"):
@@ -1779,50 +1880,44 @@ def update_share_duration(share_id):
             abort(400, description="Invalid duration format.")
     else:
         abort(400, description="Invalid duration unit.")
-
-    if (
-        duration_hours is not None
-        and (duration_hours < 0 or duration_hours > 30 * 24)
-        and duration_hours != 0
-    ):
+    if duration_hours is not None and (duration_hours < 0 or duration_hours > 30 * 24):
         abort(400, description="Duration out of range.")
-
     log.info(
         f"User '{user_id}' attempting to update duration for share '{share_id}' to {duration_str}"
     )
-
     try:
-        updated_share = uds.update_share_expiry(share_id, user_id, duration_hours)
-        if updated_share:
+        updated_share_data = uds.update_share_expiry(share_id, user_id, duration_hours)
+        if updated_share_data:
             if note is not None:
-                all_shares = uds.load_shares()
-                if (
-                    share_id in all_shares
-                    and all_shares[share_id].get("user_id") == user_id
-                ):
-                    all_shares[share_id]["note"] = note
-                    uds.save_shares(all_shares)
-                    updated_share["note"] = note
+                share_obj = db.session.execute(
+                    db.select(Share).filter_by(id=share_id, user_username=user_id)
+                ).scalar_one_or_none()
+                if share_obj:
+                    share_obj.note = note
+                    db.session.commit()
+                    updated_share_data["note"] = note
                     log.info(
                         f"User '{user_id}' also updated note for share '{share_id}'."
                     )
-
-            devices_config = uds.load_devices_config(user_id)
-            device_conf = devices_config.get(updated_share.get("device_id"))
-            updated_share["device_name"] = (
-                device_conf.get("name", updated_share.get("device_id", "Unknown"))
-                if device_conf
+                else:
+                    pass
+            device_config = uds.load_devices_config(user_id).get(
+                updated_share_data.get("device_id")
+            )
+            updated_share_data["device_name"] = (
+                device_config.get(
+                    "name", updated_share_data.get("device_id", "Unknown")
+                )
+                if device_config
                 else "Unknown Device"
             )
             try:
-                updated_share["share_url"] = url_for(
+                updated_share_data["share_url"] = url_for(
                     "public.view_shared_device", share_id=share_id, _external=True
                 )
             except Exception:
-                updated_share["share_url"] = None
-            updated_share["share_id"] = share_id
-
-            return jsonify(updated_share), 200
+                updated_share_data["share_url"] = None
+            return jsonify(updated_share_data), 200
         else:
             abort(
                 404,
@@ -1836,7 +1931,7 @@ def update_share_duration(share_id):
             jsonify(
                 {
                     "error": "Server Error",
-                    "message": "Failed to update share duration/note.",
+                    "message": f"Failed to update share duration/note: {e}",
                 }
             ),
             500,
@@ -1871,72 +1966,40 @@ def delete_my_share_permanently(share_id):
             ),
             500,
         )
-    
-# --- NEW 2FA API Endpoints ---
-
-def _restore_pending_2fa_account() -> Optional[AppleAccount]:
-    """Helper to restore AppleAccount from session during 2FA."""
-    account_data = session.get('pending_2fa_account_data')
-    if not account_data or not isinstance(account_data, dict):
-        log.error(f"User {current_user.id}: No valid pending 2FA account data found in session.")
-        return None
-
-    anisette_server_url = get_available_anisette_server(current_app.config.get("ANISETTE_SERVERS", []))
-    if not anisette_server_url:
-         log.error(f"User {current_user.id}: No Anisette server for restoring 2FA account.")
-         return None
-
-    try:
-        provider = RemoteAnisetteProvider(anisette_server_url)
-        account = AppleAccount(provider)
-        account.restore(account_data)
-        # Double-check state after restore
-        if account.login_state != LoginState.REQUIRE_2FA:
-             log.warning(f"User {current_user.id}: Restored account is not in REQUIRE_2FA state ({account.login_state}). Invalidating flow.")
-             session.pop('pending_2fa_account_data', None)
-             session.pop('pending_2fa_creds', None)
-             return None
-        log.debug(f"User {current_user.id}: Successfully restored pending 2FA account.")
-        return account
-    except Exception as e:
-        log.exception(f"User {current_user.id}: Error restoring pending 2FA account from session.")
-        return None
 
 
+# --- 2FA Routes (Keep as is) ---
 @bp.route("/auth/2fa/methods", methods=["GET"])
 @login_required
 def get_2fa_methods():
     user_id = current_user.id
     log.info(f"API GET /auth/2fa/methods requested by user '{user_id}'")
-
     account = _restore_pending_2fa_account()
     if not account:
-        # Clear potentially stale session data if restore failed
-        session.pop('pending_2fa_account_data', None)
-        session.pop('pending_2fa_creds', None)
-        abort(409, description="No active 2FA process found or account state invalid. Please try logging in again.")
-
+        abort(
+            409,
+            description="No active 2FA process found or account state invalid. Please try logging in again.",
+        )
     try:
         methods_raw = account.get_2fa_methods()
         methods_serializable = []
         for index, method in enumerate(methods_raw):
-            method_data = {"index": index} # Include index for selection
+            method_data = {"index": index}
             if isinstance(method, SmsSecondFactorMethod):
                 method_data["type"] = "sms"
-                method_data["detail"] = method.phone_number # Masked number
-                method_data["id"] = method.phone_number_id # Need the ID for requests
+                method_data["detail"] = method.phone_number
+                method_data["id"] = method.phone_number_id
             elif isinstance(method, TrustedDeviceSecondFactorMethod):
                 method_data["type"] = "trusted_device"
                 method_data["detail"] = "Trusted Device"
-                method_data["id"] = None # No specific ID needed for trusted device
+                method_data["id"] = None
             else:
-                log.warning(f"User '{user_id}': Unknown 2FA method type encountered: {type(method)}")
-                continue # Skip unknown types
+                continue
             methods_serializable.append(method_data)
-
-        log.info(f"User '{user_id}': Returning {len(methods_serializable)} 2FA methods.")
+        log.info(
+            f"User '{user_id}': Returning {len(methods_serializable)} 2FA methods."
+        )
         return jsonify({"methods": methods_serializable})
-
     except Exception as e:
         log.exception(f"User '{user_id}': Error retrieving 2FA methods.")
         abort(500, description=f"Server error getting 2FA methods: {e}")
@@ -1949,30 +2012,32 @@ def request_2fa_code():
     data = request.get_json()
     if not data or "method_index" not in data:
         abort(400, description="Missing 'method_index' in request.")
-
     method_index = data.get("method_index")
-    log.info(f"API POST /auth/2fa/request_code by user '{user_id}', method index: {method_index}")
-
+    log.info(
+        f"API POST /auth/2fa/request_code by user '{user_id}', method index: {method_index}"
+    )
     account = _restore_pending_2fa_account()
     if not account:
-        abort(409, description="No active 2FA process found. Please try logging in again.")
-
+        abort(
+            409, description="No active 2FA process found. Please try logging in again."
+        )
     try:
         methods = account.get_2fa_methods()
         if not isinstance(method_index, int) or not (0 <= method_index < len(methods)):
             abort(400, description="Invalid method index.")
-
         selected_method = methods[method_index]
-        log.info(f"User '{user_id}': Requesting 2FA code using method type: {type(selected_method).__name__}")
-        selected_method.request() # Request the code (e.g., send SMS)
-
-        # No need to save account state here, just requesting code
-        log.info(f"User '{user_id}': 2FA code request sent successfully for method index {method_index}.")
+        log.info(
+            f"User '{user_id}': Requesting 2FA code using method type: {type(selected_method).__name__}"
+        )
+        selected_method.request()
+        log.info(
+            f"User '{user_id}': 2FA code request sent successfully for method index {method_index}."
+        )
         return jsonify({"message": "2FA code requested successfully."}), 200
-
     except Exception as e:
-        log.exception(f"User '{user_id}': Error requesting 2FA code for index {method_index}.")
-        # Check specific FindMy.py errors if possible
+        log.exception(
+            f"User '{user_id}': Error requesting 2FA code for index {method_index}."
+        )
         abort(500, description=f"Server error requesting 2FA code: {e}")
 
 
@@ -1983,95 +2048,135 @@ def submit_2fa_code():
     data = request.get_json()
     if not data or "method_index" not in data or "code" not in data:
         abort(400, description="Missing 'method_index' or 'code' in request.")
-
     method_index = data.get("method_index")
-    code = str(data.get("code","")).strip()
-    log.info(f"API POST /auth/2fa/submit_code by user '{user_id}', method index: {method_index}")
-
+    code = str(data.get("code", "")).strip()
+    log.info(
+        f"API POST /auth/2fa/submit_code by user '{user_id}', method index: {method_index}"
+    )
     if len(code) != 6 or not code.isdigit():
-         abort(400, description="Invalid code format. Must be 6 digits.")
-
+        abort(400, description="Invalid code format. Must be 6 digits.")
     account = _restore_pending_2fa_account()
-    pending_creds = session.get('pending_2fa_creds')
-
+    pending_creds = session.get("pending_2fa_creds")
     if not account or not pending_creds:
-        abort(409, description="No active 2FA process or credentials found. Please try logging in again.")
-
+        abort(
+            409,
+            description="No active 2FA process or credentials found. Please try logging in again.",
+        )
     try:
         methods = account.get_2fa_methods()
         if not isinstance(method_index, int) or not (0 <= method_index < len(methods)):
             abort(400, description="Invalid method index.")
-
         selected_method = methods[method_index]
-        log.info(f"User '{user_id}': Submitting 2FA code for method type: {type(selected_method).__name__}")
-
-        # --- Submit the code using FindMy.py ---
-        # This internally calls account.sms_2fa_submit or account.td_2fa_submit
-        # which then calls _gsa_authenticate again and _login_mobileme if successful
+        log.info(
+            f"User '{user_id}': Submitting 2FA code for method type: {type(selected_method).__name__}"
+        )
         final_state = selected_method.submit(code)
         log.info(f"User '{user_id}': State after 2FA code submission: {final_state}")
-
         if final_state == LoginState.LOGGED_IN:
-            # Success!
             log.info(f"User '{user_id}': 2FA verification successful!")
             uds = UserDataService(current_app.config)
-
-            # Get final state and original credentials
             final_account_state = account.export()
-            apple_id = pending_creds.get('apple_id')
-            # Password needs to be decrypted from session THEN re-encrypted for storage
-            # OR we stored the already-encrypted one. Let's assume we stored encrypted.
-            encrypted_password = pending_creds.get('apple_password_encrypted')
-            # For saving, we need the *unencrypted* password. Let's decrypt from session storage.
-            # NOTE: This assumes 'pending_2fa_creds' stored the *unencrypted* password temporarily.
-            # If you stored the encrypted one, you'll need to decrypt it here before saving again.
-            # Let's MODIFY the plan slightly: Store UNENCRYPTED password in session during 2FA.
-            unencrypted_password = pending_creds.get('apple_password_unencrypted')
-
+            apple_id = pending_creds.get("apple_id")
+            unencrypted_password = pending_creds.get("apple_password_unencrypted")
             if not apple_id or not unencrypted_password:
-                 log.error(f"User '{user_id}': Missing credentials in session after successful 2FA. Cannot save state.")
-                 abort(500, description="Internal error: Missing credentials during 2FA completion.")
-
-            # Save permanently using the new service method
-            uds.save_apple_credentials_and_state(user_id, apple_id, unencrypted_password, final_account_state)
-
-            # Clear temporary session data
-            session.pop('pending_2fa_account_data', None)
-            session.pop('pending_2fa_creds', None)
+                log.error(
+                    f"User '{user_id}': Missing credentials in session after successful 2FA."
+                )
+                abort(
+                    500,
+                    description="Internal error: Missing credentials during 2FA completion.",
+                )
+            uds.save_apple_credentials_and_state(
+                user_id, apple_id, unencrypted_password, final_account_state
+            )
+            session.pop("pending_2fa_account_data", None)
+            session.pop("pending_2fa_creds", None)
             log.info(f"User '{user_id}': Cleared pending 2FA session data.")
-
-            # Trigger background fetch
-            log.info(f"User '{user_id}': Triggering immediate fetch after successful 2FA.")
+            log.info(
+                f"User '{user_id}': Triggering immediate fetch after successful 2FA."
+            )
             try:
+                app_context = current_app._get_current_object()
                 immediate_fetch_thread = threading.Thread(
                     target=run_fetch_for_user_task,
-                    args=(user_id, apple_id, unencrypted_password, current_app.config), # Use unencrypted pw
+                    args=(app_context, user_id),
                     name=f"ImmediateFetch2FA-{user_id}",
                     daemon=True,
                 )
                 immediate_fetch_thread.start()
             except Exception as fetch_trigger_err:
-                log.error(f"User '{user_id}': Failed to start immediate fetch after 2FA: {fetch_trigger_err}")
-                # Don't abort, login was successful, just warn user maybe
-
-            return jsonify({"message": "2FA verified successfully. Credentials saved.", "status": "success"}), 200
-
+                log.error(
+                    f"User '{user_id}': Failed to start immediate fetch after 2FA: {fetch_trigger_err}"
+                )
+            return (
+                jsonify(
+                    {
+                        "message": "2FA verified successfully. Credentials saved.",
+                        "status": "success",
+                    }
+                ),
+                200,
+            )
         elif final_state == LoginState.REQUIRE_2FA:
-            # Incorrect code, user needs to retry
             log.warning(f"User '{user_id}': Invalid 2FA code submitted.")
-            # Do NOT clear session data
-            abort(401, description="Invalid 2FA code.") # 401 Unauthorized suggests bad code
+            abort(401, description="Invalid 2FA code.")
         else:
-            # Unexpected state after submission
-            log.error(f"User '{user_id}': Unexpected state {final_state} after submitting 2FA code.")
-            # Clear session data in case of unexpected error state
-            session.pop('pending_2fa_account_data', None)
-            session.pop('pending_2fa_creds', None)
-            abort(500, description="Verification failed due to an unexpected server state.")
-
+            log.error(
+                f"User '{user_id}': Unexpected state {final_state} after submitting 2FA code."
+            )
+            session.pop("pending_2fa_account_data", None)
+            session.pop("pending_2fa_creds", None)
+            abort(
+                500,
+                description="Verification failed due to an unexpected server state.",
+            )
     except Exception as e:
-        log.exception(f"User '{user_id}': Error submitting 2FA code for index {method_index}.")
-        # Clear session data on general error
-        session.pop('pending_2fa_account_data', None)
-        session.pop('pending_2fa_creds', None)
-        abort(500, description=f"Server error submitting 2FA code: {e}")
+        log.exception(
+            f"User '{user_id}': Error submitting 2FA code for index {method_index}."
+        )
+        session.pop("pending_2fa_account_data", None)
+        session.pop("pending_2fa_creds", None)
+        if "InvalidCredentialsError" in str(e) or "Invalid 2FA code" in str(e):
+            abort(401, description="Invalid 2FA code provided.")
+        else:
+            abort(500, description=f"Server error submitting 2FA code: {e}")
+
+
+
+# --- Helper Function (Keep as is) ---
+def _restore_pending_2fa_account() -> Optional[AppleAccount]:
+    """Restores a pending AppleAccount object from session data."""
+    account_data = session.get("pending_2fa_account_data")
+    if not account_data or not isinstance(account_data, dict):
+        log.error(
+            f"User {current_user.id}: No valid pending 2FA account data found in session."
+        )
+        return None
+    anisette_server_url = get_available_anisette_server(
+        current_app.config.get("ANISETTE_SERVERS", [])
+    )
+    if not anisette_server_url:
+        log.error(
+            f"User {current_user.id}: No Anisette server for restoring 2FA account."
+        )
+        return None
+    try:
+        provider = RemoteAnisetteProvider(anisette_server_url)
+        account = AppleAccount(provider)
+        account.restore(account_data)
+        if account.login_state != LoginState.REQUIRE_2FA:
+            log.warning(
+                f"User {current_user.id}: Restored account is not in REQUIRE_2FA state ({account.login_state}). Invalidating flow."
+            )
+            session.pop("pending_2fa_account_data", None)
+            session.pop("pending_2fa_creds", None)
+            return None
+        log.debug(f"User {current_user.id}: Successfully restored pending 2FA account.")
+        return account
+    except Exception as e:
+        log.exception(
+            f"User {current_user.id}: Error restoring pending 2FA account from session."
+        )
+        session.pop("pending_2fa_account_data", None)
+        session.pop("pending_2fa_creds", None)
+        return None

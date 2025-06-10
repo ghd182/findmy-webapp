@@ -14,69 +14,107 @@ def format_latest_report_for_api(
     device_id: str,
     report: Optional[Dict[str, Any]],
     config: Dict[str, Any],
-    all_user_geofences: Dict[str, Dict[str, Any]],  # Pass loaded geofences
-    low_battery_threshold: int = 15,  # Pass threshold from config
+    all_user_geofences: Dict[
+        str, Dict[str, Any]
+    ],  # Pass loaded geofences (Dict of Dicts)
+    low_battery_threshold: int = 15,
 ) -> Dict[str, Any]:
     """
     Formats the latest device report and configuration into a structure suitable for the API response.
-    Includes the generated SVG icon.
+    Includes the generated SVG icon and correctly formats linked geofences with notification flags.
     """
     config = config or {}  # Ensure config is a dict
+    log.debug(f"[Formatter - {device_id}] Starting format. Input config: {config}")
+    log.debug(f"[Formatter - {device_id}] Input report: {report}")
 
     # Extract display info from config with defaults
     display_name = config.get("name", device_id) or device_id
     display_label = config.get("label", "❓") or "❓"
     display_color = config.get("color")
     model_name = config.get("model", "Accessory/Tag") or "Accessory/Tag"
-    icon_name = (
-        config.get("icon", "tag") or "tag"
-    )  # Keep icon name if needed by frontend
-
+    icon_name = config.get("icon", "tag") or "tag"
     final_color = display_color if display_color else getDefaultColorForId(device_id)
 
-    # --- Generate SVG Icon ---
+    # Generate SVG Icon
     try:
-        # Call the updated helper function
         device_svg_icon = generate_device_icon_svg(display_label, final_color)
     except Exception as e:
         log.error(f"Failed to generate SVG for device {device_id}: {e}")
-        device_svg_icon = None  # Handle error case
-    # --- ----------------- ---
+        device_svg_icon = None
 
-    # Resolve linked geofences using the provided all_user_geofences map
+    # --- REVISED Geofence Linking Logic ---
     resolved_geofences = []
-    linked_geofence_info = config.get("linked_geofences", [])
-    if isinstance(linked_geofence_info, list):
-        for link_info in linked_geofence_info:
-            gf_id = link_info.get("id")
-            if gf_id and gf_id in all_user_geofences:
-                gf_def = all_user_geofences[gf_id]
-                # Combine definition with link-specific notification flags
-                resolved_gf = {
-                    **gf_def,  # Includes id, name, lat, lng, radius from definition
-                    "notify_on_entry": link_info.get("notify_entry", False),
-                    "notify_on_exit": link_info.get("notify_exit", False),
-                }
-                resolved_geofences.append(resolved_gf)
-            elif gf_id:
-                log.warning(
-                    f"User '{user_id}', Device '{device_id}': Linked geofence ID '{gf_id}' not found in loaded definitions."
-                )
+    linked_geofence_info = config.get(
+        "linked_geofences", []
+    )  # This should come correctly from load_devices_config now
+    log.debug(
+        f"[Formatter - {device_id}] Processing linked_geofences from config: {linked_geofence_info}"
+    )
 
-    # Base structure for the device, including resolved config and SVG
+    if isinstance(linked_geofence_info, list):
+        for link_data_from_config in linked_geofence_info:
+            gf_id = link_data_from_config.get("id")
+            log.debug(
+                f"[Formatter - {device_id}]  Processing link data: {link_data_from_config}"
+            )
+
+            if not gf_id:
+                log.warning(
+                    f"[Formatter - {device_id}]  Skipping link data with missing ID: {link_data_from_config}"
+                )
+                continue
+
+            # Get the main geofence definition (already loaded)
+            gf_def = all_user_geofences.get(gf_id)
+            if not gf_def:
+                log.warning(
+                    f"[Formatter - {device_id}]  Geofence definition not found for linked ID '{gf_id}'. Skipping link."
+                )
+                continue
+
+            # *** Explicitly extract flags from the link_data_from_config ***
+            notify_entry = link_data_from_config.get("notify_on_entry", False)
+            notify_exit = link_data_from_config.get("notify_on_exit", False)
+            log.debug(
+                f"[Formatter - {device_id}]   Extracted flags for GF '{gf_id}': Entry={notify_entry}, Exit={notify_exit}"
+            )
+
+            # *** Build the final dictionary explicitly ***
+            resolved_gf = {
+                "id": gf_def.get("id"),  # Get ID from definition
+                "name": gf_def.get("name"),
+                "lat": gf_def.get("lat"),
+                "lng": gf_def.get("lng"),
+                "radius": gf_def.get("radius"),
+                "notify_on_entry": bool(notify_entry),  # Ensure boolean
+                "notify_on_exit": bool(notify_exit),  # Ensure boolean
+            }
+            resolved_geofences.append(resolved_gf)
+            log.debug(
+                f"[Formatter - {device_id}]   Appended resolved geofence: {resolved_gf}"
+            )
+
+    else:
+        log.warning(
+            f"[Formatter - {device_id}] linked_geofences in config was not a list: {type(linked_geofence_info)}"
+        )
+
+    # --- End REVISED Geofence Linking Logic ---
+
+    # Base structure for the device
     base_info = {
         "id": device_id,
         "name": display_name,
         "model": model_name,
-        "icon": icon_name,  # Frontend might use this name
+        "icon": icon_name,
         "label": display_label,
         "color": final_color,
-        "svg_icon": device_svg_icon,  # <-- Include SVG in response
-        "geofences": resolved_geofences,  # Include resolved geofences linked to this device
-        "reports": [],  # Will be populated later if needed by the caller
+        "svg_icon": device_svg_icon,
+        "geofences": resolved_geofences,  # Use the explicitly built list
+        "reports": [],  # Populated by caller if needed
     }
 
-    # If no report is available, return base info with unknown status
+    # If no report, return base info with unknowns
     if not report:
         return {
             **base_info,
@@ -87,36 +125,28 @@ def format_latest_report_for_api(
             "lng": None,
             "locationTimestamp": None,
             "address": "Location Unavailable",
-            "rawLocation": None,  # Add rawLocation field even if null
+            "rawLocation": None,
         }
 
-    # Process the report data
+    # Process report data (keep existing logic)
     lat, lng = report.get("lat"), report.get("lon")
     battery_level_raw = report.get("battery")
     raw_status_code = report.get("status")
     timestamp_iso = report.get("timestamp")
     horizontal_accuracy = report.get("horizontalAccuracy")
-
     status_parts = []
     timestamp_str = None
-    address_str = "Location Unavailable"  # Default address string
-    relative_time_desc = "Unknown Time"  # Default relative time
-
-    # Format timestamp and relative time
+    address_str = "Location Unavailable"
+    relative_time_desc = "Unknown Time"
     if timestamp_iso:
         try:
-            # Handle potential 'Z' for UTC and ensure timezone awareness
             timestamp_dt = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
             if timestamp_dt.tzinfo is None:
                 timestamp_dt = timestamp_dt.replace(tzinfo=timezone.utc)
             else:
                 timestamp_dt = timestamp_dt.astimezone(timezone.utc)
-
             now = datetime.now(timezone.utc)
-            delta = now - timestamp_dt
-            delta = max(delta, timedelta(seconds=0))  # Ensure delta is not negative
-
-            # Generate relative time description
+            delta = max(now - timestamp_dt, timedelta(seconds=0))
             if delta < timedelta(minutes=2):
                 relative_time_desc = "Just now"
             elif delta < timedelta(hours=1):
@@ -127,11 +157,9 @@ def format_latest_report_for_api(
                 relative_time_desc = (
                     f"{delta.days} day{'s' if delta.days > 1 else ''} ago"
                 )
-
             timestamp_str = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
             address_str = f"Located {relative_time_desc}"
             status_parts.append(f"Located {relative_time_desc}")
-
             if horizontal_accuracy is not None:
                 try:
                     address_str += f" (±{horizontal_accuracy:.0f}m)"
@@ -139,7 +167,6 @@ def format_latest_report_for_api(
                     log.warning(
                         f"Invalid horizontalAccuracy format '{horizontal_accuracy}' for {device_id}"
                     )
-
         except Exception as time_err:
             log.warning(
                 f"Error formatting report timestamp {timestamp_iso} for {device_id}: {time_err}"
@@ -149,13 +176,9 @@ def format_latest_report_for_api(
             status_parts.append("Location Available (Time Error)")
     else:
         status_parts.append("Location Unknown (No Time)")
-
-    # Process battery information using helper
     mapped_battery_level, battery_status_str = _parse_battery_info(
         battery_level_raw, raw_status_code, low_battery_threshold
     )
-
-    # Add battery info to status string
     if mapped_battery_level is not None:
         try:
             status_parts.append(
@@ -165,12 +188,10 @@ def format_latest_report_for_api(
             status_parts.append(f"Batt: {battery_status_str}")
     elif battery_status_str != "Unknown":
         status_parts.append(f"Batt: {battery_status_str}")
-
-    # Combine status parts
     final_status = " - ".join(filter(None, status_parts)) or "Status Unknown"
 
-    # Assemble the final dictionary, including the raw report data
-    return {
+    # Assemble final dictionary
+    final_data = {
         **base_info,
         "status": final_status,
         "batteryLevel": mapped_battery_level,
@@ -179,8 +200,12 @@ def format_latest_report_for_api(
         "lng": lng,
         "locationTimestamp": timestamp_str,
         "address": address_str,
-        "rawLocation": report,  # Include the original report data
+        "rawLocation": report,
     }
+    log.debug(
+        f"[Formatter - {device_id}] Final formatted data: {final_data}"
+    )  # Log final output for this device
+    return final_data
 
 
 def _parse_battery_info(
@@ -190,31 +215,34 @@ def _parse_battery_info(
     mapped_battery_level: Optional[float] = None
     battery_status_str: str = "Unknown"
 
-    # Try parsing battery status code first
+    # Try status code first
     if raw_status_code is not None:
         try:
             status_int = int(raw_status_code)
             if status_int == 0:
                 mapped_battery_level, battery_status_str = 100.0, "Full"
+            elif status_int == 16:
+                mapped_battery_level, battery_status_str = 100.0, "Charged"
             elif status_int == 32:
                 mapped_battery_level, battery_status_str = 90.0, "High"
             elif status_int == 64:
                 mapped_battery_level, battery_status_str = 50.0, "Medium"
+            elif status_int == 96:
+                mapped_battery_level, battery_status_str = 10.0, "Critical"
             elif status_int == 128:
                 mapped_battery_level, battery_status_str = 30.0, "Low"
             elif status_int == 192:
-                mapped_battery_level, battery_status_str = 10.0, "Very Low"
+                mapped_battery_level, battery_status_str = 20.0, "Very Low"
+            # Note: Status 96 (0x60) is not explicitly handled here
         except (ValueError, TypeError):
             log.debug(
                 f"Could not parse raw_status_code '{raw_status_code}' as integer."
             )
-            pass  # Fall through
 
-    # If status code didn't give a level, check the battery field
+    # If status code didn't give level, check battery field
     if mapped_battery_level is None:
         if isinstance(battery_level_raw, (int, float)):
             mapped_battery_level = float(battery_level_raw)
-            # Status string determined later based on final level
         elif isinstance(battery_level_raw, str):
             level_lower = battery_level_raw.lower()
             if level_lower == "very low":
@@ -228,13 +256,16 @@ def _parse_battery_info(
             elif level_lower == "full":
                 mapped_battery_level, battery_status_str = 100.0, "Full"
             else:
-                # Handle unknown string values by just displaying them
+                # If it's a string but not one of the above, capture it as the status string.
+                # Don't try to parse it as a percentage unless it's explicitly numeric.
                 battery_status_str = battery_level_raw.capitalize()
-                log.debug(f"Unknown string battery level: '{battery_level_raw}'")
+                log.debug(
+                    f"Unknown string battery level: '{battery_level_raw}' captured as status string."
+                )
+                # mapped_battery_level remains None if it's just a generic string
 
-    # Final check: Determine status string based on calculated level
+    # Final check: Determine status string based on level if a numeric level was determined
     if mapped_battery_level is not None:
-        # Override status string based on threshold if level exists
         if mapped_battery_level < low_battery_threshold:
             battery_status_str = "Very Low"
         elif mapped_battery_level < 30:
@@ -245,5 +276,4 @@ def _parse_battery_info(
             battery_status_str = "High"
         else:
             battery_status_str = "Full"
-
     return mapped_battery_level, battery_status_str

@@ -12,25 +12,11 @@ window.AppMap = {
     getDeviceLeafletIcon: function (label, color, svg_icon_html) {
         const size = 36;
         if (svg_icon_html) {
-            return L.divIcon({
-                className: 'custom-marker shared-device-marker',
-                html: svg_icon_html,
-                iconSize: [size, size],
-                iconAnchor: [size / 2, size],
-                popupAnchor: [0, -size]
-            });
+            return L.divIcon({ className: 'custom-marker shared-device-marker', html: svg_icon_html, iconSize: [size, size], iconAnchor: [size / 2, size], popupAnchor: [0, -size] });
         } else {
-            const fallbackSvg = window.AppUtils
-                ? AppUtils.generateDeviceIconSVG(label, color, size)
-                : `<div style="width:${size}px; height:${size}px; border-radius:50%; background-color:${color || '#ccc'}; display:flex; align-items:center; justify-content:center; color:white; font-size:18px; font-weight:bold;">${(label || '?').substring(0, 1)}</div>`;
+            const fallbackSvg = window.AppUtils ? AppUtils.generateDeviceIconSVG(label, color, size) : `<div style="width:${size}px; height:${size}px; border-radius:50%; background-color:${color || '#ccc'}; display:flex; align-items:center; justify-content:center; color:white; font-size:18px; font-weight:bold;">${(label || '?').substring(0, 1)}</div>`;
             console.warn(`SVG icon missing or AppUtils unavailable for device label ${label}, using JS fallback.`);
-            return L.divIcon({
-                className: 'custom-marker shared-device-marker fallback-icon',
-                html: fallbackSvg,
-                iconSize: [size, size],
-                iconAnchor: [size / 2, size],
-                popupAnchor: [0, -size]
-            });
+            return L.divIcon({ className: 'custom-marker shared-device-marker fallback-icon', html: fallbackSvg, iconSize: [size, size], iconAnchor: [size / 2, size], popupAnchor: [0, -size] });
         }
     },
 
@@ -284,65 +270,142 @@ window.AppMap = {
     },
 
     // --- Geolocation & User Location ---
+    
     locateMeInitial: function (callback) {
-        console.log("Attempting initial location...");
-        if (!navigator.geolocation) {
-            if (window.AppUI) AppUI.showErrorDialog("Geolocation Unavailable", "Your browser does not support geolocation.");
-            else console.error("Geolocation Unavailable");
-            if (callback) callback();
-            return;
-        }
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                this.initialPositionSuccess(pos); // Pass position object
-                if (callback) callback();
-            },
-            (err) => {
-                this.handleLocationError(err, "Initial location check failed.");
-                if (callback) callback();
-            },
-            { timeout: 8000, enableHighAccuracy: false } // Options
-        );
-    },
+        console.log("[Map] Attempting initial location...");
+        const isAndroidApp = window.Android && typeof window.Android.requestLocationUpdate === 'function';
 
-    initialPositionSuccess: function (position) {
+        if (isAndroidApp) {
+            console.log("[Map Initial] Running in Android app, calling native location request.");
+            try {
+                window.Android.requestLocationUpdate();
+                // Native side will call back to updateUserLocationFromNative
+                // We call the callback immediately here, as the native call is async
+                if (callback) callback();
+            } catch (e) {
+                console.error("[Map Initial] Error calling Android.requestLocationUpdate:", e);
+                this.handleLocationError({ code: -1, message: "Could not request native location." }, "Initial location failed (native bridge error).", false);
+                if (callback) callback();
+            }
+        } else {
+            console.log("[Map Initial] Not in Android app, using Web Geolocation API.");
+            if (!navigator.geolocation) {
+                console.warn("[Map Initial] Initial location check failed: Geolocation not supported.");
+                if (callback) callback();
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    this.initialPositionSuccess(pos); // Calls updateUserLocationMarker etc.
+                    if (callback) callback();
+                },
+                (err) => {
+                    this.handleLocationError(err, "Initial location check failed (non-blocking).", false);
+                    if (callback) callback();
+                },
+                { timeout: 8000, enableHighAccuracy: false }
+            );
+        }
+    },
+    
+
+    initialPositionSuccess: function (position) { // Keep original logic
         console.log("Initial location success:", position.coords);
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        const accuracy = position.coords.accuracy; // <<< Get accuracy
-        this.updateUserLocationMarker(lat, lng, accuracy); // <<< Pass accuracy
+        const accuracy = position.coords.accuracy;
+        this.updateUserLocationMarker(lat, lng, accuracy);
         this.updateLocationInfo(lat, lng);
         this.reverseGeocode(lat, lng);
-        // Don't call updateMapView here, let initMap handle it when ready
+        // Note: Do NOT call updateMapView here, wait for data load
     },
 
+    
     locateMe: function () {
-        console.log("Attempting location update...");
-        document.getElementById('location-address-text').textContent = "Fetching address...";
-        document.getElementById('location-coordinates-text').textContent = "Fetching coordinates...";
-        document.getElementById('last-updated-text').textContent = "Updating...";
-        if (!navigator.geolocation) {
-            if (window.AppUI) AppUI.showErrorDialog("Geolocation Unavailable");
-            else console.error("Geolocation Unavailable");
-            return;
+        console.log("[Map] Attempting location update ('My Location' button)...");
+        const addressText = document.getElementById('location-address-text');
+        const coordsText = document.getElementById('location-coordinates-text');
+        const updatedText = document.getElementById('last-updated-text');
+        if (addressText) addressText.textContent = "Fetching address...";
+        if (coordsText) coordsText.textContent = "Fetching coordinates...";
+        if (updatedText) updatedText.textContent = "Updating...";
+
+        const isAndroidApp = window.Android && typeof window.Android.requestLocationUpdate === 'function';
+
+        if (isAndroidApp) {
+            console.log("[Map LocateMe] Running in Android app, calling native location request.");
+            try {
+                window.Android.requestLocationUpdate();
+                // Native side will call back to updateUserLocationFromNative
+            } catch (e) {
+                console.error("[Map LocateMe] Error calling Android.requestLocationUpdate:", e);
+                this.handleLocationError({ code: -1, message: "Could not request native location." }, "Could not get location (native bridge error).", true);
+            }
+        } else {
+            console.log("[Map LocateMe] Not in Android app, using Web Geolocation API.");
+            if (!navigator.geolocation) {
+                const msg = "Geolocation is not supported by your browser.";
+                console.error("Geolocation Error:", msg);
+                if (window.AppUI) AppUI.showErrorDialog("Location Unavailable", msg);
+                this.handleLocationError({ code: -1, message: msg }, "Could not get location.", true);
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                this.showPosition.bind(this), // Standard web success callback
+                (err) => this.handleLocationError(err, "Could not get current location."), // Standard web error callback
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
         }
-        navigator.geolocation.getCurrentPosition(
-            this.showPosition.bind(this), // Pass method reference
-            (err) => this.handleLocationError(err, "Could not update location."), // Pass error handler
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // Options
-        );
     },
+    
 
     showPosition: function (position) {
         console.log("Location update success:", position.coords);
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        const accuracy = position.coords.accuracy; // <<< Get accuracy
-        this.updateUserLocationMarker(lat, lng, accuracy); // <<< Pass accuracy
+        const accuracy = position.coords.accuracy;
+        this.updateUserLocationMarker(lat, lng, accuracy);
         this.updateLocationInfo(lat, lng);
         this.reverseGeocode(lat, lng);
-        this.updateMapView(); // Update map view after getting position
+        this.updateMapView();
     },
+
+
+    
+    /**
+     * Callback function called by the native Android code via the JS Bridge
+     * when a location update is available (or an error occurred).
+     * @param {number|null} lat Latitude, or null on error.
+     * @param {number|null} lng Longitude, or null on error.
+     * @param {number|null} accuracy Accuracy in meters, or null.
+     * @param {string|null} errorMsg Error message, or null on success.
+     */
+    updateUserLocationFromNative: function (lat, lng, accuracy, errorMsg) {
+        console.log(`[Map JS Bridge] Received location update from Native: lat=${lat}, lng=${lng}, acc=${accuracy}, err=${errorMsg}`);
+        if (errorMsg) {
+            console.error("[Map JS Bridge] Native location error:", errorMsg);
+            // Use handleLocationError, simulating an error object
+            // We don't have a specific code, so use a generic one like POSITION_UNAVAILABLE
+            this.handleLocationError({ code: 2, message: errorMsg }, "Could not get location (from native).", true);
+        } else if (lat != null && lng != null) {
+            console.log("[Map JS Bridge] Native location success.");
+            const accFloat = (accuracy != null) ? parseFloat(accuracy) : 0; // Ensure accuracy is a number
+            this.updateUserLocationMarker(lat, lng, accFloat);
+            this.updateLocationInfo(lat, lng);
+            this.reverseGeocode(lat, lng);
+            // Center map after successful update from native
+            const mapInstance = AppState.getMap();
+            if (mapInstance && AppState.locationMarker) {
+                mapInstance.setView(AppState.locationMarker.getLatLng(), Math.max(mapInstance.getZoom(), 15));
+            }
+        } else {
+            console.warn("[Map JS Bridge] Native location update received, but lat/lng were null and no error message.");
+            this.handleLocationError({ code: 2, message: "Unknown location issue from native." }, "Could not get location (from native).", true);
+        }
+    },
+    
+
 
     updateUserLocationMarker: function (lat, lng, accuracy) {
         const latLng = L.latLng(lat, lng);
@@ -355,120 +418,80 @@ window.AppMap = {
         } else {
             AppState.locationMarker.setLatLng(latLng);
         }
-        this.updateUserAccuracyCircle(latLng, accuracy); // Update the PERMANENT user circle
+        this.updateUserAccuracyCircle(latLng, accuracy);
     },
 
     updateUserAccuracyCircle: function (latLng, accuracy) {
         const mapInstance = AppState.getMap();
-        // Don't add/remove layer here, just manage the object
-        // if (!mapInstance || !AppState.mapReady) return; // Keep guard
-
-        // Hide/Remove if accuracy is invalid
         if (!accuracy || accuracy <= 0) {
             if (AppState.userAccuracyCircle && mapInstance?.hasLayer(AppState.userAccuracyCircle)) {
                 mapInstance.removeLayer(AppState.userAccuracyCircle);
                 console.log("[Map Accuracy] Removed USER accuracy circle (invalid accuracy).");
             }
-            // Set to null so updateMapView knows it shouldn't be added
             AppState.userAccuracyCircle = null;
             return;
         }
-
-        // Valid accuracy, create or update the object
         const circleOptions = {
-            radius: accuracy,
-            color: 'var(--m3-sys-color-primary)', weight: 1, opacity: 0.3,
+            radius: accuracy, color: 'var(--m3-sys-color-primary)', weight: 1, opacity: 0.3,
             fillColor: 'var(--m3-sys-color-primary)', fillOpacity: 0.1,
-            interactive: false, // Non-interactive
-            pane: AppConfig.LEAFLET_PANES.USER_ACCURACY.name // Use dedicated non-interactive pane
+            interactive: false, pane: AppConfig.LEAFLET_PANES.USER_ACCURACY.name
         };
-
         if (!AppState.userAccuracyCircle) {
             console.log("[Map Accuracy] Creating USER accuracy circle object.");
             AppState.userAccuracyCircle = L.circle(latLng, circleOptions);
-            // Store accuracy in options for potential future use
             AppState.userAccuracyCircle.options.accuracy = accuracy;
         } else {
-            // console.log("[Map Accuracy] Updating existing USER accuracy circle object."); // Can be noisy
             AppState.userAccuracyCircle.setLatLng(latLng);
             AppState.userAccuracyCircle.setRadius(accuracy);
-            AppState.userAccuracyCircle.setStyle(circleOptions); // Apply style updates
-            AppState.userAccuracyCircle.options.accuracy = accuracy; // Update stored accuracy
+            AppState.userAccuracyCircle.setStyle(circleOptions);
+            AppState.userAccuracyCircle.options.accuracy = accuracy;
         }
-        // *** DO NOT ADD TO MAP HERE - updateMapView handles visibility ***
     },
 
 
 
 
     updateLocationInfo: function (lat, lng) {
-        document.getElementById('location-coordinates-text').textContent = `${lat.toFixed(5)}°, ${lng.toFixed(5)}°`;
+        const coordsText = document.getElementById('location-coordinates-text');
+        const updatedText = document.getElementById('last-updated-text');
+        if (coordsText) coordsText.textContent = `${lat.toFixed(5)}°, ${lng.toFixed(5)}°`;
         AppState.lastUpdateTime = new Date();
-        document.getElementById('last-updated-text').textContent = `Last updated: ${window.AppUtils ? AppUtils.formatTimeRelative(AppState.lastUpdateTime) : 'just now'}`;
+        if (updatedText) updatedText.textContent = `Last updated: ${window.AppUtils ? AppUtils.formatTimeRelative(AppState.lastUpdateTime) : 'just now'}`;
     },
 
     reverseGeocode: function (latitude, longitude) {
         const apiUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&addressdetails=1`;
         console.log("Fetching address for:", latitude.toFixed(5), longitude.toFixed(5));
-        // Use AppConfig if available, otherwise default
         const appVersion = window.AppConfig?.APP_VERSION || '?.?.?';
         fetch(apiUrl, { headers: { 'User-Agent': `FindMyWebApp/${appVersion}` } })
-            .then(res => {
-                if (!res.ok) return res.text().then(text => { throw new Error(`Nominatim error! status: ${res.status}, response: ${text}`) });
-                return res.json();
-            })
-            .then(data => {
-                let addr = data?.display_name || "Address not found";
-                document.getElementById('location-address-text').textContent = addr;
-                // --- PASS ISO TIMESTAMP ---
-                const now = AppState.lastUpdateTime || new Date();
-                AppState.addToLocationHistory({
-                    time: window.AppUtils ? AppUtils.formatTime(now) : now.toLocaleTimeString(),
-                    timestampISO: now.toISOString(), // Add ISO string
-                    location: "My Location",
-                    address: addr,
-                    lat: latitude,
-                    lng: longitude
-                });
-                // --- -------------------- ---
-            })
-            .catch(err => {
-                console.error("Reverse geocoding error:", err);
-                document.getElementById('location-address-text').textContent = "Error fetching address";
-                const now = AppState.lastUpdateTime || new Date();
-                AppState.addToLocationHistory({
-                    time: window.AppUtils ? AppUtils.formatTime(now) : now.toLocaleTimeString(),
-                    timestampISO: now.toISOString(), // Add ISO string
-                    location: "My Location",
-                    address: "Error fetching address",
-                    lat: latitude,
-                    lng: longitude
-                });
-            });
+            .then(res => { if (!res.ok) return res.text().then(text => { throw new Error(`Nominatim error! status: ${res.status}, response: ${text}`) }); return res.json(); })
+            .then(data => { let addr = data?.display_name || "Address not found"; const addressText = document.getElementById('location-address-text'); if (addressText) addressText.textContent = addr; const now = AppState.lastUpdateTime || new Date(); AppState.addToLocationHistory({ time: window.AppUtils ? AppUtils.formatTime(now) : now.toLocaleTimeString(), timestampISO: now.toISOString(), location: "My Location", address: addr, lat: latitude, lng: longitude }); })
+            .catch(err => { console.error("Reverse geocoding error:", err); const addressText = document.getElementById('location-address-text'); if (addressText) addressText.textContent = "Error fetching address"; const now = AppState.lastUpdateTime || new Date(); AppState.addToLocationHistory({ time: window.AppUtils ? AppUtils.formatTime(now) : now.toLocaleTimeString(), timestampISO: now.toISOString(), location: "My Location", address: "Error fetching address", lat: latitude, lng: longitude }); });
     },
 
-    handleLocationError: function (error, contextMessage = "Unable to retrieve your location.") {
-        console.error("Geolocation Error:", error.code, error.message);
+    handleLocationError: function (error, contextMessage = "Unable to retrieve your location.", showDialog = true) {
+        console.error("Geolocation Error:", error.code, error.message, `Context: ${contextMessage}`);
         let userMessage = contextMessage;
-        switch (error.code) {
-            case error.PERMISSION_DENIED: userMessage = "Location access denied by browser."; break;
-            case error.POSITION_UNAVAILABLE: userMessage = "Location information is unavailable."; break;
-            case error.TIMEOUT: userMessage = "Location request timed out."; break;
-            default: userMessage = "An unknown error occurred getting location."; break;
-        }
-        if (window.AppUI) AppUI.showErrorDialog("Location Error", userMessage);
-        else console.error("Location Error:", userMessage);
+        let detailedInfo = `Error code: ${error.code}, Message: ${error.message}`;
 
-        document.getElementById('location-coordinates-text').textContent = "Location unavailable";
-        document.getElementById('location-address-text').textContent = "Could not determine location";
-        const lastUpdatedEl = document.getElementById('last-updated-text');
-        if (lastUpdatedEl?.textContent.includes("Updating")) {
-            lastUpdatedEl.textContent = "Update failed";
+        switch (error.code) {
+            case error.PERMISSION_DENIED: case 1:
+                userMessage = "Location permission denied."; detailedInfo += " Please ensure location access is allowed for this site/app in your browser/system settings."; break;
+            case error.POSITION_UNAVAILABLE: case 2:
+                userMessage = "Location information is currently unavailable."; detailedInfo += " The source (GPS, Wi-Fi, Cell) might be disabled or unavailable."; break;
+            case error.TIMEOUT: case 3:
+                userMessage = "Location request timed out."; detailedInfo += " Could not get a location fix within the time limit."; break;
+            case -1: userMessage = "Geolocation is not supported by your browser."; detailedInfo = error.message; break;
+            default: userMessage = "An unknown error occurred getting location."; detailedInfo += " Check browser console for more details."; break;
         }
+        const coordsText = document.getElementById('location-coordinates-text'); const addressText = document.getElementById('location-address-text'); const updatedText = document.getElementById('last-updated-text');
+        if (coordsText) coordsText.textContent = "Location unavailable";
+        if (addressText) addressText.textContent = "Could not determine location";
+        if (updatedText?.textContent.includes("Updating")) { updatedText.textContent = "Update failed"; }
+        if (showDialog) { if (window.AppUI) AppUI.showErrorDialog("Location Error", `${userMessage}<br><small>${detailedInfo}</small>`); else console.error("Location Error:", userMessage, detailedInfo); }
     },
 
     shouldShowUserLocation: function () {
-        // Show user location if not viewing a specific device AND no search result is active
         return !AppState.currentViewedDeviceId && !AppState.searchMarker;
     },
 
@@ -753,7 +776,7 @@ window.AppMap = {
         const markerTime = report.timestamp ? new Date(report.timestamp.replace("Z", "+00:00")) : null;
         const publishedTime = report.published_at ? new Date(report.published_at.replace("Z", "+00:00")) : null;
 
-        // --- Get ISO strings (for title attribute) ---
+        // --- Get ISO strings (for title attribute and potential absolute time if AppUtils fails) ---
         const markerTimestampISO = markerTime && !isNaN(markerTime) ? markerTime.toISOString() : '';
         const publishedTimestampISO = publishedTime && !isNaN(publishedTime) ? publishedTime.toISOString() : '';
 
@@ -761,8 +784,8 @@ window.AppMap = {
         let markerTimeAbsolute = "N/A";
         let markerTimeRelative = "N/A";
         if (markerTime && !isNaN(markerTime)) {
-            markerTimeAbsolute = AppUtils.formatTime(markerTime); // e.g., "12/04/2025 16:38"
-            markerTimeRelative = AppUtils.formatTimeRelative(markerTime); // e.g., "5 min ago"
+            markerTimeAbsolute = AppUtils.formatTime(markerTime); // e.g., "May 6, 2025, 09:39" (localized absolute)
+            markerTimeRelative = AppUtils.formatTimeRelative(markerTime); // e.g., "22 min ago"
         }
 
         let publishedTimeAbsolute = "N/A";
@@ -787,17 +810,40 @@ window.AppMap = {
         if (mappedBattPercent !== null) { batteryPercentStr = `${mappedBattPercent.toFixed(0)}%`; }
         else if (batteryStatusStr !== 'Unknown') { batteryPercentStr = batteryStatusStr; }
 
+        // --- Get Local Seen Time from displayInfo ---
+        const localTimestampISO = displayInfo.last_seen_local || '';
+        let localTimeRelative = 'Never';
+        let localTimeAbsolute = ''; // << Initialize absolute local time
+        if (localTimestampISO) {
+            try {
+                const localDate = new Date(localTimestampISO.replace("Z", "+00:00"));
+                if (!isNaN(localDate)) {
+                    localTimeRelative = AppUtils.formatTimeRelative(localDate);
+                    localTimeAbsolute = AppUtils.formatTime(localDate); // << Calculate absolute local time
+                }
+            } catch (e) { console.warn("Error formatting local time for popup"); }
+        }
+
+
         const icon = (name) => `<span class="material-symbols-outlined">${name}</span>`;
         const smallSvgIconHtml = AppUtils.generateDeviceIconSVG(displayInfo.label, displayInfo.color, 20);
         const labelHtml = `<span style="display:inline-block; width:20px; height:20px; vertical-align:middle; margin-right: 5px;">${smallSvgIconHtml}</span>`;
 
         let content = `<div style="font-size: var(--body-small-size); max-width: 280px;"><table class="history-popup-table">`;
-        content += `<tr><td>${icon('sell')}</td><td colspan="2" style="font-weight: bold;">${labelHtml}${displayInfo.name}</td></tr>`;
+        content += `<tr><td>${icon('sell')}</td><td colspan="2" style="font-weight: bold;">${labelHtml}${AppUtils.escapeHtml(displayInfo.name)}</td></tr>`; // Escaped name
 
+        // --- CORRECTED Located Time Output ---
         content += `<tr><td>${icon('schedule')}</td><td>Located:</td><td><span class="relative-time" data-timestamp="${markerTimestampISO}" title="${markerTimestampISO}">${markerTimeAbsolute} (${markerTimeRelative})</span></td></tr>`;
+
         // Show 'Reported' only if different from 'Located' time
         if (publishedTime && markerTime && Math.abs(publishedTime.getTime() - markerTime.getTime()) > 1000) { // Check if more than 1s difference
+            // --- CORRECTED Reported Time Output ---
             content += `<tr><td>${icon('publish')}</td><td>Reported:</td><td><span class="relative-time" data-timestamp="${publishedTimestampISO}" title="${publishedTimestampISO}">${publishedTimeAbsolute} (${publishedTimeRelative})</span></td></tr>`;
+        }
+
+        // --- CORRECTED Nearby Time Output ---
+        if (localTimestampISO) { // Only show if data exists
+            content += `<tr><td>${icon('radar')}</td><td>Nearby:</td><td><span class="relative-time" data-timestamp="${localTimestampISO}" title="${localTimestampISO}">${localTimeAbsolute} (${localTimeRelative})</span></td></tr>`;
         }
 
         content += `<tr><td>${icon('location_on')}</td><td>Coords:</td><td><a href="${googleMapsLink}" target="_blank">${lat != null ? `${lat.toFixed(5)}°, ${lon.toFixed(5)}°` : 'N/A'}</a></td></tr>`;

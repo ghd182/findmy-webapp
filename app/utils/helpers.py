@@ -99,7 +99,7 @@ def generate_device_icon_svg(label: str, color: str, size: int = 36) -> str:
     svg_template = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">
 <circle cx="{size/2}" cy="{size/2}" r="{size/2}" fill="{color}" />
 <circle cx="{size/2}" cy="{size/2}" r="{inner_radius}" fill="#FFFFFF" />
-<text x="50%" y="50%" dominant-baseline="central" text-anchor="middle"
+<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
         font-family="sans-serif" font-size="{text_size}px" font-weight="bold" fill="{text_color}">
     {label_safe}
 </text>

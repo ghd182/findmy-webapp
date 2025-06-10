@@ -181,33 +181,85 @@ window.AppNotifications = {
 
     subscribeUser: async function () {
         console.log("Attempting to subscribe user...");
-        if (!AppConfig.VAPID_PUBLIC_KEY) { AppUI.showErrorDialog("Error", "Server VAPID key missing."); this.updateNotificationButtonState(); return null; }
-        if (!AppState.swRegistration) { AppUI.showErrorDialog("Error", "Service worker not ready."); this.updateNotificationButtonState(); return null; }
+        if (!AppConfig.VAPID_PUBLIC_KEY) {
+            AppUI.showErrorDialog("Error", "Server VAPID key missing.");
+            this.updateNotificationButtonState();
+            return null;
+        }
+        if (!AppState.swRegistration) {
+            AppUI.showErrorDialog("Error", "Service worker not ready.");
+            this.updateNotificationButtonState();
+            return null;
+        }
 
         try {
             const applicationServerKey = AppUtils.urlBase64ToUint8Array(AppConfig.VAPID_PUBLIC_KEY);
             console.log("Calling pushManager.subscribe...");
-            const subscription = await AppState.swRegistration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey });
-            console.log('User subscribed successfully:', subscription);
+            const subscription = await AppState.swRegistration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: applicationServerKey
+            });
+            console.log('User subscribed successfully (Web Push):', subscription);
             AppState.currentPushSubscription = subscription;
 
-            console.log("Sending subscription to backend...");
+            // --- Get FCM Token if in Android App ---
+            let fcmToken = null;
+            const isAndroidApp = window.Android && typeof window.Android.getFCMToken === 'function' && typeof window.Android.isRunningInAndroidApp === 'function' && window.Android.isRunningInAndroidApp();
+            if (isAndroidApp) {
+                console.log("Attempting to get FCM Token from Android...");
+                try {
+                    // Call the synchronous method we defined in WebAppInterface
+                    fcmToken = window.Android.getFCMToken(); // Returns stored token or null
+                    if (fcmToken && typeof fcmToken === 'string' && fcmToken.length > 10) {
+                        console.log("Received FCM Token from Android:", fcmToken.substring(0, 10) + "...");
+                    } else {
+                        console.warn("Received invalid or null FCM token from Android:", fcmToken);
+                        fcmToken = null; // Ensure it's null if invalid
+                    }
+                } catch (e) {
+                    console.error("Error calling Android.getFCMToken:", e);
+                    fcmToken = null; // Set to null on error
+                }
+            } else {
+                console.log("Not running in Android app or getFCMToken not available.");
+            }
+            // --- ----------------------------- ---
+
+            console.log(`Sending subscription ${fcmToken ? 'AND FCM token' : ''} to backend...`);
             try {
-                const backendResponse = await AppApi.subscribePush(subscription);
+                // --- Modify payload to include FCM token ---
+                const payload = {
+                    // Convert PushSubscription to standard JSON format
+                    subscription: subscription.toJSON ? subscription.toJSON() : subscription,
+                    fcm_token: fcmToken // Send FCM token (will be null if not available/not in Android)
+                };
+                console.log("Subscription Payload to Backend:", payload);
+                // Use the API wrapper function
+                const backendResponse = await AppApi.subscribePush(payload); // API needs to handle this structure
+                // --- ------------------------------------ ---
+
                 console.log(`Backend subscription sync successful:`, backendResponse);
-                if (backendResponse && backendResponse.message) { AppUI.showConfirmationDialog("Subscribed!", "You have successfully subscribed to notifications."); }
-                else { AppUI.showErrorDialog("Subscription Issue", "Subscribed locally, but server response was unexpected. Notifications might not work."); }
+                if (backendResponse && backendResponse.message) {
+                    AppUI.showConfirmationDialog("Subscribed!", "You have successfully subscribed to notifications.");
+                } else {
+                    AppUI.showErrorDialog("Subscription Issue", "Subscribed locally, but server response was unexpected. Notifications might not work.");
+                }
             } catch (backendError) {
-                console.error("Failed to send subscription to backend:", backendError);
+                console.error("Failed to send subscription/FCM token to backend:", backendError);
+                // Consider if we should unsubscribe locally if backend sync fails?
+                // Example: await subscription.unsubscribe(); AppState.currentPushSubscription = null;
                 AppUI.showErrorDialog("Subscription Issue", `Subscribed locally, but failed to sync with the server: ${backendError.message}. Notifications might not work until sync succeeds.`);
             }
-            this.updateNotificationButtonState();
+            this.updateNotificationButtonState(); // Update UI based on local subscription status
             return subscription;
         } catch (err) {
             console.error('Failed to subscribe the user:', err);
-            AppState.currentPushSubscription = null;
-            if (err.name === 'NotAllowedError' || Notification.permission === 'denied') { AppUI.showErrorDialog("Subscription Failed", "Notification permission was denied. Please enable it in browser settings."); }
-            else { AppUI.showErrorDialog("Subscription Failed", `Could not subscribe to notifications. Error: ${err.name} - ${err.message}`); }
+            AppState.currentPushSubscription = null; // Clear local state on failure
+            if (err.name === 'NotAllowedError' || Notification.permission === 'denied') {
+                AppUI.showErrorDialog("Subscription Failed", "Notification permission was denied. Please enable it in browser settings.");
+            } else {
+                AppUI.showErrorDialog("Subscription Failed", `Could not subscribe to notifications. Error: ${err.name} - ${err.message}`);
+            }
             this.updateNotificationButtonState();
             return null;
         }
@@ -226,8 +278,15 @@ window.AppNotifications = {
                 console.log("Unsubscribed successfully on client.");
                 const endpointToRemove = subscription.endpoint;
                 AppState.currentPushSubscription = null;
-                try { await AppApi.unsubscribePush(endpointToRemove); console.log("Sent unsubscribe request to backend."); }
-                catch (error) { backendError = error; console.error("Error sending unsubscribe request to backend:", backendError); AppUI.showConfirmationDialog("Unsubscribed (Partial)", "Unsubscribed locally, but could not notify the server. You might receive old notifications temporarily."); }
+                try {
+                    // --- Send endpoint AND indicate FCM removal if needed ---
+                    // Backend needs to know which endpoint to remove. If using FCM,
+                    // the backend might need to disassociate the FCM token too.
+                    // Simplest: Just send the endpoint to remove the web push part.
+                    await AppApi.unsubscribePush(endpointToRemove);
+                    // --- --------------------------------------------- ---
+                    console.log("Sent unsubscribe request to backend.");
+                } catch (error) { backendError = error; console.error("Error sending unsubscribe request to backend:", backendError); AppUI.showConfirmationDialog("Unsubscribed (Partial)", "Unsubscribed locally, but could not notify the server. You might receive old notifications temporarily."); }
                 if (!backendError) { AppUI.showConfirmationDialog("Unsubscribed", "You have been unsubscribed from notifications."); }
                 this.updateNotificationButtonState();
             } else { console.error("Client unsubscribe method returned false."); AppUI.showErrorDialog("Unsubscribe Failed", "Could not unsubscribe on the client. Please try again."); this.updateNotificationButtonState(); }

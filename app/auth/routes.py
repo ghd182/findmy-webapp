@@ -1,5 +1,4 @@
-# app/auth/routes.py
-
+# File: app/auth/routes.py
 import logging
 from flask import (
     render_template,
@@ -18,7 +17,7 @@ from urllib.parse import urlparse, urljoin
 # Blueprint, User model, LoginManager instance
 from . import bp
 from app.models import User
-from app import login_manager
+from app import login_manager, db
 
 # --- Import the globally defined limiter instance ---
 from app import limiter
@@ -32,26 +31,26 @@ from .forms import LoginForm, RegistrationForm
 log = logging.getLogger(__name__)
 
 
-# --- Helper for safe redirects ---
+# --- Helper for safe redirects (Keep existing) ---
 def is_safe_url(target):
     """Checks if a redirect target URL is safe."""
     if not isinstance(target, str):
         return False
     ref_url = urlparse(request.host_url)
-    test_url = urlparse(urljoin(request.host_url, target))
+    test_url = urljoin(request.host_url, target)
     is_safe = test_url.scheme in ("http", "https") and ref_url.netloc == test_url.netloc
     if not is_safe:
         log.warning(f"Unsafe redirect target detected and blocked: {target}")
     return is_safe
 
 
-# --- User Loader ---
+# --- User Loader (Keep existing) ---
 @login_manager.user_loader
 def load_user(user_id):
     """Flask-Login user loader callback."""
     log.debug(f"Flask-Login attempting to load user: {user_id}")
     try:
-        user = User.get(user_id)
+        user = User.get(user_id)  # User.get uses the DB now
         if user:
             log.debug(f"User {user_id} loaded successfully by Flask-Login.")
         else:
@@ -62,9 +61,9 @@ def load_user(user_id):
         return None
 
 
-# --- Registration Route (Using WTForms) ---
+# --- Registration Route (Keep existing) ---
 @bp.route("/register", methods=["GET", "POST"])
-@limiter.limit("5 per hour")  # <<< Use the imported 'limiter' instance directly
+@limiter.limit("50 per hour")
 def register_route():
     if current_user.is_authenticated:
         return redirect(url_for("main.index_route"))
@@ -74,74 +73,66 @@ def register_route():
         email = form.email.data.strip().lower()
         password = form.password.data
         uds = UserDataService(current_app.config)
+
         try:
-            existing_users = uds.load_users()
-            if any(
-                u_data.get("email", "").lower() == email
-                for u_data in existing_users.values()
-                if u_data.get("email")
-            ):
+            existing_user_by_email = uds.get_user_by_email(email)
+            if existing_user_by_email:
+                log.warning(
+                    f"Registration failed: Email '{email}' already exists in DB."
+                )
                 flash(f"Email address '{email}' is already registered.", "error")
                 return render_template("register.html", title="Register", form=form)
         except Exception as e:
-            log.error(f"Failed to load users for email uniqueness check: {e}")
+            log.error(f"Database error during email uniqueness check: {e}")
             flash("Error checking existing users. Please try again.", "error")
             return render_template("register.html", title="Register", form=form)
+
         try:
-            hashed_password = generate_password_hash(password)
-            user_dir = uds._get_user_data_dir(username)
-            if not user_dir:
-                raise IOError(f"Could not create data directory for user '{username}'.")
-            new_user_data = {"email": email, "password_hash": hashed_password}
-            existing_users[username] = new_user_data
-            uds.save_users(existing_users)
-            log.info(f"New user registered: '{username}' ({email})")
-            flash(
-                f"User '{username}' registered successfully! Please log in.", "success"
-            )
-            return redirect(url_for(".login_route"))
-        except (IOError, TypeError, RuntimeError) as e:
-            log.exception(f"Error saving new user '{username}': {e}")
-            flash(
-                f"An error occurred during registration: {e}. Please try again later.",
-                "error",
-            )
+            new_user = uds.create_user(username, email, password)
+            if new_user:
+                log.info(f"New user registered via DB: '{username}' ({email})")
+                flash(
+                    f"User '{username}' registered successfully! Please log in.",
+                    "success",
+                )
+                return redirect(url_for(".login_route"))
+            else:
+                flash(
+                    "Registration failed. Username or email might already exist, or a server error occurred.",
+                    "error",
+                )
         except Exception as e:
-            log.exception(f"Unexpected error saving new user '{username}': {e}")
+            log.exception(f"Unexpected error creating user '{username}' via UDS: {e}")
             flash(
                 "An error occurred during registration. Please try again later.",
                 "error",
             )
+
     return render_template("register.html", title="Register", form=form)
 
 
-# --- Login Route (Using WTForms) ---
+# --- Login Route (Keep existing) ---
 @bp.route("/login", methods=["GET", "POST"])
-@limiter.limit("10 per minute;200 per day") # <<< Use the imported 'limiter' instance directly
+@limiter.limit("10 per minute;1000 per day")
 def login_route():
     uds = UserDataService(current_app.config)
     first_user_redirect = False
+
     try:
-        existing_users = uds.load_users()  # Returns {} on error or empty
-        # --- MODIFIED CHECK ---
-        # Redirect to register ONLY if the users file was loaded successfully AND is empty
-        if isinstance(existing_users, dict) and not existing_users:
-            log.warning("No users found in users.json. Redirecting to registration.")
+        user_count = db.session.execute(
+            db.select(db.func.count(User.id_internal))
+        ).scalar_one()
+        if user_count == 0:
+            log.warning("No users found in database. Redirecting to registration.")
             flash("No users exist yet. Please register the first user.", "info")
             first_user_redirect = True
-            return redirect(url_for(".register_route"))
-        # --- END MODIFIED CHECK ---
     except Exception as e:
-        # Log error if loading users failed, but don't necessarily redirect to register
-        log.error(f"Failed to check user existence before login: {e}")
+        log.error(f"Database error checking user existence before login: {e}")
         flash("Warning: Could not verify user database status.", "warning")
-        # Allow rendering login form even if user check failed
 
-    # If redirected to register, don't process the login form
     if first_user_redirect:
-        return redirect(url_for(".register_route"))  # Ensure redirect happens
+        return redirect(url_for(".register_route"))
 
-    # --- Proceed with Login Form ---
     form = LoginForm()
     if form.validate_on_submit():
         username = form.username.data
@@ -150,7 +141,6 @@ def login_route():
         log.info(f"Login attempt for user: '{username}'")
         user_obj = User.get(username)
 
-        # --- IMPORTANT: Check user_obj BEFORE checking password to avoid timing attacks ---
         if user_obj and user_obj.check_password(password):
             login_user(user_obj, remember=remember)
             log.info(f"User '{username}' logged in successfully.")
@@ -159,10 +149,21 @@ def login_route():
             if not is_safe_url(next_page):
                 log.warning(f"Unsafe 'next' URL: {next_page}. Ignoring.")
                 next_page = None
-            has_creds = uds.user_has_apple_credentials(username)  # Error handled in uds
-            log.info(
-                f"User '{username}' creds status: {'Found' if has_creds else 'Not Found'}"
-            )
+
+            has_creds = False
+            try:
+                has_creds = uds.user_has_apple_credentials(username)
+                log.info(
+                    f"User '{username}' creds status check: {'Found' if has_creds else 'Not Found'}"
+                )
+            except Exception as cred_err:
+                log.error(
+                    f"Error checking Apple creds status for {username} after login: {cred_err}"
+                )
+                flash(
+                    "Login successful, but couldn't check Apple credential status.",
+                    "warning",
+                )
 
             if next_page:
                 return redirect(next_page)
@@ -170,61 +171,65 @@ def login_route():
                 flash("Login successful. Please set your Apple credentials.", "info")
                 return redirect(url_for("main.manage_apple_creds_route"))
             else:
-                return redirect(next_page or url_for("main.index_route"))
+                return redirect(url_for("main.index_route"))
         else:
-            # Failed login attempt
             log.warning(f"Login failed for user '{username}'. Invalid credentials.")
-            # Rate limit decorator automatically handles the 429 response on too many attempts
             flash("Invalid username or password.", "error")
-            # No need to explicitly handle rate limit error here, Flask-Limiter does it
 
     return render_template("login.html", title="Login", form=form)
 
 
-# --- Logout Route (Redirect to intermediate page) ---
+# --- Logout Route (Keep existing) ---
 @bp.route("/logout")
 @login_required
 def logout_route():
     user_id = current_user.id
     log.info(f"Logout requested for user '{user_id}'.")
-    flash_message = "You have been logged out."  # Keep original message base
+    flash_message = "You have been logged out."
 
-    # Clear Apple Credentials first (best effort)
     try:
         uds = UserDataService(current_app.config)
         uds.clear_apple_credentials(user_id)
         log.info(f"Cleared stored Apple credentials for user '{user_id}'.")
-        # No need to add to flash message, user is going straight to login
     except Exception as e:
         log.error(
             f"Failed to clear Apple credentials for user '{user_id}' during logout: {e}",
             exc_info=True,
         )
-        # Add a different flash message if needed, but maybe keep it simple
         flash("Logged out, but failed to clear stored Apple credentials.", "warning")
 
-    # Perform actual logout (clears session, expires remember cookie)
     try:
         logout_user()
-        # session.clear() # logout_user() handles the necessary session keys
         log.info(f"User '{user_id}' logged out via Flask-Login.")
     except Exception as e:
         log.error(
             f"Error during Flask-Login logout for user '{user_id}': {e}", exc_info=True
         )
-        flash("An error occurred during logout.", "error")  # Add error flash
+        flash("An error occurred during logout.", "error")
 
-    # Flash the logout message before redirecting to login
-    flash(flash_message, "success")  # Use success category
-
+    flash(flash_message, "success")
     log.info(f"Redirecting user '{user_id}' directly to login page.")
-    # --- MODIFIED REDIRECT ---
     return redirect(url_for("auth.login_route"))
-    # --- ------------------- ---
 
 
-# --- Intermediate Logged Out Route ---
+# --- Intermediate Logged Out Route (Keep existing) ---
 @bp.route("/logged-out")
 def logged_out_route():
     """Displays a confirmation page after logout before redirecting to login."""
     return render_template("logout_success.html", title="Logged Out")
+
+
+@bp.route("/reauth")
+@login_required  # Still require app login context conceptually, though CF intercepts first
+def reauth_route():
+    """
+    An uncached endpoint to trigger Cloudflare Access re-authentication.
+    Cloudflare intercepts this, and upon successful auth, redirects back.
+    This route just redirects to the main page if reached after auth.
+    """
+    log.info(
+        f"User '{current_user.id}' reached /reauth route (likely after Cloudflare auth). Redirecting to main."
+    )
+    # Redirect to the main application page
+    return redirect(url_for("main.index_route"))
+

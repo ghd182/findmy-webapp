@@ -1,6 +1,8 @@
-// app/static/sw.js
+// File: app/static/sw.js
+// Purpose: Service Worker for PWA caching and offline capabilities.
 
-const CACHE_NAME = 'findmy-cache-v14'; // <<< INCREMENT CACHE NAME
+// --- CACHE_NAME and urlsToCache (Keep existing) ---
+const CACHE_NAME = 'findmy-cache-v19'; // Consider incrementing if major SW logic changes
 const urlsToCache = [
     // Core App Shell (URLs remain the same)
     '/', // Cache the root app shell
@@ -13,7 +15,7 @@ const urlsToCache = [
     '/static/js/map.js',
     '/static/js/notifications.js',
     '/static/js/app.js',
-    '/static/js/scanner.js', // Include scanner JS
+    '/static/js/scanner.js',
 
     // Icons (URLs remain the same)
     '/static/icons/web-app-manifest-192x192.png',
@@ -28,10 +30,8 @@ const urlsToCache = [
     '/favicon.ico', // Served by Flask at root
 
     // Leaflet assets (URLs remain the same)
-    // Corrected paths assuming libs is under static
     '/static/libs/leaflet/leaflet.js',
     '/static/libs/leaflet/leaflet.css',
-    // Corrected image paths assuming styles/leaflet/images is under static
     '/static/styles/leaflet/images/marker-icon.png',
     '/static/styles/leaflet/images/marker-icon-2x.png',
     '/static/styles/leaflet/images/marker-shadow.png',
@@ -47,10 +47,10 @@ const urlsToCache = [
     // Material Color Utilities (local fallback)
     '/static/libs/material-color/material-color-utilities.esm.js',
     // Manifest (Served by public blueprint)
-    '/public/manifest.json', // <<< CORRECT PATH
+    '/public/manifest.json',
 ];
 
-// --- Install Event (Keep as is, but ensure paths are correct) ---
+// --- Install Event (Keep existing) ---
 self.addEventListener('install', event => {
     console.log(`[SW-${CACHE_NAME}] Install event started.`);
     event.waitUntil(
@@ -58,17 +58,15 @@ self.addEventListener('install', event => {
             .then(cache => {
                 console.log(`[SW-${CACHE_NAME}] Caching core assets... (${urlsToCache.length} items)`);
                 const cachePromises = urlsToCache.map(urlToCache => {
-                    // Ensure requests respect potential redirects during caching
                     return cache.add(new Request(urlToCache, { redirect: 'follow' })).catch(err => {
                         console.warn(`[SW-${CACHE_NAME}] Failed to cache on install: ${urlToCache}`, err);
-                        return null; // Don't fail install for optional assets
+                        return null;
                     });
                 });
                 return Promise.all(cachePromises);
             })
             .then(() => {
                 console.log(`[SW-${CACHE_NAME}] Core assets caching finished.`);
-                // Don't skip waiting here; let UI prompt for update.
             })
             .catch(error => {
                 console.error(`[SW-${CACHE_NAME}] Installation failed:`, error);
@@ -76,17 +74,15 @@ self.addEventListener('install', event => {
     );
 });
 
-// --- Activate Event (Keep as is) ---
+// --- Activate Event (Keep existing) ---
 self.addEventListener('activate', event => {
     console.log(`[SW-${CACHE_NAME}] Activate event started.`);
     event.waitUntil(
         (async () => {
-            // Client Claiming
             if (self.clients && typeof self.clients.claim === 'function') {
                 try { await self.clients.claim(); console.log(`[SW-${CACHE_NAME}] Clients claimed successfully.`); }
                 catch (err) { console.error(`[SW-${CACHE_NAME}] Error claiming clients:`, err); }
             }
-            // Cache Cleanup
             try {
                 const cacheNames = await caches.keys();
                 await Promise.all(
@@ -104,6 +100,7 @@ self.addEventListener('activate', event => {
     );
 });
 
+// --- notifyClientOfCloudflareAuth (Keep existing) ---
 async function notifyClientOfCloudflareAuth(failedUrl) {
     console.log('[SW] Attempting to notify client about Cloudflare Auth requirement.');
     const clients = await self.clients.matchAll({
@@ -129,39 +126,43 @@ self.addEventListener('fetch', event => {
     // --- 1. API Calls: Network Only (with Cloudflare Detection) ---
     if (url.pathname.startsWith('/api/')) {
         event.respondWith(
-            fetch(request).catch(async error => { // Make catch async
+            fetch(request).catch(async error => {
                 const isCorsFetchError = error instanceof TypeError && error.message.includes('Failed to fetch');
                 const isSameOriginRequest = url.origin === self.location.origin;
 
                 if (isCorsFetchError && isSameOriginRequest) {
                     console.warn(`[SW API Catch] CORS/Fetch error for same-origin API ${url.pathname}. Suspecting Cloudflare block.`);
-                    await notifyClientOfCloudflareAuth(url.href); // Notify the client page
-                    // Respond with 401 to signal auth issue clearly to the fetch call
+                    await notifyClientOfCloudflareAuth(url.href);
                     return new Response(JSON.stringify({
                         error: 'Authentication Required', code: 'CLOUDFLARE_AUTH_REQUIRED',
                         message: 'Access session may have expired. Please re-authenticate.'
                     }), { status: 401, headers: { 'Content-Type': 'application/json' } });
                 }
-                // Original fallback for other network errors
                 console.warn(`[SW API Catch] Other network error for API ${request.method} ${url.pathname}:`, error);
+                // For GET API requests, provide an offline JSON response
                 if (request.method === 'GET') {
                     return new Response(JSON.stringify({ error: 'Offline', message: 'Network connection unavailable.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
                 }
-                throw error; // Rethrow for non-GET or other errors
+                // For non-GET API requests, re-throw the error to let the browser handle it (e.g. show its own network error page)
+                // Or, if the app handles errors from API._fetch properly, this might be okay.
+                // However, respondWith *must* be called with a Response.
+                return new Response(JSON.stringify({ error: 'Network Error', message: 'Failed to perform action while offline.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
             })
         );
         return;
     }
 
-    // --- 2. Auth/Action Routes: Bypass SW (Keep) ---
-    if (url.pathname === '/logout' || url.pathname === '/login' || url.pathname === '/register' || url.pathname === '/manage_apple_creds') {
+    // --- 2. Auth/Action Routes: Bypass SW ---
+    const bypassedPaths = [
+        '/logout', '/login', '/register', '/manage_apple_creds',
+        '/auth/logout', '/auth/login', '/auth/register', '/auth/reauth'
+    ];
+    if (bypassedPaths.includes(url.pathname)) {
         console.log(`[SW Fetch] Bypassing SW for critical route: ${url.pathname}`);
         return; // Let browser handle directly
     }
 
-    // --- 3. Static Assets: Stale-While-Revalidate (Simplified Error Handling) ---
-    // Let the browser handle CORS errors for static assets more directly initially.
-    // The main app.js fallback loader will catch the M3 utils error.
+    // --- 3. Static Assets: Stale-While-Revalidate ---
     if (request.method === 'GET' && (url.pathname.startsWith('/static/') || url.pathname === '/favicon.ico' || url.pathname === '/public/manifest.json')) {
         event.respondWith(
             caches.open(CACHE_NAME).then(async (cache) => {
@@ -170,28 +171,25 @@ self.addEventListener('fetch', event => {
                     if (networkResponse && networkResponse.ok) {
                         cache.put(request, networkResponse.clone());
                     }
-                    // Don't log *every* non-ok status as a warning here if it might be CF redirect
                     return networkResponse;
                 }).catch(error => {
-                    // Log the fetch failure but don't intercept specifically for Cloudflare here.
-                    // Let the main page script handle failures for critical JS like M3 utils.
                     console.warn(`[SW Static Catch] SWR: Network fetch failed for ${url.pathname}:`, error);
-                    throw error; // Rethrow to trigger cache fallback or browser error
+                    // If network fails for static asset, and we have it in cache, return cached. Otherwise, error.
+                    if (cachedResponse) return cachedResponse;
+                    throw error; // Will be caught by the outer .catch
                 });
-
                 return cachedResponse || networkFetchPromise;
             }).catch(error => {
                 console.error(`[SW Static] Final error (cache or network) for ${request.url}:`, error);
-                // Return generic 404 if both cache and network fail.
-                return new Response(null, { status: 404 });
+                // Provide a generic 404 for missing static assets if not in cache and network fails
+                return new Response("Static asset not found.", { status: 404, headers: { 'Content-Type': 'text/plain' } });
             })
         );
-        return; // Handled static asset
+        return;
     }
 
-    // --- 4. HTML Navigation Requests (REVISED LOGIC) ---
+    // --- 4. HTML Navigation Requests ---
     if (request.mode === 'navigate' && request.method === 'GET' && url.origin === self.location.origin) {
-
         if (url.pathname === '/') {
             // Network First for Root App Shell
             console.log(`[SW Fetch] Network First (Root Shell Nav): ${url.pathname}`);
@@ -199,51 +197,60 @@ self.addEventListener('fetch', event => {
                 fetch(request)
                     .then(response => {
                         if (response && response.ok && response.type === 'basic') {
-                            // Cache successful response
                             const responseToCache = response.clone();
                             caches.open(CACHE_NAME).then(cache => {
                                 cache.put(new Request('/'), responseToCache);
                                 console.log(`[SW Fetch] Cached root '/' response.`);
                             });
-                            return response; // Serve fresh response
+                            return response;
                         }
-                        // Network error/bad response, try cache (don't throw error yet)
                         console.warn(`[SW Fetch] Network First: Bad network response for root shell (${response?.status}). Trying cache...`);
                         return caches.match(new Request('/'));
                     })
                     .catch(async (error) => {
-                        // Network failed completely, try cache
                         console.warn(`[SW Fetch] Network First: Network failed for root shell. Serving '/' from cache. Error:`, error);
                         const cachedResponse = await caches.match(new Request('/'));
                         if (cachedResponse) {
-                            return cachedResponse; // Serve cached version
+                            return cachedResponse;
                         } else {
-                            // Network failed AND cache miss - CRITICAL FAILURE
-                            console.error(`[SW Fetch] Network First: Network failed and root '/' not in cache.`);
-                            // *** Let the browser handle the failure ***
-                            // Re-throwing the original network error is often best here.
-                            // This allows the client-side JS fetch (if any part loaded)
-                            // or the browser's default offline page to potentially show.
-                            throw error;
-                            // ---- OLD response that crashed ----
-                            // return new Response("Network error and page not cached.", { status: 503, statusText: "Service Unavailable" });
-                            // ---- ------------------------- ----
+                            console.error(`[SW Fetch] Network First: Network failed and root '/' not in cache. Serving fallback HTML.`);
+                            // Provide a very basic fallback HTML response
+                            return new Response(
+                                `<!DOCTYPE html>
+                                 <html>
+                                   <head><title>Offline</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+                                   <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+                                     <h1>Network Connection Error</h1>
+                                     <p>The app could not be loaded. Please check your internet connection and try again.</p>
+                                     <p><small>Failed to fetch: ${url.pathname}</small></p>
+                                   </body>
+                                 </html>`,
+                                { headers: { 'Content-Type': 'text/html' }, status: 503 }
+                            );
                         }
                     })
             );
-        } else { // Other HTML pages (like /public/shared/*) - Network Only
+        } else { // Other HTML pages (like /public/shared/*) - Network Only, with fallback
             console.log(`[SW Fetch] Network Only (Other HTML Nav): ${url.pathname}`);
-            // Let browser handle fetch and errors directly
-            event.respondWith(fetch(request));
+            event.respondWith(
+                fetch(request).catch(() => {
+                    // Basic fallback for other HTML pages if network fails
+                    return new Response(
+                        `<!DOCTYPE html><html><head><title>Page Offline</title></head><body><h1>Page Unavailable</h1><p>This page could not be loaded. Please check your connection.</p></body></html>`,
+                        { headers: { 'Content-Type': 'text/html' }, status: 503 }
+                    );
+                })
+            );
         }
         return; // Handled navigation
     }
 
-    // --- 5. Default: Let the browser handle any other requests ---
+    // --- 5. Default: Let the browser handle ---
     // console.log(`[SW Fetch] Default browser handling: ${url.pathname}`);
+    // For any other requests not handled, don't call event.respondWith to let browser handle normally.
 });
 
-// --- Push Event Listener (Keep as is) ---
+// --- Push Event Listener (Keep existing) ---
 self.addEventListener('push', event => {
     console.log('[SW] Push Received.');
     let payload = {};
@@ -266,7 +273,7 @@ self.addEventListener('push', event => {
     event.waitUntil(notificationPromise);
 });
 
-// --- Notification Click Listener (Keep as is) ---
+// --- Notification Click Listener (Keep existing) ---
 self.addEventListener('notificationclick', event => {
     const clickedNotification = event.notification;
     const notificationData = clickedNotification.data;
@@ -280,7 +287,7 @@ self.addEventListener('notificationclick', event => {
     event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => { let focusedClient = null; for (const client of clientList) { if (new URL(client.url).pathname === '/' && 'focus' in client) { focusedClient = client; break; } } if (focusedClient) { return focusedClient.focus().then(() => { if (focusMessage) focusedClient.postMessage(focusMessage); }).catch(focusErr => { console.error('[SW Click] Error focusing client:', focusErr); if (clients.openWindow) { console.log('[SW Click] Focusing failed. Opening new window:', urlToOpen); return clients.openWindow(urlToOpen); } }); } else { if (clients.openWindow) { console.log('[SW Click] No matching client found. Opening new window:', urlToOpen); return clients.openWindow(urlToOpen); } else { console.warn('[SW Click] clients.openWindow() is not supported.'); } } }).catch(err => { console.error('[SW Click] Error handling notification click:', err); }));
 });
 
-// --- Message Listener for SKIP_WAITING (Keep as is) ---
+// --- Message Listener for SKIP_WAITING (Keep existing) ---
 self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'SKIP_WAITING') {
         console.log(`[SW-${CACHE_NAME}] Received SKIP_WAITING message. Activating new worker...`);

@@ -1,4 +1,5 @@
-# app/services/user_data_service.py
+# File: app/services/user_data_service.py
+
 import os
 import json
 import logging
@@ -7,60 +8,71 @@ import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, Set, List
 from datetime import datetime, timezone, timedelta
+import time
 from werkzeug.security import generate_password_hash
 import uuid
+import base64
 
-from findmy.reports import AppleAccount # Import AppleAccount
+from app import db
+from app.models import (
+    User,
+    AppleCredentialState,
+    Device,
+    Geofence,
+    PushSubscription,
+    NotificationHistory,
+    Share,
+    GeofenceDeviceStatus,
+    NotificationCooldown,
+    device_geofence_link,
+)
 
-
-from app.utils.json_utils import load_json_file, save_json_atomic
+from app.utils.json_utils import (
+    load_json_file,
+    save_json_atomic,
+)
 from app.utils.helpers import (
     encrypt_password,
     decrypt_password,
     getDefaultColorForId,
     generate_device_icon_svg,
-    DEFAULT_SOURCE_COLOR,  # Import the default color constant
+    DEFAULT_SOURCE_COLOR,
 )
+from app.utils.migration_utils import _parse_old_timestamp
 
 log = logging.getLogger(__name__)
 
 
 class UserDataService:
     """
-    Handles loading and saving of user-specific data files (JSON).
-    Encapsulates file paths, locking, and basic validation.
+    Handles loading and saving of user-specific data, now primarily via the database.
     """
 
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initializes the service with application configuration.
-
-        Args:
-            config: The Flask app config dictionary.
-        """
         self.config = config
         self.data_dir = Path(config["DATA_DIRECTORY"])
-        self.users_file = Path(config["USERS_FILE"])
-        self.file_locks = config["FILE_LOCKS"]  # Use locks from config
-
-        # Ensure base data directory exists
+        self.file_locks = {
+            k: v
+            for k, v in config["FILE_LOCKS"].items()
+            if k in [config.get("USER_CACHE_FILENAME")]
+        }
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        log.debug(f"UserDataService initialized. Data directory: {self.data_dir}")
-
-    # --- Path Helpers ---
+        log.debug(
+            f"UserDataService (DB Mode) initialized. Data directory: {self.data_dir}"
+        )
 
     def _get_user_data_dir(self, user_id: str) -> Optional[Path]:
-        """Gets the Path object for a user's data directory, creating it if needed."""
         if (
             not user_id
             or not isinstance(user_id, str)
             or "/" in user_id
-            or ".." in user_id  # Prevent path traversal
+            or ".." in user_id
             or user_id.startswith(".")
         ):
-            log.error(f"Attempted to get data dir for invalid user ID: '{user_id}'")
-            return None  # Indicate failure
-
+            log.error(
+                f"Attempted to get user directory for invalid user_id: '{user_id}'"
+            )
+            return None
         user_dir = self.data_dir / user_id
         try:
             user_dir.mkdir(parents=True, exist_ok=True)
@@ -70,1281 +82,1064 @@ class UserDataService:
             return None
 
     def _get_user_file_path(self, user_id: str, filename: str) -> Optional[Path]:
-        """Constructs the full path to a user-specific file."""
         user_dir = self._get_user_data_dir(user_id)
         if not user_dir:
-            return None  # Failed to get/create user directory
-
-        # Basic check on filename
-        if "/" in filename or filename.startswith("."):
+            return None
+        if (
+            "/" in filename
+            or ".." in filename
+            or filename.startswith(".")
+            or not filename
+        ):
             log.error(
                 f"Attempted to get file path for invalid filename: '{filename}' for user '{user_id}'"
             )
             return None
-
         return user_dir / filename
 
-    # --- Global User Management (users.json) ---
-
-    def load_users(self) -> Dict[str, Dict[str, Any]]:
-        """Loads the main user database (users.json)."""
-        users_lock = self.file_locks.get("users")
-        if not users_lock:
-            log.error("Lock for 'users.json' not found in configuration.")
-            return {}
-
-        users_data = load_json_file(self.users_file, users_lock)
-
-        if users_data is None:
-            return {}
-        elif not isinstance(users_data, dict):
-            log.error(
-                f"{self.users_file.name} has invalid format (not a dictionary). Returning empty."
-            )
-            return {}
-
-        log.info(f"Loaded {len(users_data)} users from {self.users_file.name}")
-        return users_data
-
-    def save_users(self, users_data: Dict[str, Dict[str, Any]]):
-        """Saves the main user database (users.json)."""
-        users_lock = self.file_locks.get("users")
-        if not users_lock:
-            log.error("Lock for 'users.json' not found in configuration. Cannot save.")
-            raise RuntimeError("User lock configuration missing.")
-        if not isinstance(users_data, dict):
-            log.error(
-                f"Attempted to save non-dictionary data to {self.users_file.name}. Aborting save."
-            )
-            raise TypeError("users_data must be a dictionary.")
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        log.debug(f"Querying DB for user by username: {username}")
         try:
-            save_json_atomic(self.users_file, users_data, users_lock, indent=4)
-            log.info(f"Saved {len(users_data)} users to {self.users_file.name}")
+            user = db.session.execute(
+                db.select(User).filter_by(username=username)
+            ).scalar_one_or_none()
+            return user
         except Exception as e:
-            log.error(f"Failed to save users data: {e}")
-            raise
+            log.error(f"Database error getting user '{username}': {e}")
+            return None
 
-    def load_single_user(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Loads data for a single user from users.json."""
-        all_users = self.load_users()
-        return all_users.get(user_id)
+    def get_user_by_email(self, email: str) -> Optional[User]:
+        log.debug(f"Querying DB for user by email: {email}")
+        try:
+            user = db.session.execute(
+                db.select(User).filter_by(email=email.lower())
+            ).scalar_one_or_none()
+            return user
+        except Exception as e:
+            log.error(f"Database error getting user by email '{email}': {e}")
+            return None
 
-    # --- NEW: User Preferences ---
+    def get_all_usernames(self) -> List[str]:
+        log.debug("Querying DB for all usernames")
+        try:
+            usernames = db.session.execute(db.select(User.username)).scalars().all()
+            return list(usernames)
+        except Exception as e:
+            log.error(f"Database error getting all usernames: {e}")
+            return []
+
+    def create_user(self, username: str, email: str, password: str) -> Optional[User]:
+        log.info(f"Attempting to create user '{username}' ({email}) in DB")
+        if not username or not email or not password:
+            log.error("Create user failed: Missing username, email, or password.")
+            return None
+        if self.get_user_by_username(username):
+            log.warning(f"Create user failed: Username '{username}' already exists.")
+            return None
+        if self.get_user_by_email(email):
+            log.warning(f"Create user failed: Email '{email}' already exists.")
+            return None
+        user_dir = self._get_user_data_dir(username)
+        if not user_dir:
+            log.error(
+                f"Create user failed: Could not create data directory for '{username}'."
+            )
+            return None
+        try:
+            new_user = User(username=username.strip(), email=email.strip().lower())
+            new_user.set_password(password)
+            new_user.theme_color = getDefaultColorForId(username)
+            db.session.add(new_user)
+            db.session.commit()
+            log.info(f"Successfully created user '{username}' in database.")
+            return new_user
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"Database error creating user '{username}': {e}")
+            return None
+
+    def delete_user_data(self, user_id: str) -> bool:
+        log.warning(
+            f"Initiating deletion for user '{user_id}' from database. This is irreversible."
+        )
+        user = self.get_user_by_username(user_id)
+        if not user:
+            log.warning(f"Delete failed: User '{user_id}' not found in database.")
+            return False
+        try:
+            log.info(f"Deleting user object '{user_id}' and cascading deletes...")
+            db.session.delete(user)
+            db.session.commit()
+            log.info(
+                f"Successfully deleted user '{user_id}' and associated data from database."
+            )
+            user_dir = self.data_dir / user_id
+            if user_dir.exists() and user_dir.is_dir():
+                try:
+                    shutil.rmtree(user_dir)
+                    log.info(
+                        f"Successfully deleted data directory {user_dir} for deleted user '{user_id}'."
+                    )
+                except OSError as e:
+                    log.error(
+                        f"Failed to delete directory {user_dir} for deleted user '{user_id}': {e}"
+                    )
+                except Exception as e:
+                    log.exception(
+                        f"Unexpected error deleting directory {user_dir} for deleted user '{user_id}'"
+                    )
+            else:
+                log.debug(
+                    f"Data directory {user_dir} not found for deleted user '{user_id}'."
+                )
+            return True
+        except Exception as e:
+            db.session.rollback()
+            log.exception(f"Database error deleting user '{user_id}': {e}")
+            return False
+
     def load_user_preferences(self, user_id: str) -> Dict[str, str]:
-        """Loads theme preferences for a user, returning defaults if not found."""
-        user_data = self.load_single_user(user_id)
+        user = self.get_user_by_username(user_id)
         default_prefs = {
             "theme_mode": "system",
-            "theme_color": DEFAULT_SOURCE_COLOR,  # Use default from helpers
+            "theme_color": DEFAULT_SOURCE_COLOR,
         }
-        if not user_data:
+        if not user:
+            log.warning(
+                f"Preferences requested for non-existent user '{user_id}'. Returning defaults."
+            )
             return default_prefs
-
-        # Return saved prefs or defaults if specific keys are missing
         return {
-            "theme_mode": user_data.get("theme_mode", default_prefs["theme_mode"]),
-            "theme_color": user_data.get("theme_color", default_prefs["theme_color"]),
+            "theme_mode": user.theme_mode or default_prefs["theme_mode"],
+            "theme_color": user.theme_color or default_prefs["theme_color"],
         }
 
     def save_user_preferences(self, user_id: str, theme_mode: str, theme_color: str):
-        """Saves theme preferences for a user into users.json."""
-        if not user_id:
-            log.error("Cannot save preferences for empty user ID.")
-            raise ValueError("User ID cannot be empty.")
-
-        # --- START: Validation (outside lock) ---
+        user = self.get_user_by_username(user_id)
+        if not user:
+            log.error(f"Cannot save preferences: User '{user_id}' not found.")
+            raise ValueError(f"User '{user_id}' not found.")
         valid_modes = ["system", "light", "dark"]
         if theme_mode not in valid_modes:
-            log.warning(
-                f"Invalid theme mode '{theme_mode}' for user '{user_id}'. Using 'system'."
-            )
             theme_mode = "system"
         if not theme_color or not theme_color.startswith("#") or len(theme_color) != 7:
-            log.warning(
-                f"Invalid theme color '{theme_color}' for user '{user_id}'. Using default."
-            )
             theme_color = DEFAULT_SOURCE_COLOR
-        # --- END: Validation ---
-
-        users_lock = self.file_locks.get("users")
-        if not users_lock:
-            log.error("Lock for 'users.json' not found. Cannot save preferences.")
-            raise RuntimeError("User lock configuration missing.")
-
-        # --- START: Modified Lock Handling ---
-        MAX_RETRIES = 3
-        RETRY_DELAY = 0.1  # seconds
-        for attempt in range(MAX_RETRIES):
-            # 1. Load data *without* holding the lock for modification
-            #    (load_users handles its own locking for the read)
-            all_users = self.load_users()  # Read the latest data
-
-            if user_id not in all_users:
-                log.error(
-                    f"User '{user_id}' not found in users.json during save attempt {attempt + 1}. Cannot save preferences."
-                )
-                raise ValueError(f"User '{user_id}' not found.")
-
-            # 2. Modify the data in memory
-            original_mode = all_users[user_id].get("theme_mode")
-            original_color = all_users[user_id].get("theme_color")
-            all_users[user_id]["theme_mode"] = theme_mode
-            all_users[user_id]["theme_color"] = theme_color
-
-            # 3. Acquire lock ONLY for the save operation
-            with users_lock:
-                # 4. *Re-read* the file inside the lock to check for conflicts
-                try:
-                    # Use the locked load_json_file directly for efficiency
-                    current_data_in_file = load_json_file(
-                        self.users_file, threading.Lock()
-                    )  # Dummy lock as outer lock is held
-                    if (
-                        current_data_in_file is None
-                    ):  # File deleted or corrupted between load and lock?
-                        log.error(
-                            f"Users file {self.users_file} became inaccessible during save_user_preferences. Aborting."
-                        )
-                        raise IOError("Users file became inaccessible during save.")
-
-                    # Check if the specific user's data changed concurrently
-                    current_user_data_in_file = current_data_in_file.get(user_id, {})
-                    if (
-                        current_user_data_in_file.get("theme_mode") != original_mode
-                        or current_user_data_in_file.get("theme_color")
-                        != original_color
-                    ):
-                        log.warning(
-                            f"Conflict detected saving preferences for user '{user_id}'. Retrying (attempt {attempt + 1}/{MAX_RETRIES})..."
-                        )
-                        # Release lock implicitly by exiting 'with', loop will retry
-                        if attempt < MAX_RETRIES - 1:
-                            import time
-
-                            time.sleep(
-                                RETRY_DELAY * (attempt + 1)
-                            )  # Exponential backoff basic
-                            continue  # Go to next retry iteration
-                        else:
-                            log.error(
-                                f"Failed to save preferences for user '{user_id}' after {MAX_RETRIES} attempts due to conflicts."
-                            )
-                            raise RuntimeError(
-                                "Failed to save preferences due to concurrent modification."
-                            )
-
-                    # 5. If no conflict, save the modified data (atomic save)
-                    save_json_atomic(
-                        self.users_file, all_users, threading.Lock(), indent=4
-                    )  # Dummy lock as outer lock is held
-                    log.info(
-                        f"Saved preferences for user '{user_id}': Mode={theme_mode}, Color={theme_color}"
-                    )
-                    return  # Success, exit function
-
-                except Exception as e:
-                    log.exception(
-                        f"Error during locked save/check in save_user_preferences (attempt {attempt + 1})"
-                    )
-                    # Depending on error, might want to retry or raise immediately
-                    if attempt < MAX_RETRIES - 1:
-                        import time
-
-                        time.sleep(RETRY_DELAY * (attempt + 1))
-                        continue
-                    else:
-                        raise  # Re-raise after final attempt
-
-        # Should not be reached if successful, only if retries failed
-        log.error(f"Exhausted retries saving preferences for {user_id}")
-        raise RuntimeError("Failed to save preferences after multiple retries.")
-
-    # --- Apple Credentials ---
+        try:
+            user.theme_mode = theme_mode
+            user.theme_color = theme_color
+            db.session.commit()
+            log.info(
+                f"Saved DB preferences for user '{user_id}': Mode={theme_mode}, Color={theme_color}"
+            )
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"Database error saving preferences for '{user_id}': {e}")
+            raise RuntimeError("Failed to save preferences due to database error.")
 
     def load_apple_credentials_and_state(
         self, user_id: str
     ) -> Tuple[Optional[str], Optional[str], Optional[Dict]]:
-        """
-        Loads Apple ID, (decrypted) password, and the full account state
-        from the user's credential file.
-
-        Returns:
-            Tuple (apple_id, decrypted_password, account_state_dict) or (None, None, None)
-        """
-        creds_filename = self.config["USER_APPLE_CREDS_FILENAME"]
-        creds_file = self._get_user_file_path(user_id, creds_filename)
-        if not creds_file:
-            return None, None, None
-        lock = self.file_locks.get(creds_filename)
-        if not lock:
-            log.error(f"Lock for '{creds_filename}' not found for user '{user_id}'.")
-            return None, None, None
-
-        creds_data = load_json_file(creds_file, lock)
-        if creds_data is None:
-            log.debug(f"No Apple credentials/state file found for user '{user_id}'.")
-            return None, None, None
-
-        apple_id = creds_data.get("apple_id")
-        encrypted_password = creds_data.get("apple_password_encrypted")
-        account_state = creds_data.get("account_state") # Load the full state
-
-        if not apple_id or not encrypted_password:
-            # If basic creds are missing, state is irrelevant
-            log.warning(
-                f"Incomplete Apple credentials found for user '{user_id}'."
-            )
-            return apple_id or None, None, None
-
-        # Decrypt password (keep existing logic)
-        password = decrypt_password(encrypted_password, self.config)
-        if not password:
-            log.error(
-                f"Password decryption failed for user '{user_id}'. Check FERNET_KEY or stored format."
-            )
-            return apple_id, None, account_state # Return state even if password decrypt fails
-
-        if not isinstance(account_state, dict):
-             log.warning(f"Account state for user '{user_id}' is missing or not a dict. Full functionality might be limited.")
-             account_state = None # Treat missing/invalid state as None
-
-        log.debug(f"Loaded Apple credentials and state for user '{user_id}'.")
-        return apple_id, password, account_state
-
-    def save_apple_credentials_and_state(self, user_id: str, apple_id: str, apple_password: str, account_export_data: Dict):
-        """
-        Saves Apple ID (encrypted), password (encrypted), and the full
-        account state dict from account.export() to the user's credential file.
-        """
-        if not user_id or not apple_id or not apple_password or not account_export_data:
-            raise ValueError("Missing required arguments for saving Apple credentials and state.")
-        if not isinstance(account_export_data, dict):
-             raise TypeError("account_export_data must be a dictionary.")
-
-        creds_filename = self.config["USER_APPLE_CREDS_FILENAME"]
-        creds_file = self._get_user_file_path(user_id, creds_filename)
-        if not creds_file:
-            raise IOError(f"Could not determine credential file path for user '{user_id}'.")
-        lock = self.file_locks.get(creds_filename)
-        if not lock:
-            raise RuntimeError(f"Apple credentials lock configuration missing for user '{user_id}'.")
-
-        # Encrypt password (keep existing logic)
-        encrypted_password = encrypt_password(apple_password, self.config)
-        if not encrypted_password and apple_password: # Only error if password wasn't empty
-            raise ValueError("Password encryption failed.")
-
-        # Prepare data to save
-        data_to_save = {
-            "apple_id": apple_id,
-            "apple_password_encrypted": encrypted_password,
-            "account_state": account_export_data, # Store the full exported state
-            "last_updated": datetime.now(timezone.utc).isoformat(),
-        }
-
+        log.debug(f"Loading Apple creds/state from DB for user '{user_id}'")
         try:
-            # Use save_json_atomic (ensure it handles Path objects)
-            save_json_atomic(creds_file, data_to_save, lock, indent=2) # Use indent=2 for state file
-            log.info(f"Saved Apple credentials and state to {creds_file} for user '{user_id}'.")
+            credential_state = db.session.execute(
+                db.select(AppleCredentialState).filter_by(user_username=user_id)
+            ).scalar_one_or_none()
+            if not credential_state:
+                log.debug(
+                    f"No Apple credentials/state found in DB for user '{user_id}'."
+                )
+                return None, None, None
+            apple_id = credential_state.apple_id
+            encrypted_password = credential_state.apple_password_encrypted
+            account_state = credential_state.get_account_state()
+            if not apple_id or not encrypted_password:
+                log.warning(f"Incomplete Apple credentials in DB for user '{user_id}'.")
+                return apple_id or None, None, account_state
+            password = decrypt_password(encrypted_password, self.config)
+            if not password:
+                log.error(f"Password decryption failed for user '{user_id}' from DB.")
+                return apple_id, None, account_state
+            log.debug(
+                f"Loaded Apple credentials and state from DB for user '{user_id}'."
+            )
+            return apple_id, password, account_state
         except Exception as e:
-            log.error(f"Failed to save Apple credentials and state for user '{user_id}': {e}")
+            log.error(
+                f"Database error loading Apple credentials/state for '{user_id}': {e}"
+            )
+            return None, None, None
+
+    def save_apple_credentials_and_state(
+        self,
+        user_id: str,
+        apple_id: str,
+        apple_password: str,
+        account_export_data: Dict,
+    ):
+        log.info(f"Saving Apple creds/state to DB for user '{user_id}'")
+        if not user_id or not apple_id or not apple_password or not account_export_data:
+            raise ValueError(
+                "Missing required arguments for saving Apple credentials and state."
+            )
+        try:
+            user = self.get_user_by_username(user_id)
+            if not user:
+                raise ValueError(
+                    f"Cannot save credentials, user '{user_id}' does not exist."
+                )
+            credential_state = db.session.execute(
+                db.select(AppleCredentialState).filter_by(user_username=user_id)
+            ).scalar_one_or_none()
+            if not credential_state:
+                log.debug(
+                    f"Creating new AppleCredentialState record for user '{user_id}'."
+                )
+                credential_state = AppleCredentialState(user_username=user_id)
+                db.session.add(credential_state)
+            encrypted_password = encrypt_password(apple_password, self.config)
+            if not encrypted_password and apple_password:
+                raise ValueError("Password encryption failed.")
+            credential_state.apple_id = apple_id
+            credential_state.apple_password_encrypted = encrypted_password
+            credential_state.set_account_state(account_export_data)
+            credential_state.last_updated = datetime.now(timezone.utc)
+            db.session.commit()
+            log.info(
+                f"Successfully saved Apple credentials and state to DB for user '{user_id}'."
+            )
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"Database error saving Apple credentials/state for '{user_id}': {e}"
+            )
             raise
 
     def clear_apple_credentials(self, user_id: str):
-        """Removes the Apple credentials/state file for a user."""
-        # This function remains largely the same, just deletes the combined file
+        log.info(f"Clearing Apple creds/state from DB for user '{user_id}'")
         if not user_id:
             log.error("clear_apple_credentials called without user_id")
             return
-        creds_filename = self.config["USER_APPLE_CREDS_FILENAME"]
-        creds_file = self._get_user_file_path(user_id, creds_filename)
-        if not creds_file:
-            log.warning(f"Could not get creds file path for clear for user '{user_id}'")
-            return
-        lock = self.file_locks.get(creds_filename)
-        if not lock:
-            log.error(f"Lock for '{creds_filename}' not found for user '{user_id}'.")
-            return
-        with lock:
-            try:
-                if creds_file.exists():
-                    os.remove(creds_file)
-                    log.info(f"Removed Apple credentials/state file for user '{user_id}'.")
-                else:
-                    log.debug(f"No Apple credentials/state file to remove for user '{user_id}'.")
-            except OSError as e:
-                log.error(f"Failed to remove {creds_file} for user '{user_id}': {e}")
+        try:
+            credential_state = db.session.execute(
+                db.select(AppleCredentialState).filter_by(user_username=user_id)
+            ).scalar_one_or_none()
+            if credential_state:
+                db.session.delete(credential_state)
+                db.session.commit()
+                log.info(
+                    f"Removed Apple credentials/state record from DB for user '{user_id}'."
+                )
+            else:
+                log.debug(
+                    f"No Apple credentials/state record found in DB to remove for user '{user_id}'."
+                )
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"Database error clearing Apple credentials/state for '{user_id}': {e}"
+            )
 
     def user_has_apple_credentials(self, user_id: str) -> bool:
-        """Checks if the credentials/state file exists and contains essential data."""
-        apple_id, _, account_state = self.load_apple_credentials_and_state(user_id)
-        # Check if both Apple ID and some account state exist
-        has_creds = bool(apple_id)
-        has_state = isinstance(account_state, dict) and bool(account_state) # Basic check if state dict exists and is not empty
-        log.debug(f"Cred check for user {user_id}: has_creds={has_creds}, has_state={has_state}")
-        # Require both ID and state for the user to be considered fully configured.
-        # Adjust this logic if you only want to check for ID initially.
-        return has_creds and has_state
-
-    # --- Devices Config ---
+        log.debug(f"Checking DB for Apple creds/state for user '{user_id}'")
+        try:
+            query = db.select(
+                AppleCredentialState.apple_id, AppleCredentialState.account_state_json
+            ).filter_by(user_username=user_id)
+            result = db.session.execute(query).first()
+            if result:
+                apple_id, state_json = result
+                has_creds = bool(apple_id)
+                has_state = (
+                    bool(state_json)
+                    and state_json.strip() != "{}"
+                    and state_json.strip() != "null"
+                )
+                log.debug(
+                    f"DB Cred check for user {user_id}: has_creds={has_creds}, has_state={has_state}"
+                )
+                return has_creds
+            else:
+                log.debug(
+                    f"No AppleCredentialState record found in DB for user '{user_id}'."
+                )
+                return False
+        except Exception as e:
+            log.error(f"Database error checking Apple creds/state for '{user_id}': {e}")
+            return False
 
     def load_devices_config(self, user_id: str) -> Dict[str, Dict[str, Any]]:
-        """
-        Loads and validates the devices configuration for a user.
-        Merges devices found from .plist/.keys files if they are missing from devices.json.
-        """
-        devices_filename = self.config["USER_DEVICES_FILENAME"]
-        devices_file = self._get_user_file_path(user_id, devices_filename)
-        if not devices_file:
+        """Loads devices configuration for a user, merging file-based devices if needed."""
+        log.debug(
+            f"[UDS LoadDevCfg] Loading devices config from DB for user '{user_id}'"
+        )
+        config_data = {}
+        try:
+            log.debug(f"[UDS LoadDevCfg] Expiring session objects for user '{user_id}'")
+            user_devices_to_expire = (
+                db.session.execute(db.select(Device).filter_by(user_username=user_id))
+                .scalars()
+                .all()
+            )
+            user_geofences_to_expire = (
+                db.session.execute(db.select(Geofence).filter_by(user_username=user_id))
+                .scalars()
+                .all()
+            )
+            for obj in user_devices_to_expire + user_geofences_to_expire:
+                if obj in db.session:
+                    db.session.expire(obj)
+            log.debug(
+                f"Expired {len(user_devices_to_expire)} devices and {len(user_geofences_to_expire)} geofences from session."
+            )
+
+            initial_devices_in_db_query = db.select(Device.id).filter_by(
+                user_username=user_id
+            )
+            existing_db_ids_for_merge = set(
+                db.session.execute(initial_devices_in_db_query).scalars().all()
+            )
+            log.debug(
+                f"[UDS LoadDevCfg] Found {len(existing_db_ids_for_merge)} existing DB IDs for merge check: {existing_db_ids_for_merge}"
+            )
+
+            self._merge_file_devices_to_db(user_id, existing_db_ids_for_merge)
+
+            final_devices_query = db.select(Device).filter_by(user_username=user_id)
+            devices_in_db = {
+                dev.id: dev for dev in db.session.execute(final_devices_query).scalars()
+            }
+            log.info(
+                f"[UDS LoadDevCfg] Final device count after merge: {len(devices_in_db)} for user '{user_id}'."
+            )
+
+            all_user_geofences_map = {
+                gf.id: gf
+                for gf in db.session.execute(
+                    db.select(Geofence).filter_by(user_username=user_id)
+                ).scalars()
+            }
+            log.debug(
+                f"[UDS LoadDevCfg] Loaded {len(all_user_geofences_map)} geofence definitions for user '{user_id}'."
+            )
+
+            for (
+                device_id,
+                device_obj,
+            ) in devices_in_db.items():
+                linked_geofences_data = []
+                try:
+                    link_details_query = db.select(
+                        device_geofence_link.c.geofence_id,
+                        device_geofence_link.c.notify_entry,
+                        device_geofence_link.c.notify_exit,
+                    ).where(device_geofence_link.c.device_id == device_obj.id)
+                    link_details_result = db.session.execute(link_details_query).all()
+
+                    for gf_id_from_link, entry_flag, exit_flag in link_details_result:
+                        gf_definition = all_user_geofences_map.get(gf_id_from_link)
+                        if gf_definition:
+                            linked_geofences_data.append(
+                                {
+                                    "id": gf_id_from_link,
+                                    "name": gf_definition.name,
+                                    "lat": gf_definition.latitude,
+                                    "lng": gf_definition.longitude,
+                                    "radius": gf_definition.radius,
+                                    "notify_on_entry": bool(entry_flag),
+                                    "notify_on_exit": bool(exit_flag),
+                                }
+                            )
+                        else:
+                            log.warning(
+                                f"[UDS LoadDevCfg] Geofence definition for link GF {gf_id_from_link} (Device {device_obj.id}) not found."
+                            )
+                except Exception as e:
+                    log.error(
+                        f"[UDS LoadDevCfg] Error loading linked geofences for device {device_obj.id}: {e}",
+                        exc_info=True,
+                    )
+
+                linked_geofences_data.sort(key=lambda x: x.get("name", "").lower())
+                final_color = device_obj.color or getDefaultColorForId(device_obj.id)
+                svg_icon = None
+                try:
+                    svg_icon = generate_device_icon_svg(
+                        device_obj.label or "❓", final_color
+                    )
+                except Exception as svg_err:
+                    log.error(
+                        f"[UDS LoadDevCfg] Error generating SVG for device {device_obj.id}: {svg_err}"
+                    )
+
+                retrieved_ts_obj = device_obj.last_seen_local
+                retrieved_ts_iso = None
+                if retrieved_ts_obj:
+                    log.debug(
+                        f"[UDS LoadDevCfg] Retrieved device.last_seen_local for {device_id}: {retrieved_ts_obj} (TZInfo: {retrieved_ts_obj.tzinfo})"
+                    )
+                    if retrieved_ts_obj.tzinfo is None:
+                        log.warning(
+                            f"[UDS LoadDevCfg] Retrieved timestamp for {device_id} is naive! Assuming UTC."
+                        )
+                        retrieved_ts_utc = retrieved_ts_obj.replace(tzinfo=timezone.utc)
+                    else:
+                        retrieved_ts_utc = retrieved_ts_obj.astimezone(timezone.utc)
+                    retrieved_ts_iso = retrieved_ts_utc.isoformat()
+                    log.debug(
+                        f"[UDS LoadDevCfg] Formatted last_seen_local for {device_id} as ISO string: {retrieved_ts_iso}"
+                    )
+                else:
+                    log.debug(
+                        f"[UDS LoadDevCfg] No last_seen_local found in DB for {device_id}."
+                    )
+
+                config_data[device_obj.id] = {
+                    "id": device_obj.id,
+                    "name": device_obj.name or device_obj.id,
+                    "label": device_obj.label or "❓",
+                    "color": final_color,
+                    "model": device_obj.model or "Accessory/Tag",
+                    "icon": device_obj.icon or "tag",
+                    "svg_icon": svg_icon,
+                    "linked_geofences": linked_geofences_data,
+                    "last_battery_status": device_obj.last_battery_status,
+                    "last_seen_local": retrieved_ts_iso,
+                }
+        except Exception as e:
+            log.error(
+                f"[UDS LoadDevCfg] Database error loading devices config for user '{user_id}': {e}",
+                exc_info=True,
+            )
             return {}
 
-        lock = self.file_locks.get(devices_filename)
-        if not lock:
-            log.error(f"Lock for '{devices_filename}' not found.")
-            return {}
+        log.info(
+            f"[UDS LoadDevCfg] Finished loading {len(config_data)} device configs from DB for user '{user_id}'."
+        )
+        return config_data
 
-        config_data = load_json_file(devices_file, lock)
-        if config_data is None:
-            config_data = {}  # Start with empty dict if file missing/invalid
-
-        # --- START: Merge file-based devices if missing from loaded config ---
+    def _merge_file_devices_to_db(self, user_id: str, existing_db_ids: Set[str]):
+        log.debug(
+            f"Scanning for file-based devices to potentially merge into DB for user '{user_id}'."
+        )
         user_data_dir = self._get_user_data_dir(user_id)
+        if not user_data_dir:
+            return
         config_changed_by_merge = False
-        if user_data_dir:
+        user = self.get_user_by_username(user_id)
+        if not user:
+            log.error(f"Cannot merge file devices: User '{user_id}' not found.")
+            return
+        try:
             found_file_ids = set()
+            creds_filename = self.config.get(
+                "USER_APPLE_CREDS_FILENAME", "apple_credentials.json"
+            )
+            creds_stem = Path(creds_filename).stem
+
             for data_file in list(user_data_dir.glob("*.plist")) + list(
                 user_data_dir.glob("*.keys")
             ):
                 device_id = data_file.stem
-                # Skip known non-device files
-                if device_id == Path(self.config["USER_APPLE_CREDS_FILENAME"]).stem:
+                if not device_id or len(device_id) > 128:
+                    log.warning(
+                        f"Skipping merge for file with invalid derived device ID: {data_file.name}"
+                    )
                     continue
-                if device_id:
-                    found_file_ids.add(device_id)
+                if device_id == creds_stem:
+                    continue
+                found_file_ids.add(device_id)
 
-            devices_to_add = found_file_ids - set(config_data.keys())
-            if devices_to_add:
+            devices_to_add_ids = found_file_ids - existing_db_ids
+            if devices_to_add_ids:
                 log.warning(
-                    f"User '{user_id}': Found device files not in {devices_filename}: {devices_to_add}. Adding default entries."
+                    f"User '{user_id}': Found device files not in DB: {devices_to_add_ids}. Adding default entries."
                 )
-                for device_id in devices_to_add:
-                    config_data[device_id] = {  # Add default config
-                        "name": device_id,
-                        "label": "❓",
-                        "color": None,
-                        "model": "Accessory/Tag",
-                        "icon": "tag",
-                        "linked_geofences": [],
-                    }
-                config_changed_by_merge = True  # Mark that we modified the loaded data
-        # --- END: Merge file-based devices ---
-
-        # --- Validation ---
-        all_user_geofences = self.load_geofences_config(
-            user_id
-        )  # Load for link validation
-        validated_config = {}
-        default_config_structure = {
-            "linked_geofences": [],
-            "name": None,
-            "label": "❓",
-            "color": None,
-            "model": "Accessory/Tag",
-            "icon": "tag",
-        }
-        for device_id, config in config_data.items():
-            if not isinstance(config, dict):
-                continue
-            validated_device = default_config_structure.copy()
-            validated_device.update(config)  # Apply loaded config over defaults
-            raw_links = validated_device.get("linked_geofences", [])
-            validated_links, linked_ids_seen = [], set()
-            if isinstance(raw_links, list):
-                for link in raw_links:
-                    if isinstance(link, dict) and "id" in link:
-                        gf_id = link.get("id")
-                        if (
-                            isinstance(gf_id, str)
-                            and gf_id
-                            and gf_id in all_user_geofences
-                            and gf_id not in linked_ids_seen
-                        ):
-                            validated_links.append(
-                                {
-                                    "id": gf_id,
-                                    "notify_entry": bool(
-                                        link.get("notify_entry", False)
-                                    ),
-                                    "notify_exit": bool(link.get("notify_exit", False)),
-                                }
+                devices_to_bulk_add = []
+                for device_id_to_add in devices_to_add_ids:
+                    if not db.session.get(Device, device_id_to_add):
+                        devices_to_bulk_add.append(
+                            Device(
+                                id=device_id_to_add,
+                                user_username=user_id,
+                                name=device_id_to_add,
+                                label="❓",
+                                color=getDefaultColorForId(device_id_to_add),
+                                model="Accessory/Tag",
+                                icon="tag",
                             )
-                            linked_ids_seen.add(gf_id)
-                        elif gf_id and gf_id not in all_user_geofences:
-                            log.warning(
-                                f"User '{user_id}', Device '{device_id}': Linked geofence ID '{gf_id}' not found. Removing link."
-                            )
-                        elif gf_id in linked_ids_seen:
-                            log.warning(
-                                f"User '{user_id}', Device '{device_id}': Duplicate geofence link ID '{gf_id}'. Ignoring duplicate."
-                            )
-            validated_device["linked_geofences"] = validated_links
-            validated_device["name"] = str(
-                validated_device.get("name", device_id) or device_id
-            ).strip()
-            validated_device["label"] = str(
-                validated_device.get("label", "❓") or "❓"
-            ).strip()[:2]
-            validated_device["color"] = validated_device.get("color")  # Allow None
-            validated_device["model"] = str(
-                validated_device.get("model", "Accessory/Tag") or "Accessory/Tag"
-            ).strip()
-            validated_device["icon"] = str(
-                validated_device.get("icon", "tag") or "tag"
-            ).strip()
+                        )
+                    else:
+                        log.info(
+                            f"Device {device_id_to_add} already exists in DB, skipping add in merge operation."
+                        )
 
-            # --- Generate and add SVG icon during load ---
-            try:
-                final_color_for_svg = validated_device["color"] or getDefaultColorForId(
-                    device_id
-                )
-                validated_device["svg_icon"] = generate_device_icon_svg(
-                    validated_device["label"], final_color_for_svg
-                )
-            except Exception as svg_err:
-                log.error(
-                    f"Error generating SVG during device config load for {device_id}: {svg_err}"
-                )
-                validated_device["svg_icon"] = None  # Ensure field exists even on error
-            # --- -------------------------------------- ---
+                if devices_to_bulk_add:
+                    db.session.add_all(devices_to_bulk_add)
+                    config_changed_by_merge = True
 
-            validated_config[device_id] = validated_device
+            if config_changed_by_merge:
+                db.session.commit()
+                log.info(
+                    f"User '{user_id}': Committed {len(devices_to_bulk_add)} new devices merged from files to DB."
+                )
+            else:
+                log.debug(
+                    f"User '{user_id}': No new devices from files to merge into DB."
+                )
 
-        # If we added devices by merging, save the updated config file back
-        if config_changed_by_merge:
-            log.info(
-                f"User '{user_id}': Saving merged device config back to {devices_filename}."
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"Database error during file device merge for user '{user_id}': {e}",
+                exc_info=True,
             )
-            try:
-                # Use save_json_atomic directly for initial save, indent=4 for readability
-                save_json_atomic(
-                    devices_file,
-                    {
-                        dev_id: {k: v for k, v in conf.items() if k != "svg_icon"}
-                        for dev_id, conf in validated_config.items()
-                    },
-                    lock,
-                    indent=4,
-                )  # Exclude SVG from file
-            except Exception as e:
-                log.error(
-                    f"User '{user_id}': Failed to save merged {devices_filename}: {e}"
-                )
-                # Proceed with in-memory data, but log error
 
-        log.debug(
-            f"Device config loaded for user '{user_id}' ({len(validated_config)} items)"
-        )
-        return validated_config
-
+    
     def save_devices_config(self, user_id: str, config_data: Dict[str, Dict[str, Any]]):
-        """Validates and saves the devices configuration for a user (excluding generated SVG)."""
-        devices_filename = self.config["USER_DEVICES_FILENAME"]
-        devices_file = self._get_user_file_path(user_id, devices_filename)
-        if not devices_file:
-            raise IOError(
-                f"Could not determine device config file path for user '{user_id}'."
-            )
-        lock = self.file_locks.get(devices_filename)
-        if not lock:
-            raise RuntimeError("Device config lock configuration missing.")
+        log.info(
+            f"Saving/Updating {len(config_data)} device configs to DB for user '{user_id}'"
+        )
         if not isinstance(config_data, dict):
             raise TypeError("Device config data must be a dictionary.")
 
-        all_user_geofences_ids = set(self.load_geofences_config(user_id).keys())
-        validated_config_to_save = {}
-        for device_id, config in config_data.items():
-            if not isinstance(config, dict):
-                log.warning(
-                    f"User '{user_id}', Device '{device_id}': Invalid config format (not dict) during save, skipping."
-                )
-                continue
-            config_to_save = {
-                k: v for k, v in config.items() if k != "svg_icon"
-            }  # Exclude SVG from saving
+        all_user_geofences_ids = set(
+            db.session.execute(
+                db.select(Geofence.id).filter_by(user_username=user_id)
+            ).scalars()
+        )
+        log.debug(
+            f"User '{user_id}': Valid geofence IDs for link validation: {all_user_geofences_ids}"
+        )
 
-            raw_links = config_to_save.get("linked_geofences", [])
-            validated_links, linked_ids_seen = [], set()
-            if isinstance(raw_links, list):
-                for link in raw_links:
-                    if isinstance(link, dict) and "id" in link:
-                        gf_id = link.get("id")
-                        if (
-                            isinstance(gf_id, str)
-                            and gf_id
-                            and gf_id in all_user_geofences_ids
-                            and gf_id not in linked_ids_seen
-                        ):
-                            validated_links.append(
-                                {
-                                    "id": gf_id,
-                                    "notify_entry": bool(
-                                        link.get("notify_entry", False)
-                                    ),
-                                    "notify_exit": bool(link.get("notify_exit", False)),
-                                }
-                            )
-                            linked_ids_seen.add(gf_id)
-                        elif gf_id and gf_id not in all_user_geofences_ids:
-                            log.warning(
-                                f"User '{user_id}', Device '{device_id}': Skipping link to non-existent geofence ID '{gf_id}' during save."
-                            )
-                        elif gf_id in linked_ids_seen:
-                            log.warning(
-                                f"User '{user_id}', Device '{device_id}': Duplicate geofence link ID '{gf_id}' during save. Skipping duplicate."
-                            )
-            config_to_save["linked_geofences"] = validated_links
-            config_to_save["name"] = str(
-                config_to_save.get("name", device_id) or device_id
-            ).strip()
-            config_to_save["label"] = str(
-                config_to_save.get("label", "❓") or "❓"
-            ).strip()[:2]
-            config_to_save["color"] = config_to_save.get("color")
-            config_to_save["model"] = str(
-                config_to_save.get("model", "Accessory/Tag") or "Accessory/Tag"
-            ).strip()
-            config_to_save["icon"] = str(
-                config_to_save.get("icon", "tag") or "tag"
-            ).strip()
-            validated_config_to_save[device_id] = config_to_save
-
+        processed_device_ids = set()
         try:
-            save_json_atomic(devices_file, validated_config_to_save, lock, indent=4)
-            log.info(f"Device config saved to {devices_file} for user '{user_id}'")
+            for (
+                device_id,
+                config_item,
+            ) in (
+                config_data.items()
+            ):  # Renamed 'config' to 'config_item' to avoid confusion
+                processed_device_ids.add(device_id)
+                log.debug(f"Processing device '{device_id}' for save...")
+                if not isinstance(config_item, dict):  # Use 'config_item'
+                    log.warning(
+                        f"Skipping invalid config for device {device_id} during save."
+                    )
+                    continue
+
+                device = db.session.execute(
+                    db.select(Device).filter_by(id=device_id, user_username=user_id)
+                ).scalar_one_or_none()
+
+                if not device:
+                    log.warning(
+                        f"Device {device_id} not found for user {user_id} during config save. Skipping."
+                    )
+                    continue
+                # Use config_item to get device attributes
+                if "name" in config_item:
+                    device.name = str(
+                        config_item.get("name", device_id) or device_id
+                    ).strip()
+                if "label" in config_item:
+                    device.label = str(config_item.get("label", "❓") or "❓").strip()[
+                        :5
+                    ]
+                if "color" in config_item:
+                    device.color = config_item.get("color")
+                if "model" in config_item:
+                    device.model = str(
+                        config_item.get("model", "Accessory/Tag") or "Accessory/Tag"
+                    ).strip()
+                if "icon" in config_item:
+                    device.icon = str(config_item.get("icon", "tag") or "tag").strip()
+                if "last_battery_status" in config_item:
+                    device.last_battery_status = config_item["last_battery_status"]
+                if "last_seen_local" in config_item and config_item["last_seen_local"]:
+                    try:
+                        ts = datetime.fromisoformat(
+                            config_item["last_seen_local"].replace("Z", "+00:00")
+                        )
+                        device.last_seen_local = (
+                            ts.astimezone(timezone.utc)
+                            if ts.tzinfo
+                            else ts.replace(tzinfo=timezone.utc)
+                        )
+                    except (ValueError, TypeError) as ts_err:
+                        log.warning(
+                            f"Could not parse last_seen_local timestamp '{config_item['last_seen_local']}' for device {device_id}. Skipping update. Error: {ts_err}"
+                        )
+
+                db.session.add(device)
+                log.debug(f"Device '{device_id}' fields marked for update.")
+
+                if "linked_geofences" in config_item:  # Use 'config_item'
+                    log.debug(
+                        f"Updating links for device {device_id} as 'linked_geofences' is in payload..."
+                    )
+                    delete_stmt = db.delete(device_geofence_link).where(
+                        device_geofence_link.c.device_id == device_id
+                    )
+                    delete_result = db.session.execute(delete_stmt)
+                    log.debug(
+                        f"Deleted {delete_result.rowcount} existing link(s) for device {device_id}."
+                    )
+                    incoming_links_data = config_item.get(
+                        "linked_geofences", []
+                    )  # Use 'config_item'
+                    rows_to_insert = []
+                    if isinstance(incoming_links_data, list):
+                        for link_info in incoming_links_data:
+                            log.debug(
+                                f"SAVE_LINKS User:{user_id} Dev:{device_id} | Raw link_info from payload: {link_info}"
+                            )  # Log the raw link_info
+
+                            if isinstance(link_info, dict) and "id" in link_info:
+                                gf_id = link_info.get("id")
+                                if gf_id in all_user_geofences_ids:
+                                    # --- CORRECTED KEY ACCESS ---
+                                    entry_flag_bool = bool(
+                                        link_info.get("notify_entry", False)
+                                    )  # Use 'notify_entry'
+                                    exit_flag_bool = bool(
+                                        link_info.get("notify_exit", False)
+                                    )  # Use 'notify_exit'
+                                    # --- -------------------- ---
+
+                                    log.debug(
+                                        f"SAVE_LINKS User:{user_id} Dev:{device_id} GF:{gf_id} | "
+                                        f"link_info_notify_entry: {link_info.get('notify_entry')} (Type: {type(link_info.get('notify_entry'))}), Parsed entry_flag_bool: {entry_flag_bool} | "
+                                        f"link_info_notify_exit: {link_info.get('notify_exit')} (Type: {type(link_info.get('notify_exit'))}), Parsed exit_flag_bool: {exit_flag_bool}"
+                                    )
+
+                                    rows_to_insert.append(
+                                        {
+                                            "device_id": device_id,
+                                            "geofence_id": gf_id,
+                                            "notify_entry": 1 if entry_flag_bool else 0,
+                                            "notify_exit": 1 if exit_flag_bool else 0,
+                                        }
+                                    )
+                                else:
+                                    log.warning(
+                                        f"Skipping link insert for non-existent/invalid geofence '{gf_id}' for device '{device_id}'."
+                                    )
+                            else:
+                                log.warning(
+                                    f"Skipping malformed link_info during insert for device {device_id}: {link_info}"
+                                )
+                        if rows_to_insert:
+                            log.debug(
+                                f"Inserting {len(rows_to_insert)} new links for device {device_id}: {rows_to_insert}"
+                            )
+                            db.session.execute(
+                                db.insert(device_geofence_link), rows_to_insert
+                            )
+                        else:
+                            log.debug(
+                                f"No valid links to insert for device {device_id}."
+                            )
+                    else:
+                        log.warning(
+                            f"Invalid format for 'linked_geofences' for device {device_id}. Expected list, got {type(incoming_links_data)}."
+                        )
+                else:
+                    log.debug(
+                        f"Skipping link update for device {device_id} as 'linked_geofences' not in payload."
+                    )
+            db.session.commit()
+            log.info(
+                f"Committed device config and potentially link updates for user '{user_id}'."
+            )
+            for verify_device_id in processed_device_ids:
+                # Check if linked_geofences was part of the update for this device_id
+                if "linked_geofences" in config_data.get(verify_device_id, {}):
+                    log.debug(
+                        f"Verifying saved links for device '{verify_device_id}' after commit..."
+                    )
+                    verify_links_query = db.select(
+                        device_geofence_link.c.geofence_id,
+                        device_geofence_link.c.notify_entry,
+                        device_geofence_link.c.notify_exit,
+                    ).where(device_geofence_link.c.device_id == verify_device_id)
+                    verify_results = db.session.execute(verify_links_query).all()
+                    log.debug(
+                        f"Verification query results for {verify_device_id}: {verify_results}"
+                    )
         except Exception as e:
-            log.error(f"Failed to save device config for user '{user_id}': {e}")
+            db.session.rollback()
+            log.error(
+                f"Database error during saving device configs for user '{user_id}': {e}",
+                exc_info=True,
+            )
             raise
 
-    # --- Geofences Config ---
+    
 
     def load_geofences_config(self, user_id: str) -> Dict[str, Dict[str, Any]]:
-        """Loads and validates the geofences configuration for a user."""
-        geofences_filename = self.config["USER_GEOFENCES_FILENAME"]
-        geofences_file = self._get_user_file_path(user_id, geofences_filename)
-        if not geofences_file:
-            return {}
-        lock = self.file_locks.get(geofences_filename)
-        if not lock:
-            log.error(f"Lock for '{geofences_filename}' not found.")
-            return {}
-
-        config_data = load_json_file(geofences_file, lock)
-        if config_data is None:
-            return {}
-
-        validated_config, seen_names_lower = {}, set()
-        for gf_id, config in config_data.items():
-            if not isinstance(config, dict):
-                log.warning(
-                    f"User '{user_id}', Geofence '{gf_id}': Invalid config format (not dict), skipping."
-                )
-                continue
-            try:
-                validated_gf = {
-                    "id": gf_id,
-                    "name": str(config["name"]).strip(),
-                    "lat": float(config["lat"]),
-                    "lng": float(config["lng"]),
-                    "radius": float(config["radius"]),
+        log.debug(f"Loading geofences config from DB for user '{user_id}'")
+        try:
+            geofences = (
+                db.session.execute(db.select(Geofence).filter_by(user_username=user_id))
+                .scalars()
+                .all()
+            )
+            config_data = {
+                gf.id: {
+                    "id": gf.id,
+                    "name": gf.name,
+                    "lat": gf.latitude,
+                    "lng": gf.longitude,
+                    "radius": gf.radius,
                 }
-                if (
-                    not validated_gf["name"]
-                    or validated_gf["radius"] <= 0
-                    or not (-90 <= validated_gf["lat"] <= 90)
-                    or not (-180 <= validated_gf["lng"] <= 180)
-                ):
-                    raise ValueError("Invalid geofence data (name, radius, lat, lng).")
-                name_lower = validated_gf["name"].lower()
-                if name_lower in seen_names_lower:
-                    log.warning(
-                        f"User '{user_id}' has duplicate geofence name (case-insensitive): '{validated_gf['name']}'. Loading anyway, but check config."
-                    )
-                validated_config[gf_id] = validated_gf
-                seen_names_lower.add(name_lower)
-            except (KeyError, ValueError, TypeError) as ve:
-                log.warning(
-                    f"User '{user_id}': Skipping invalid geofence config for ID {gf_id}: {config} - Error: {ve}"
-                )
-
-        log.debug(
-            f"Geofence config loaded for user '{user_id}' ({len(validated_config)} items)"
-        )
-        return validated_config
+                for gf in geofences
+            }
+            log.info(
+                f"Loaded {len(config_data)} geofences from DB for user '{user_id}'"
+            )
+            return config_data
+        except Exception as e:
+            log.error(
+                f"Database error loading geofences config for '{user_id}': {e}",
+                exc_info=True,
+            )
+            return {}
 
     def save_geofences_config(
         self, user_id: str, config_data: Dict[str, Dict[str, Any]]
     ):
-        """Validates and saves the geofences configuration for a user."""
-        geofences_filename = self.config["USER_GEOFENCES_FILENAME"]
-        geofences_file = self._get_user_file_path(user_id, geofences_filename)
-        if not geofences_file:
-            raise IOError(
-                f"Could not determine geofence config file path for user '{user_id}'."
-            )
-        lock = self.file_locks.get(geofences_filename)
-        if not lock:
-            raise RuntimeError("Geofence config lock configuration missing.")
+        log.info(
+            f"Saving {len(config_data)} geofence configs to DB for user '{user_id}'"
+        )
         if not isinstance(config_data, dict):
             raise TypeError("Geofence config data must be a dictionary.")
-
-        validated_config_to_save, seen_names_lower = {}, set()
-        for gf_id, config in config_data.items():
-            config_value = {
-                k: v for k, v in config.items() if k != "id"
-            }  # Exclude ID from value saved to file
-            if not isinstance(config_value, dict):
-                log.warning(
-                    f"User '{user_id}', Geofence '{gf_id}': Invalid value format (not dict) during save, skipping."
-                )
-                continue
-            try:
-                validated_gf_data = {
-                    "name": str(config_value["name"]).strip(),
-                    "lat": float(config_value["lat"]),
-                    "lng": float(config_value["lng"]),
-                    "radius": float(config_value["radius"]),
-                }
-                if (
-                    not validated_gf_data["name"]
-                    or validated_gf_data["radius"] <= 0
-                    or not (-90 <= validated_gf_data["lat"] <= 90)
-                    or not (-180 <= validated_gf_data["lng"] <= 180)
-                ):
-                    raise ValueError("Invalid geofence data (name, radius, lat, lng).")
-                name_lower = validated_gf_data["name"].lower()
-                if name_lower in seen_names_lower:
-                    raise ValueError(
-                        f"Duplicate geofence name detected: '{validated_gf_data['name']}'"
+        existing_geofences = {
+            gf.id: gf
+            for gf in db.session.execute(
+                db.select(Geofence).filter_by(user_username=user_id)
+            ).scalars()
+        }
+        try:
+            processed_ids = set()
+            for (
+                gf_id,
+                config_item,
+            ) in config_data.items():  # Renamed 'config' to 'config_item'
+                if not isinstance(config_item, dict):  # Use 'config_item'
+                    continue
+                processed_ids.add(gf_id)
+                try:
+                    name = str(config_item["name"]).strip()  # Use 'config_item'
+                    lat = float(config_item["lat"])  # Use 'config_item'
+                    lng = float(config_item["lng"])  # Use 'config_item'
+                    radius = float(config_item["radius"])  # Use 'config_item'
+                    if (
+                        not name
+                        or radius <= 0
+                        or not (-90 <= lat <= 90)
+                        or not (-180 <= lng <= 180)
+                    ):
+                        raise ValueError("Invalid geofence data.")
+                    geofence_obj = existing_geofences.get(gf_id)
+                    if geofence_obj:
+                        geofence_obj.name = name
+                        geofence_obj.latitude = lat
+                        geofence_obj.longitude = lng
+                        geofence_obj.radius = radius
+                    else:
+                        user = self.get_user_by_username(user_id)
+                        if not user:
+                            raise ValueError(
+                                f"User '{user_id}' not found for creating geofence."
+                            )
+                        new_geofence = Geofence(
+                            id=gf_id,
+                            user_username=user_id,
+                            name=name,
+                            latitude=lat,
+                            longitude=lng,
+                            radius=radius,
+                        )
+                        db.session.add(new_geofence)
+                        log.debug(f"Adding new geofence {gf_id} for user '{user_id}'.")
+                except (KeyError, ValueError, TypeError) as ve:
+                    log.warning(
+                        f"Skipping invalid geofence data during save: ID {gf_id}, Data {config_item}, Error: {ve}"
                     )
-                validated_config_to_save[gf_id] = validated_gf_data
-                seen_names_lower.add(name_lower)
-            except (KeyError, ValueError, TypeError) as ve:
-                log.warning(
-                    f"User '{user_id}': Skipping invalid geofence during save ID {gf_id}: {config_value} - Error: {ve}"
+            ids_to_delete = set(existing_geofences.keys()) - processed_ids
+            if ids_to_delete:
+                self._handle_geofence_deletion_dependencies(user_id, ids_to_delete)
+                db.session.execute(
+                    db.delete(Geofence).filter(
+                        Geofence.user_username == user_id,
+                        Geofence.id.in_(ids_to_delete),
+                    )
                 )
-
-        try:
-            save_json_atomic(geofences_file, validated_config_to_save, lock, indent=4)
-            log.info(f"Geofence config saved to {geofences_file} for user '{user_id}'")
-        except Exception as e:
-            log.error(f"Failed to save geofence config for user '{user_id}': {e}")
-            raise
-
-    # --- Push Subscriptions ---
-
-    def load_subscriptions(self, user_id: str) -> Dict[str, Dict[str, Any]]:
-        """Loads push notification subscriptions for a user."""
-        subs_filename = self.config["USER_SUBSCRIPTIONS_FILENAME"]
-        subs_file = self._get_user_file_path(user_id, subs_filename)
-        if not subs_file:
-            return {}
-        lock = self.file_locks.get(subs_filename)
-        if not lock:
-            log.error(f"Lock for '{subs_filename}' not found.")
-            return {}
-
-        subs_data = load_json_file(subs_file, lock)
-        if subs_data is None:
-            return {}
-
-        validated_subs = {}
-        for endpoint, sub_info in subs_data.items():
-            if (
-                isinstance(sub_info, dict)
-                and "endpoint" in sub_info
-                and "keys" in sub_info
-            ):
-                validated_subs[endpoint] = sub_info
-            else:
-                log.warning(
-                    f"User '{user_id}': Invalid subscription format found for endpoint '{endpoint[:50]}...'. Skipping."
-                )
-        log.info(f"Loaded {len(validated_subs)} subscriptions for user '{user_id}'")
-        return validated_subs
-
-    def save_subscriptions(self, user_id: str, subs_to_save: Dict[str, Dict[str, Any]]):
-        """Saves push notification subscriptions for a user."""
-        subs_filename = self.config["USER_SUBSCRIPTIONS_FILENAME"]
-        subs_file = self._get_user_file_path(user_id, subs_filename)
-        if not subs_file:
-            raise IOError(
-                f"Could not determine subscriptions file path for user '{user_id}'."
-            )
-        lock = self.file_locks.get(subs_filename)
-        if not lock:
-            raise RuntimeError("Subscriptions lock configuration missing.")
-        if not isinstance(subs_to_save, dict):
-            raise TypeError("Subscriptions data must be a dictionary.")
-
-        validated_data_to_save = {}
-        for endpoint, sub_info in subs_to_save.items():
-            if (
-                isinstance(sub_info, dict)
-                and "endpoint" in sub_info
-                and "keys" in sub_info
-            ):
-                validated_data_to_save[endpoint] = sub_info
-            else:
-                log.warning(
-                    f"User '{user_id}': Attempting to save invalid subscription format for endpoint '{endpoint[:50]}...'. Skipping."
-                )
-        try:
-            save_json_atomic(
-                subs_file, validated_data_to_save, lock, indent=None
-            )  # No indent
+                log.info(f"Deleting geofences for user '{user_id}': {ids_to_delete}")
+            db.session.commit()
             log.info(
-                f"Saved {len(validated_data_to_save)} subscriptions to {subs_file} for user '{user_id}'"
+                f"Successfully saved/updated geofence config to DB for user '{user_id}'."
             )
         except Exception as e:
-            log.error(f"Failed to save subscriptions for user '{user_id}': {e}")
+            db.session.rollback()
+            log.error(
+                f"Database error saving geofence config for user '{user_id}': {e}"
+            )
             raise
 
-    # --- Notification History ---
-
-    def load_notification_history(self, user_id: str) -> List[Dict[str, Any]]:
-        """Loads notification history for a user, sorted newest first."""
-        history_filename = self.config["USER_NOTIFICATIONS_HISTORY_FILENAME"]
-        history_file = self._get_user_file_path(user_id, history_filename)
-        if not history_file:
-            return []
-        lock = self.file_locks.get(history_filename)
-        if not lock:
-            log.error(f"Lock for '{history_filename}' not found.")
-            return []
-
-        # --- MODIFIED: Use load_json_file but handle LIST type ---
-        with lock:
-            if not history_file.exists():
-                log.debug(f"Notification history file not found: {history_file}")
-                return []
-            if history_file.stat().st_size == 0:
-                log.warning(f"Notification history file is empty: {history_file}")
-                return []
-
-            try:
-                with open(history_file, "r", encoding="utf-8") as f:
-                    history_data = json.load(f)
-
-                # *** CRITICAL FIX: Check if it's a LIST ***
-                if not isinstance(history_data, list):
-                    log.warning(
-                        f"Notification history file {history_file} is not a list. Resetting."
-                    )
-                    # Optionally backup/rename corrupted file here before returning empty
-                    # history_file.rename(history_file.with_suffix(".corrupted"))
-                    return []
-
-            except json.JSONDecodeError as e:
-                log.error(f"Failed to parse JSON from {history_file}: {e}")
-                return []
-            except (IOError, OSError) as e:
-                log.error(f"Failed to read file {history_file}: {e}")
-                return []
-            except Exception as e:
-                log.exception(f"Unexpected error loading JSON from {history_file}")
-                return []
-        # --- END MODIFICATION ---
-
-        # Ensure basic structure and sort (Keep this part)
-        validated_history = []
-        required_keys = {"id", "timestamp", "title", "body", "is_read"}
-        for item in history_data:
-            if isinstance(item, dict) and required_keys.issubset(item.keys()):
-                try:
-                    # Attempt to parse timestamp for sorting consistency check
-                    item_ts_str = item.get("timestamp", "")
-                    # Ensure timestamp has timezone info before parsing
-                    if "+" not in item_ts_str and "Z" not in item_ts_str:
-                        item_ts_str += "+00:00"  # Assume UTC if no offset
-                    else:
-                        item_ts_str = item_ts_str.replace("Z", "+00:00")
-
-                    item["timestamp_dt"] = datetime.fromisoformat(item_ts_str)
-                    validated_history.append(item)
-                except (ValueError, TypeError, KeyError) as e:
-                    log.warning(
-                        f"Skipping history item with invalid timestamp '{item.get('timestamp')}': {e} (ID: {item.get('id')})"
-                    )
-            else:
-                log.warning(
-                    f"Skipping invalid history item structure: {str(item)[:100]}..."
-                )
-
-        validated_history.sort(key=lambda x: x["timestamp_dt"], reverse=True)
-        # Remove temporary sort key
-        for item in validated_history:
-            del item["timestamp_dt"]
-
-        log.info(
-            f"Loaded {len(validated_history)} notification history entries for user '{user_id}'"
-        )
-        return validated_history
-
-    def save_notification_history(
-        self, user_id: str, notification_entry: Dict[str, Any]
+    def _handle_geofence_deletion_dependencies(
+        self, user_id: str, geofence_ids_to_delete: Set[str]
     ):
-        """Adds a new notification entry to the history file (which is a list)."""
-        history_filename = self.config["USER_NOTIFICATIONS_HISTORY_FILENAME"]
-        history_file = self._get_user_file_path(user_id, history_filename)
-        if not history_file:
-            raise IOError(
-                f"Could not get notification history file path for user '{user_id}'."
-            )
-        lock = self.file_locks.get(history_filename)
-        if not lock:
-            raise RuntimeError(f"Lock for '{history_filename}' not found.")
-
-        # --- MODIFIED: Load existing history (expecting list) and handle potential errors ---
-        with lock:
-            current_history = []  # Default to empty list
-            if history_file.exists() and history_file.stat().st_size > 0:
-                try:
-                    with open(history_file, "r", encoding="utf-8") as f:
-                        loaded_data = json.load(f)
-                    if isinstance(loaded_data, list):
-                        current_history = loaded_data
-                    else:
-                        log.warning(
-                            f"Overwriting non-list history file {history_file} during save."
-                        )
-                except Exception as load_err:
-                    log.error(
-                        f"Error loading existing history file {history_file} during save, starting fresh: {load_err}"
-                    )
-            # --- END MODIFICATION ---
-
-            # Prepend new entry
-            current_history.insert(0, notification_entry)
-
-            # Prune immediately after adding
-            max_days = self.config.get("NOTIFICATION_HISTORY_DAYS", 30)
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=max_days)
-            pruned_history = []
-            for item in current_history:
-                try:
-                    # Ensure timestamp has timezone info before parsing
-                    item_ts_str = item.get("timestamp", "")
-                    if "+" not in item_ts_str and "Z" not in item_ts_str:
-                        item_ts_str += "+00:00"
-                    else:
-                        item_ts_str = item_ts_str.replace("Z", "+00:00")
-                    item_ts = datetime.fromisoformat(item_ts_str)
-                    if item_ts >= cutoff_date:
-                        pruned_history.append(item)
-                except (ValueError, TypeError, KeyError) as e:
-                    log.warning(
-                        f"Skipping item with invalid timestamp '{item.get('timestamp')}' during history save/prune: {e} (ID: {item.get('id')})"
-                    )
-
-            try:
-                # Save the potentially pruned list back
-                save_json_atomic(
-                    history_file, pruned_history, threading.Lock(), indent=2
-                )  # Use dummy lock inside outer lock
-                log.info(
-                    f"Saved notification history for user '{user_id}' ({len(pruned_history)} entries)."
-                )
-            except Exception as e:
-                log.error(
-                    f"Failed to save notification history for user '{user_id}': {e}"
-                )
-                raise  # Re-raise the exception after logging
-
-    def update_notification_read_status(
-        self, user_id: str, notification_id: str, is_read: bool
-    ) -> bool:
-        """Updates the read status of a specific notification entry in the history list."""
-        history_filename = self.config["USER_NOTIFICATIONS_HISTORY_FILENAME"]
-        history_file = self._get_user_file_path(user_id, history_filename)
-        if not history_file:
-            return False
-        lock = self.file_locks.get(history_filename)
-        if not lock:
-            return False
-
-        with lock:
-            # --- MODIFIED: Load directly expecting a list ---
-            current_history = []
-            if history_file.exists() and history_file.stat().st_size > 0:
-                try:
-                    with open(history_file, "r", encoding="utf-8") as f:
-                        loaded_data = json.load(f)
-                    if isinstance(loaded_data, list):
-                        current_history = loaded_data
-                    else:
-                        log.warning(
-                            f"History file {history_file} is not a list. Cannot update read status."
-                        )
-                        return False
-                except Exception as load_err:
-                    log.error(
-                        f"Error loading history file {history_file} for read status update: {load_err}"
-                    )
-                    return False
-            # --- END MODIFICATION ---
-
-            updated = False
-            for item in current_history:
-                if isinstance(item, dict) and item.get("id") == notification_id:
-                    item["is_read"] = bool(is_read)
-                    updated = True
-                    break  # Found and updated
-
-            if updated:
-                try:
-                    # Save the modified list
-                    save_json_atomic(
-                        history_file, current_history, threading.Lock(), indent=2
-                    )  # Use dummy lock
-                    log.info(
-                        f"Updated read status for notification {notification_id} for user '{user_id}' to {is_read}."
-                    )
-                    return True
-                except Exception as e:
-                    log.error(
-                        f"Failed to save updated history for read status change (user {user_id}): {e}"
-                    )
-                    return False  # Save failed
-            else:
-                log.warning(
-                    f"Notification ID {notification_id} not found for user '{user_id}' during status update."
-                )
-                return False  # Indicate not found
-
-    def delete_notification_history(
-        self, user_id: str, notification_id: Optional[str] = None
-    ) -> bool:
-        """Deletes a specific notification or all history (list) for a user."""
-        history_filename = self.config["USER_NOTIFICATIONS_HISTORY_FILENAME"]
-        history_file = self._get_user_file_path(user_id, history_filename)
-        if not history_file:
-            return False
-        lock = self.file_locks.get(history_filename)
-        if not lock:
-            return False
-
-        with lock:
-            # --- MODIFIED: Load directly expecting a list ---
-            current_history = []
-            if history_file.exists() and history_file.stat().st_size > 0:
-                try:
-                    with open(history_file, "r", encoding="utf-8") as f:
-                        loaded_data = json.load(f)
-                    if isinstance(loaded_data, list):
-                        current_history = loaded_data
-                    else:
-                        log.warning(
-                            f"History file {history_file} is not a list. Cannot delete entries."
-                        )
-                        # Treat as success if clearing all, as file will be overwritten anyway
-                        return notification_id is None
-                except Exception as load_err:
-                    log.error(
-                        f"Error loading history file {history_file} for deletion: {load_err}"
-                    )
-                    return False
-            # --- END MODIFICATION ---
-
-            deleted = False
-            if notification_id:  # Delete single entry
-                original_count = len(current_history)
-                new_history = [
-                    item
-                    for item in current_history
-                    if not (
-                        isinstance(item, dict) and item.get("id") == notification_id
-                    )
-                ]
-                deleted = len(new_history) < original_count
-            else:  # Delete all entries
-                new_history = []
-                deleted = (
-                    len(current_history) > 0
-                )  # Mark as deleted if list wasn't already empty
-
-            if (
-                deleted or notification_id is None
-            ):  # Save if deleted specific OR clearing all
-                try:
-                    # Save the potentially modified list
-                    save_json_atomic(
-                        history_file, new_history, threading.Lock(), indent=2
-                    )  # Use dummy lock
-                    if notification_id:
-                        if deleted:
-                            log.info(
-                                f"Deleted notification {notification_id} for user '{user_id}'."
-                            )
-                        else:
-                            log.warning(
-                                f"Notification ID {notification_id} not found for deletion for user '{user_id}'."
-                            )
-                    else:
-                        log.info(
-                            f"Cleared all notification history for user '{user_id}'."
-                        )
-                    return True  # Return True if operation completed, even if specific ID wasn't found
-                except Exception as e:
-                    log.error(
-                        f"Failed to save history after deletion (user {user_id}): {e}"
-                    )
-                    return False  # Save failed
-            else:
-                # This case means specific ID was requested but not found
-                log.warning(
-                    f"Notification ID {notification_id} not found for deletion for user '{user_id}'."
-                )
-                return True  # Return True as operation completed without error, though nothing changed
-
-    # --- Pruning (Keep as is, it already loads/saves correctly based on the fixed methods above) ---
-    def prune_notification_history(self, user_id: str):
-        """Removes history entries older than the configured retention period."""
-        history_filename = self.config["USER_NOTIFICATIONS_HISTORY_FILENAME"]
-        history_file = self._get_user_file_path(user_id, history_filename)
-        if not history_file or not history_file.exists():
-            return  # No file to prune
-        lock = self.file_locks.get(history_filename)
-        if not lock:
+        if not geofence_ids_to_delete:
             return
+        log.info(
+            f"Cleaning dependencies for deleting geofences: {geofence_ids_to_delete}"
+        )
+        try:
+            user_device_ids_subquery = db.select(Device.id).filter_by(
+                user_username=user_id
+            )
+            stmt_link = db.delete(device_geofence_link).where(
+                device_geofence_link.c.geofence_id.in_(geofence_ids_to_delete),
+                device_geofence_link.c.device_id.in_(user_device_ids_subquery),
+            )
+            deleted_links = db.session.execute(stmt_link).rowcount
+            log.debug(f"Deleted {deleted_links} entries from device_geofence_link.")
+            stmt_status = db.delete(GeofenceDeviceStatus).where(
+                GeofenceDeviceStatus.geofence_id.in_(geofence_ids_to_delete),
+                GeofenceDeviceStatus.device_id.in_(user_device_ids_subquery),
+            )
+            deleted_status = db.session.execute(stmt_status).rowcount
+            log.debug(f"Deleted {deleted_status} entries from geofence_device_status.")
+            cooldowns_deleted_count = 0
+            for gf_id in geofence_ids_to_delete:
+                event_key_entry = f"geofence_{gf_id}_entry"
+                event_key_exit = f"geofence_{gf_id}_exit"
+                stmt_cd = db.delete(NotificationCooldown).where(
+                    NotificationCooldown.device_id.in_(user_device_ids_subquery),
+                    (NotificationCooldown.event_key == event_key_entry)
+                    | (NotificationCooldown.event_key == event_key_exit),
+                )
+                result = db.session.execute(stmt_cd)
+                cooldowns_deleted_count += result.rowcount
+            log.debug(
+                f"Deleted {cooldowns_deleted_count} related entries from notification_cooldown."
+            )
+        except Exception as e:
+            log.error(f"Error cleaning geofence dependencies for user {user_id}: {e}")
+            raise
 
-        with lock:
-            # --- MODIFIED: Load directly expecting a list ---
-            current_history = []
-            if history_file.exists() and history_file.stat().st_size > 0:
+    def delete_device_and_data(self, user_id: str, device_id: str) -> Tuple[bool, str]:
+        log.warning(
+            f"Attempting to delete device '{device_id}' from DB for user '{user_id}'."
+        )
+        try:
+            device = db.session.execute(
+                db.select(Device).filter_by(id=device_id, user_username=user_id)
+            ).scalar_one_or_none()
+
+            if not device:
+                log.warning(
+                    f"Delete failed: Device {device_id} not found for user '{user_id}'. Checking for files..."
+                )
+                deleted_filename = self._delete_device_files(user_id, device_id)
+                return (
+                    False,
+                    f"Device '{device_id}' not found in database ({'file deleted' if deleted_filename else 'no file found'}).",
+                )
+
+            log.info(f"Deleting device object {device_id} from DB and cascading...")
+            db.session.delete(device)
+            db.session.commit()
+            log.info(f"Successfully deleted device {device_id} from DB.")
+            deleted_filename = self._delete_device_files(user_id, device_id)
+            msg = f"Successfully deleted device '{device_id}' ({deleted_filename or 'No File Found'}) and associated database records."
+            log.info(f"User '{user_id}': {msg}")
+            return True, msg
+        except Exception as e:
+            db.session.rollback()
+            log.exception(
+                f"Error deleting device {device_id} for user '{user_id}': {e}"
+            )
+            return False, f"Database error during device deletion: {e}"
+
+    def _delete_device_files(self, user_id: str, device_id: str) -> Optional[str]:
+        user_data_dir = self._get_user_data_dir(user_id)
+        if not user_data_dir:
+            log.warning(
+                f"Cannot delete device files for {device_id}, user dir not found for {user_id}"
+            )
+            return None
+        deleted_filename = None
+        plist_path = user_data_dir / f"{device_id}.plist"
+        keys_path = user_data_dir / f"{device_id}.keys"
+        for file_path in [plist_path, keys_path]:
+            if file_path.exists():
                 try:
-                    with open(history_file, "r", encoding="utf-8") as f:
-                        loaded_data = json.load(f)
-                    if isinstance(loaded_data, list):
-                        current_history = loaded_data
-                    else:
-                        log.warning(
-                            f"History file {history_file} is not a list during prune. Cannot prune."
-                        )
-                        return  # Cannot prune invalid file
-                except Exception as load_err:
-                    log.error(
-                        f"Error loading history file {history_file} for pruning: {load_err}"
-                    )
-                    return  # Cannot prune if load fails
-            # --- END MODIFICATION ---
-
-            if not current_history:
-                return  # Nothing to prune
-
-            max_days = self.config.get("NOTIFICATION_HISTORY_DAYS", 30)
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=max_days)
-            original_count = len(current_history)
-
-            pruned_history = []
-            for item in current_history:
-                try:
-                    item_ts_str = item.get("timestamp", "")
-                    if "+" not in item_ts_str and "Z" not in item_ts_str:
-                        item_ts_str += "+00:00"
-                    else:
-                        item_ts_str = item_ts_str.replace("Z", "+00:00")
-                    item_ts = datetime.fromisoformat(item_ts_str)
-                    if item_ts >= cutoff_date:
-                        pruned_history.append(item)
-                except (ValueError, TypeError, KeyError) as e:
-                    log.warning(
-                        f"Skipping item with invalid timestamp '{item.get('timestamp')}' during pruning: {e} (ID: {item.get('id')})"
-                    )
-                    continue  # Skip invalid items
-
-            if len(pruned_history) < original_count:
-                try:
-                    # Save the pruned list
-                    save_json_atomic(
-                        history_file, pruned_history, threading.Lock(), indent=2
-                    )  # Dummy lock
+                    current_filename = file_path.name
+                    os.remove(file_path)
+                    deleted_filename = current_filename
                     log.info(
-                        f"Pruned {original_count - len(pruned_history)} old notification history entries for user '{user_id}'."
+                        f"User '{user_id}': Deleted source file {deleted_filename}."
+                    )
+                except OSError as e:
+                    log.error(
+                        f"User '{user_id}': Failed to delete source file {file_path.name}: {e}"
                     )
                 except Exception as e:
-                    log.error(
-                        f"Failed to save pruned history for user '{user_id}': {e}"
-                    )
-            else:
-                log.debug(f"No history entries needed pruning for user '{user_id}'.")
+                    log.exception(f"Unexpected error deleting {file_path.name}")
+        return deleted_filename
 
-    # --- State Files (Geofence, Battery, Notification Times, Cache) ---
-
-    def load_geofence_state(self, user_id: str) -> Dict[Tuple[str, str], str]:
-        state_filename = self.config["USER_GEOFENCE_STATE_FILENAME"]
-        state_file = self._get_user_file_path(user_id, state_filename)
-        if not state_file:
-            return {}
-        lock = self.file_locks.get(state_filename)
-        if not lock:
-            log.error(f"Lock for '{state_filename}' not found.")
-            return {}
-        state_from_file = load_json_file(state_file, lock)
-        if state_from_file is None:
-            return {}
-        parsed_state = {}
-        for k, v in state_from_file.items():
-            parts = k.split("::", 1)
-            if (
-                len(parts) == 2
-                and isinstance(v, str)
-                and v in ["inside", "outside", "unknown"]
+    def get_raw_device_data(self, user_id: str) -> List[Dict[str, str]]:
+        log.debug(f"Loading raw device data files for user '{user_id}'")
+        raw_data_list = []
+        user_data_dir = self._get_user_data_dir(user_id)
+        if not user_data_dir:
+            log.error(
+                f"Cannot get user data dir for raw device data retrieval: {user_id}"
+            )
+            return []
+        try:
+            creds_filename = self.config.get(
+                "USER_APPLE_CREDS_FILENAME", "apple_credentials.json"
+            )
+            creds_stem = Path(creds_filename).stem
+            for data_file in list(user_data_dir.glob("*.plist")) + list(
+                user_data_dir.glob("*.keys")
             ):
-                parsed_state[(parts[0], parts[1])] = v
-            else:
-                log.warning(
-                    f"User '{user_id}': Invalid key/value format in {state_file.name}: {k}={v}"
-                )
-        log.info(f"Loaded {len(parsed_state)} geofence states for user '{user_id}'")
-        return parsed_state
-
-    def save_geofence_state(self, user_id: str, state_dict: Dict[Tuple[str, str], str]):
-        state_filename = self.config["USER_GEOFENCE_STATE_FILENAME"]
-        state_file = self._get_user_file_path(user_id, state_filename)
-        if not state_file:
-            raise IOError(
-                f"Could not get geofence state file path for user '{user_id}'."
-            )
-        lock = self.file_locks.get(state_filename)
-        if not lock:
-            raise RuntimeError(f"Lock for '{state_filename}' not found.")
-        if not isinstance(state_dict, dict):
-            raise TypeError("Geofence state data must be a dict.")
-        state_to_save = {
-            f"{k[0]}::{k[1]}": v
-            for k, v in state_dict.items()
-            if isinstance(k, tuple) and len(k) == 2 and isinstance(v, str)
-        }
-        try:
-            save_json_atomic(state_file, state_to_save, lock, indent=2)
-            log.debug(f"Geofence state saved to {state_file} for user '{user_id}'")
-        except Exception as e:
-            log.error(f"Failed to save geofence state for user '{user_id}': {e}")
-            raise
-
-    def load_battery_state(self, user_id: str) -> Dict[str, str]:
-        state_filename = self.config["USER_BATTERY_STATE_FILENAME"]
-        state_file = self._get_user_file_path(user_id, state_filename)
-        if not state_file:
-            return {}
-        lock = self.file_locks.get(state_filename)
-        if not lock:
-            log.error(f"Lock for '{state_filename}' not found.")
-            return {}
-        state_from_file = load_json_file(state_file, lock)
-        if state_from_file is None:
-            return {}
-        state = {
-            k: v
-            for k, v in state_from_file.items()
-            if isinstance(v, str) and v in ["low", "normal", "unknown"]
-        }
-        log.info(f"Loaded {len(state)} battery states for user '{user_id}'")
-        return state
-
-    def save_battery_state(self, user_id: str, state_dict: Dict[str, str]):
-        state_filename = self.config["USER_BATTERY_STATE_FILENAME"]
-        state_file = self._get_user_file_path(user_id, state_filename)
-        if not state_file:
-            raise IOError(
-                f"Could not get battery state file path for user '{user_id}'."
-            )
-        lock = self.file_locks.get(state_filename)
-        if not lock:
-            raise RuntimeError(f"Lock for '{state_filename}' not found.")
-        if not isinstance(state_dict, dict):
-            raise TypeError("Battery state data must be a dict.")
-        state_to_save = {k: v for k, v in state_dict.items() if isinstance(v, str)}
-        try:
-            save_json_atomic(state_file, state_to_save, lock, indent=2)
-            log.debug(f"Battery state saved to {state_file} for user '{user_id}'")
-        except Exception as e:
-            log.error(f"Failed to save battery state for user '{user_id}': {e}")
-            raise
-
-    def load_notification_times(self, user_id: str) -> Dict[Tuple[str, str], float]:
-        state_filename = self.config["USER_NOTIFICATION_TIMES_FILENAME"]
-        state_file = self._get_user_file_path(user_id, state_filename)
-        if not state_file:
-            return {}
-        lock = self.file_locks.get(state_filename)
-        if not lock:
-            log.error(f"Lock for '{state_filename}' not found.")
-            return {}
-        state_from_file = load_json_file(state_file, lock)
-        if state_from_file is None:
-            return {}
-        parsed_state = {}
-        for k, v in state_from_file.items():
-            parts = k.split("::", 1)
-            if len(parts) == 2 and isinstance(v, (int, float)):
-                try:
-                    parsed_state[(parts[0], parts[1])] = float(v)
-                except ValueError:
+                device_id = data_file.stem
+                file_type = data_file.suffix.lower().strip(".")
+                if device_id == creds_stem:
+                    continue
+                if not device_id or len(device_id) > 128:
                     log.warning(
-                        f"User '{user_id}': Invalid timestamp value in {state_file.name}: {k}={v}"
+                        f"Skipping raw data load for file with invalid derived device ID: {data_file.name}"
                     )
-            else:
-                log.warning(
-                    f"User '{user_id}': Invalid key/value format in {state_file.name}: {k}={v}"
-                )
-        log.info(f"Loaded {len(parsed_state)} notification times for user '{user_id}'")
-        return parsed_state
-
-    def save_notification_times(
-        self, user_id: str, state_dict: Dict[Tuple[str, str], float]
-    ):
-        state_filename = self.config["USER_NOTIFICATION_TIMES_FILENAME"]
-        state_file = self._get_user_file_path(user_id, state_filename)
-        if not state_file:
-            raise IOError(
-                f"Could not get notification times file path for user '{user_id}'."
+                    continue
+                try:
+                    with data_file.open("rb") as f:
+                        content_bytes = f.read()
+                        content_b64 = base64.b64encode(content_bytes).decode("utf-8")
+                        raw_data_list.append(
+                            {
+                                "device_id": device_id,
+                                "type": file_type,
+                                "content_b64": content_b64,
+                            }
+                        )
+                        log.debug(
+                            f"Read and encoded {file_type} file for device {device_id}"
+                        )
+                except Exception as e:
+                    log.error(
+                        f"Error reading or encoding file {data_file.name} for user '{user_id}': {e}"
+                    )
+            log.info(
+                f"Retrieved raw data for {len(raw_data_list)} devices for user '{user_id}'"
             )
-        lock = self.file_locks.get(state_filename)
-        if not lock:
-            raise RuntimeError(f"Lock for '{state_filename}' not found.")
-        if not isinstance(state_dict, dict):
-            raise TypeError("Notification times data must be a dict.")
-        state_to_save = {}
-        for k, v in state_dict.items():
-            if isinstance(k, tuple) and len(k) == 2 and isinstance(v, (int, float)):
-                state_to_save[f"{k[0]}::{k[1]}"] = float(v)
-            else:
-                log.warning(
-                    f"User '{user_id}': Skipping invalid notification time entry during save: Key={k}, Value={v}"
-                )
-        try:
-            save_json_atomic(state_file, state_to_save, lock, indent=2)
-            log.debug(f"Notification times saved to {state_file} for user '{user_id}'")
+            return raw_data_list
         except Exception as e:
-            log.error(f"Failed to save notification times for user '{user_id}': {e}")
-            raise
+            log.error(
+                f"Error listing or processing device files for user '{user_id}': {e}"
+            )
+            return []
+
+    def update_device_local_status(
+        self,
+        user_id: str,
+        device_id: str,
+        timestamp_iso: str,
+        battery_status: Optional[str] = None,
+    ) -> bool:
+        log.info(
+            f"[UDS UpdateLocal] User:{user_id}, Device:{device_id}. Received Time: {timestamp_iso}, Batt: {battery_status}"
+        )
+        try:
+            last_seen_dt_parsed = datetime.fromisoformat(
+                timestamp_iso.replace("Z", "+00:00")
+            )
+            log.debug(
+                f"[UDS UpdateLocal] Parsed timestamp: {last_seen_dt_parsed}, TZInfo: {last_seen_dt_parsed.tzinfo}"
+            )
+            if last_seen_dt_parsed.tzinfo is None:
+                log.warning(
+                    f"[UDS UpdateLocal] Parsed timestamp was naive, assuming UTC for {device_id}."
+                )
+                last_seen_dt_utc = last_seen_dt_parsed.replace(tzinfo=timezone.utc)
+            else:
+                last_seen_dt_utc = last_seen_dt_parsed.astimezone(timezone.utc)
+                if last_seen_dt_utc != last_seen_dt_parsed:
+                    log.debug(
+                        f"[UDS UpdateLocal] Converted parsed timestamp to UTC: {last_seen_dt_utc}"
+                    )
+        except (ValueError, TypeError) as e:
+            log.error(
+                f"[UDS UpdateLocal] Invalid timestamp format received for local status update: '{timestamp_iso}'. Error: {e}"
+            )
+            return False
+        try:
+            device = db.session.execute(
+                db.select(Device).filter_by(id=device_id, user_username=user_id)
+            ).scalar_one_or_none()
+            if not device:
+                log.warning(
+                    f"[UDS UpdateLocal] Device {device_id} not found for user {user_id} during local status update. Ignoring."
+                )
+                return False
+            device.last_seen_local = last_seen_dt_utc
+            log.debug(
+                f"[UDS UpdateLocal] Setting device.last_seen_local = {device.last_seen_local} (TZInfo: {device.last_seen_local.tzinfo})"
+            )
+            valid_statuses = [
+                "Very Low",
+                "Low",
+                "Medium",
+                "High",
+                "Full",
+                "Unknown",
+                None,
+            ]
+            if battery_status is not None and battery_status in valid_statuses:
+                device.last_battery_status = battery_status
+                log.debug(
+                    f"[UDS UpdateLocal] Updating battery status for {device_id} to {battery_status}"
+                )
+            elif battery_status is not None:
+                log.warning(
+                    f"[UDS UpdateLocal] Ignoring invalid battery status '{battery_status}' received for {device_id}"
+                )
+            db.session.commit()
+            log.info(
+                f"[UDS UpdateLocal] Successfully updated DB for device {device_id} to {last_seen_dt_utc.isoformat()}"
+            )
+            return True
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"[UDS UpdateLocal] Database error updating local status for device {device_id} (User: {user_id}): {e}",
+                exc_info=True,
+            )
+            return False
 
     def load_cache_from_file(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Loads the cached device data for a user."""
-        cache_filename = self.config["USER_CACHE_FILENAME"]
+        cache_filename = self.config.get("USER_CACHE_FILENAME")
+        if not cache_filename:
+            log.error("USER_CACHE_FILENAME not found in config.")
+            return None
         cache_file = self._get_user_file_path(user_id, cache_filename)
         if not cache_file:
+            log.error(f"Could not determine cache file path for user '{user_id}'.")
             return None
         lock = self.file_locks.get(cache_filename)
         if not lock:
-            log.error(f"Lock for '{cache_filename}' not found.")
+            log.error(
+                f"Lock for cache file '{cache_filename}' not found for user '{user_id}'."
+            )
             return None
-
         cache_data = load_json_file(cache_file, lock)
         if cache_data is None:
+            log.debug(f"Cache file {cache_file} not found or invalid, returning None.")
             return None
-
         if isinstance(cache_data.get("data"), dict) and "timestamp" in cache_data:
             log.info(
                 f"Location data cache loaded from {cache_file} for user '{user_id}'"
@@ -1358,191 +1153,607 @@ class UserDataService:
             return None
 
     def save_cache_to_file(self, user_id: str, cache_data: Dict[str, Any]):
-        """Saves the cached device data for a user."""
-        cache_filename = self.config["USER_CACHE_FILENAME"]
+        cache_filename = self.config.get("USER_CACHE_FILENAME")
+        if not cache_filename:
+            log.error("USER_CACHE_FILENAME not found in config. Cannot save cache.")
+            raise ValueError("Cache filename not configured.")
         cache_file = self._get_user_file_path(user_id, cache_filename)
         if not cache_file:
             raise IOError(f"Could not get cache file path for user '{user_id}'.")
         lock = self.file_locks.get(cache_filename)
         if not lock:
-            raise RuntimeError(f"Lock for '{cache_filename}' not found.")
-
+            raise RuntimeError(
+                f"Lock configuration missing for cache file '{cache_filename}'."
+            )
         if not isinstance(cache_data, dict) or "timestamp" not in cache_data:
-            raise ValueError("Invalid cache data structure for saving.")
+            raise ValueError(
+                "Invalid cache data structure provided for saving (missing 'timestamp')."
+            )
         if "data" not in cache_data and "error" not in cache_data:
             log.warning(
                 f"Saving cache for user '{user_id}' with missing 'data' and 'error' keys."
             )
-
         try:
-            save_json_atomic(
-                cache_file, cache_data, lock, indent=None
-            )  # No indent for cache
+            save_json_atomic(cache_file, cache_data, lock, indent=None)
             log.debug(f"Cache saved to {cache_file} for user '{user_id}'")
         except Exception as e:
             log.error(f"Failed to save cache for user '{user_id}': {e}")
             raise
 
-    # --- Data Cleanup Operations ---
+    def load_subscriptions(self, user_id: str) -> Dict[str, Dict[str, Any]]:
+        log.debug(f"Loading push subscriptions from DB for user '{user_id}'")
+        try:
+            subscriptions = (
+                db.session.execute(
+                    db.select(PushSubscription).filter_by(user_username=user_id)
+                )
+                .scalars()
+                .all()
+            )
+            subs_data = {
+                sub.endpoint: sub.get_subscription_info()
+                for sub in subscriptions
+                if sub.get_subscription_info() and sub.endpoint
+            }
+            log.info(
+                f"Loaded {len(subs_data)} subscriptions from DB for user '{user_id}'"
+            )
+            return subs_data
+        except Exception as e:
+            log.error(f"Database error loading subscriptions for '{user_id}': {e}")
+            return {}
 
-    def cleanup_user_data_files(self, user_id: str, valid_device_ids: Set[str]):
-        """Removes stale entries from state files for devices that no longer exist."""
+    def save_subscriptions(self, user_id: str, subs_to_save: Dict[str, Dict[str, Any]]):
         log.info(
-            f"Running state file cleanup for user '{user_id}' based on {len(valid_device_ids)} valid device(s)."
+            f"Saving {len(subs_to_save)} push subscriptions to DB for user '{user_id}'"
+        )
+        if not isinstance(subs_to_save, dict):
+            raise TypeError("Subscriptions data must be a dictionary.")
+        try:
+            existing_subs = {
+                sub.endpoint: sub
+                for sub in db.session.execute(
+                    db.select(PushSubscription).filter_by(user_username=user_id)
+                ).scalars()
+            }
+            incoming_endpoints = set(subs_to_save.keys())
+            existing_endpoints = set(existing_subs.keys())
+            for endpoint, sub_info in subs_to_save.items():
+                if (
+                    not isinstance(sub_info, dict)
+                    or "endpoint" not in sub_info
+                    or "keys" not in sub_info
+                ):
+                    log.warning(
+                        f"Skipping invalid subscription format for endpoint {endpoint[:50]}..."
+                    )
+                    continue
+                sub = existing_subs.get(endpoint)
+                if sub:
+                    sub.set_subscription_info(sub_info)
+                    log.debug(
+                        f"Updating existing subscription for endpoint {endpoint[:50]}..."
+                    )
+                else:
+                    user = self.get_user_by_username(user_id)
+                    if not user:
+                        raise ValueError(
+                            f"User '{user_id}' not found for saving subscription."
+                        )
+                    new_sub = PushSubscription(user_username=user_id, endpoint=endpoint)
+                    new_sub.set_subscription_info(sub_info)
+                    db.session.add(new_sub)
+                    log.debug(
+                        f"Adding new subscription for endpoint {endpoint[:50]}..."
+                    )
+            endpoints_to_delete = existing_endpoints - incoming_endpoints
+            if endpoints_to_delete:
+                log.info(
+                    f"Deleting {len(endpoints_to_delete)} obsolete subscriptions for user '{user_id}'."
+                )
+                db.session.execute(
+                    db.delete(PushSubscription).filter(
+                        PushSubscription.user_username == user_id,
+                        PushSubscription.endpoint.in_(endpoints_to_delete),
+                    )
+                )
+            db.session.commit()
+            log.info(f"Successfully saved subscriptions to DB for user '{user_id}'.")
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"Database error saving subscriptions for user '{user_id}': {e}")
+            raise
+
+    def load_notification_history(self, user_id: str) -> List[Dict[str, Any]]:
+        log.debug(f"Loading notification history from DB for user '{user_id}'")
+        try:
+            history_entries = (
+                db.session.execute(
+                    db.select(NotificationHistory)
+                    .filter_by(user_username=user_id)
+                    .order_by(NotificationHistory.timestamp.desc())
+                )
+                .scalars()
+                .all()
+            )
+            history_list = [
+                {
+                    "id": entry.id,
+                    "timestamp": entry.timestamp.isoformat(),
+                    "title": entry.title,
+                    "body": entry.body,
+                    "data": entry.get_data() or {},
+                    "is_read": entry.is_read,
+                }
+                for entry in history_entries
+            ]
+            log.info(
+                f"Loaded {len(history_list)} notification history entries from DB for user '{user_id}'"
+            )
+            return history_list
+        except Exception as e:
+            log.error(
+                f"Database error loading notification history for '{user_id}': {e}"
+            )
+            return []
+
+    def save_notification_history(
+        self, user_id: str, notification_entry: Dict[str, Any]
+    ):
+        log.info(f"Saving notification history entry to DB for user '{user_id}'")
+        if not isinstance(notification_entry, dict) or not notification_entry.get("id"):
+            raise ValueError("Invalid notification entry format.")
+        try:
+            user = self.get_user_by_username(user_id)
+            if not user:
+                raise ValueError(f"User '{user_id}' not found for saving notification.")
+            ts_input = notification_entry["timestamp"]
+            timestamp_obj = None
+            if isinstance(ts_input, datetime):
+                timestamp_obj = (
+                    ts_input.astimezone(timezone.utc)
+                    if ts_input.tzinfo
+                    else ts_input.replace(tzinfo=timezone.utc)
+                )
+            elif isinstance(ts_input, str):
+                try:
+                    ts_str_cleaned = ts_input.replace("Z", "+00:00")
+                    timestamp_obj = datetime.fromisoformat(ts_str_cleaned)
+                except ValueError:
+                    log.error(
+                        f"Invalid ISO timestamp format in notification entry: {ts_input}"
+                    )
+                    raise ValueError("Invalid timestamp format in notification entry")
+            else:
+                raise ValueError("Timestamp must be a datetime object or ISO string.")
+            if timestamp_obj.tzinfo is None:
+                timestamp_obj = timestamp_obj.replace(tzinfo=timezone.utc)
+            else:
+                timestamp_obj = timestamp_obj.astimezone(timezone.utc)
+            new_entry = NotificationHistory(
+                id=notification_entry["id"],
+                user_username=user_id,
+                timestamp=timestamp_obj,
+                title=notification_entry["title"],
+                body=notification_entry.get("body"),
+                is_read=notification_entry.get("is_read", False),
+            )
+            new_entry.set_data(notification_entry.get("data", {}))
+            db.session.add(new_entry)
+            db.session.commit()
+            log.debug(
+                f"Added notification history entry {new_entry.id} for user '{user_id}'."
+            )
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"Database error saving notification history entry for user '{user_id}': {e}"
+            )
+            raise
+
+    def update_notification_read_status(
+        self, user_id: str, notification_id: str, is_read: bool
+    ) -> bool:
+        log.info(
+            f"Updating read status for notification {notification_id} (User: {user_id}) to {is_read} in DB."
         )
         try:
-            current_gf_state = self.load_geofence_state(user_id)
-            keys_to_remove_gf = [
-                k for k in current_gf_state if k[0] not in valid_device_ids
-            ]
-            if keys_to_remove_gf:
-                log.info(
-                    f"User '{user_id}': Removing {len(keys_to_remove_gf)} stale geofence state entries."
+            result = db.session.execute(
+                db.update(NotificationHistory)
+                .filter_by(id=notification_id, user_username=user_id)
+                .values(is_read=bool(is_read))
+            )
+            if result.rowcount == 0:
+                log.warning(
+                    f"Notification {notification_id} not found for user '{user_id}' during read status update."
                 )
-                updated_state = {
-                    k: v
-                    for k, v in current_gf_state.items()
-                    if k not in keys_to_remove_gf
-                }
-                self.save_geofence_state(user_id, updated_state)
+                db.session.rollback()
+                return False
+            db.session.commit()
+            log.debug(
+                f"Successfully updated read status for notification {notification_id}."
+            )
+            return True
         except Exception as e:
-            log.error(f"User '{user_id}': Error cleaning up geofence state: {e}")
-        try:
-            current_batt_state = self.load_battery_state(user_id)
-            keys_to_remove_batt = [
-                k for k in current_batt_state if k not in valid_device_ids
-            ]
-            if keys_to_remove_batt:
-                log.info(
-                    f"User '{user_id}': Removing {len(keys_to_remove_batt)} stale battery state entries."
-                )
-                updated_state = {
-                    k: v
-                    for k, v in current_batt_state.items()
-                    if k not in keys_to_remove_batt
-                }
-                self.save_battery_state(user_id, updated_state)
-        except Exception as e:
-            log.error(f"User '{user_id}': Error cleaning up battery state: {e}")
-        try:
-            current_notify_times = self.load_notification_times(user_id)
-            keys_to_remove_times = [
-                k
-                for k in current_notify_times
-                if isinstance(k, tuple) and len(k) > 0 and k[0] not in valid_device_ids
-            ]
-            if keys_to_remove_times:
-                log.info(
-                    f"User '{user_id}': Removing {len(keys_to_remove_times)} stale notification time entries."
-                )
-                updated_state = {
-                    k: v
-                    for k, v in current_notify_times.items()
-                    if k not in keys_to_remove_times
-                }
-                self.save_notification_times(user_id, updated_state)
-        except Exception as e:
-            log.error(f"User '{user_id}': Error cleaning up notification times: {e}")
-        log.info(f"Finished state file cleanup for user '{user_id}'.")
+            db.session.rollback()
+            log.error(
+                f"Database error updating read status for notification {notification_id} (User: {user_id}): {e}"
+            )
+            return False
 
-    # --- NEW: Account Deletion ---
+    def delete_notification_history(
+        self, user_id: str, notification_id: Optional[str] = None
+    ) -> bool:
+        try:
+            deleted_count = 0
+            if notification_id:
+                log.info(
+                    f"Deleting notification {notification_id} from DB for user '{user_id}'"
+                )
+                result = db.session.execute(
+                    db.delete(NotificationHistory).filter_by(
+                        id=notification_id, user_username=user_id
+                    )
+                )
+                deleted_count = result.rowcount
+                if deleted_count == 0:
+                    log.warning(
+                        f"Notification {notification_id} not found for deletion (User: {user_id})."
+                    )
+            else:
+                log.warning(
+                    f"Deleting ALL notification history from DB for user '{user_id}'"
+                )
+                result = db.session.execute(
+                    db.delete(NotificationHistory).filter_by(user_username=user_id)
+                )
+                deleted_count = result.rowcount
+                log.info(
+                    f"Deleted {deleted_count} notification history entries for user '{user_id}'."
+                )
+            db.session.commit()
+            return True if deleted_count > 0 or notification_id is None else False
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"Database error deleting notification history for user '{user_id}' (ID: {notification_id}): {e}"
+            )
+            return False
+
+    def prune_notification_history(self, user_id: str):
+        log.info(f"Pruning notification history from DB for user '{user_id}'.")
+        try:
+            max_days = self.config.get("NOTIFICATION_HISTORY_DAYS", 30)
+            if not isinstance(max_days, int) or max_days <= 0:
+                log.warning(
+                    f"Invalid NOTIFICATION_HISTORY_DAYS ({max_days}). Using default 30."
+                )
+                max_days = 30
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=max_days)
+            result = db.session.execute(
+                db.delete(NotificationHistory).filter(
+                    NotificationHistory.user_username == user_id,
+                    NotificationHistory.timestamp < cutoff_date,
+                )
+            )
+            deleted_count = result.rowcount
+            db.session.commit()
+            if deleted_count > 0:
+                log.info(
+                    f"Pruned {deleted_count} old notification history entries from DB for user '{user_id}'."
+                )
+            else:
+                log.debug(f"No history entries needed pruning for user '{user_id}'.")
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"Database error pruning notification history for user '{user_id}': {e}"
+            )
+
+    def load_geofence_state(self, user_id: str) -> Dict[Tuple[str, str], str]:
+        log.debug(f"Loading geofence state from DB for user '{user_id}'")
+        try:
+            statuses = (
+                db.session.execute(
+                    db.select(GeofenceDeviceStatus)
+                    .join(Device)
+                    .filter(Device.user_username == user_id)
+                )
+                .scalars()
+                .all()
+            )
+            state_dict = {
+                (status.device_id, status.geofence_id): status.status
+                for status in statuses
+            }
+            log.info(
+                f"Loaded {len(state_dict)} geofence states from DB for user '{user_id}'"
+            )
+            return state_dict
+        except Exception as e:
+            log.error(f"Database error loading geofence state for '{user_id}': {e}")
+            return {}
+
+    def save_geofence_state(self, user_id: str, state_dict: Dict[Tuple[str, str], str]):
+        log.debug(
+            f"Saving {len(state_dict)} geofence states to DB for user '{user_id}'"
+        )
+        if not isinstance(state_dict, dict):
+            raise TypeError("Geofence state data must be a dict.")
+        try:
+            valid_device_ids = set(
+                db.session.execute(
+                    db.select(Device.id).filter_by(user_username=user_id)
+                )
+                .scalars()
+                .all()
+            )
+            valid_geofence_ids = set(
+                db.session.execute(
+                    db.select(Geofence.id).filter_by(user_username=user_id)
+                )
+                .scalars()
+                .all()
+            )
+            for (device_id, gf_id), status in state_dict.items():
+                if not isinstance(status, str) or status not in [
+                    "inside",
+                    "outside",
+                    "unknown",
+                ]:
+                    log.warning(
+                        f"Skipping invalid status '{status}' for Dev:{device_id}/GF:{gf_id}"
+                    )
+                    continue
+                if device_id not in valid_device_ids or gf_id not in valid_geofence_ids:
+                    log.warning(
+                        f"Skipping geofence status save: Device '{device_id}' or Geofence '{gf_id}' not found or not owned by user '{user_id}'."
+                    )
+                    continue
+                status_entry = GeofenceDeviceStatus(
+                    device_id=device_id, geofence_id=gf_id, status=status
+                )
+                db.session.merge(status_entry)
+            db.session.commit()
+            log.debug(f"Geofence state saved to DB for user '{user_id}'")
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"Database error saving geofence state for user '{user_id}': {e}")
+            raise
+
+    def load_battery_state(self, user_id: str) -> Dict[str, str]:
+        log.debug(f"Loading battery state from DB for user '{user_id}'")
+        try:
+            devices = db.session.execute(
+                db.select(Device.id, Device.last_battery_status).filter_by(
+                    user_username=user_id
+                )
+            ).all()
+            state_dict = {
+                dev_id: status if status else "unknown" for dev_id, status in devices
+            }
+            log.info(
+                f"Loaded {len(state_dict)} battery states from DB for user '{user_id}'"
+            )
+            return state_dict
+        except Exception as e:
+            log.error(f"Database error loading battery state for '{user_id}': {e}")
+            return {}
+
+    def save_battery_state(self, user_id: str, state_dict: Dict[str, str]):
+        log.debug(f"Saving {len(state_dict)} battery states to DB for user '{user_id}'")
+        if not isinstance(state_dict, dict):
+            raise TypeError("Battery state data must be a dict.")
+        try:
+            updated_count = 0
+            for device_id, status in state_dict.items():
+                valid_statuses = [
+                    "low",
+                    "normal",
+                    "unknown",
+                    "Very Low",
+                    "Medium",
+                    "High",
+                    "Full",
+                    None,
+                ]
+                if status not in valid_statuses and not isinstance(status, str):
+                    log.warning(
+                        f"Skipping invalid battery status '{status}' (type: {type(status)}) for device '{device_id}'"
+                    )
+                    continue
+                result = db.session.execute(
+                    db.update(Device)
+                    .filter_by(id=device_id, user_username=user_id)
+                    .values(last_battery_status=status if status else None)
+                )
+                if result.rowcount > 0:
+                    updated_count += 1
+                else:
+                    log.warning(
+                        f"Device {device_id} not found for user {user_id} while saving battery state."
+                    )
+            db.session.commit()
+            log.debug(
+                f"Updated {updated_count} battery states in DB for user '{user_id}'."
+            )
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"Database error saving battery state for user '{user_id}': {e}")
+            raise
+
+    def load_notification_times(self, user_id: str) -> Dict[Tuple[str, str], float]:
+        log.debug(f"Loading notification times from DB for user '{user_id}'")
+        try:
+            cooldowns = (
+                db.session.execute(
+                    db.select(NotificationCooldown)
+                    .join(Device)
+                    .filter(Device.user_username == user_id)
+                )
+                .scalars()
+                .all()
+            )
+            times_dict = {
+                (cd.device_id, cd.event_key): cd.last_sent_timestamp for cd in cooldowns
+            }
+            log.info(
+                f"Loaded {len(times_dict)} notification times from DB for user '{user_id}'"
+            )
+            return times_dict
+        except Exception as e:
+            log.error(f"Database error loading notification times for '{user_id}': {e}")
+            return {}
+
+    def save_notification_times(
+        self, user_id: str, state_dict: Dict[Tuple[str, str], float]
+    ):
+        log.debug(
+            f"Saving {len(state_dict)} notification times to DB for user '{user_id}'"
+        )
+        if not isinstance(state_dict, dict):
+            raise TypeError("Notification times data must be a dict.")
+        try:
+            valid_device_ids = set(
+                db.session.execute(
+                    db.select(Device.id).filter_by(user_username=user_id)
+                )
+                .scalars()
+                .all()
+            )
+            for (device_id, event_key), timestamp in state_dict.items():
+                if not isinstance(timestamp, (int, float)):
+                    log.warning(
+                        f"Skipping invalid timestamp '{timestamp}' for Dev:{device_id}/Event:{event_key}"
+                    )
+                    continue
+                if device_id not in valid_device_ids:
+                    log.warning(
+                        f"Skipping cooldown save: Device '{device_id}' not found or not owned by user '{user_id}'."
+                    )
+                    continue
+                cooldown_entry = NotificationCooldown(
+                    device_id=device_id,
+                    event_key=event_key,
+                    last_sent_timestamp=float(timestamp),
+                )
+                db.session.merge(cooldown_entry)
+            db.session.commit()
+            log.debug(f"Notification times saved to DB for user '{user_id}'")
+        except Exception as e:
+            db.session.rollback()
+            log.error(
+                f"Database error saving notification times for user '{user_id}': {e}"
+            )
+            raise
+
+    def cleanup_user_data_files(self, user_id: str, valid_device_ids: Set[str]):
+        log.info(
+            f"Running DB state cleanup for user '{user_id}' based on {len(valid_device_ids)} valid device(s)."
+        )
+        try:
+            user_device_ids_subquery = db.select(Device.id).filter_by(
+                user_username=user_id
+            )
+            gf_status_del_stmt = db.delete(GeofenceDeviceStatus).where(
+                GeofenceDeviceStatus.device_id.in_(user_device_ids_subquery),
+                ~GeofenceDeviceStatus.device_id.in_(valid_device_ids),
+            )
+            gf_deleted_count = db.session.execute(gf_status_del_stmt).rowcount
+            if gf_deleted_count > 0:
+                log.info(
+                    f"User '{user_id}': Removed {gf_deleted_count} stale geofence status entries from DB."
+                )
+            cd_del_stmt = db.delete(NotificationCooldown).where(
+                NotificationCooldown.device_id.in_(user_device_ids_subquery),
+                ~NotificationCooldown.device_id.in_(valid_device_ids),
+            )
+            cd_deleted_count = db.session.execute(cd_del_stmt).rowcount
+            if cd_deleted_count > 0:
+                log.info(
+                    f"User '{user_id}': Removed {cd_deleted_count} stale notification cooldown entries from DB."
+                )
+            db.session.commit()
+            log.info(f"Finished DB state cleanup for user '{user_id}'.")
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"Database error during state cleanup for user '{user_id}': {e}")
 
     def load_shares(self) -> Dict[str, Dict[str, Any]]:
-        """Loads the global shares database (shares.json)."""
-        shares_lock = self.file_locks.get("shares")
-        if not shares_lock:
-            log.error("Lock for 'shares.json' not found.")
-            return {}
-        # --- FIX: Use correct path joining ---
-        shares_file_path = (
-            self.data_dir / self.config["SHARES_FILE"].name
-        )  # Use name relative to data_dir
-        # --- ---------------------------- ---
-        shares_data = load_json_file(shares_file_path, shares_lock)
-        if shares_data is None:
-            # --- FIX: Create empty shares file if it doesn't exist ---
-            if not shares_file_path.exists():
-                log.warning(
-                    f"Shares file {shares_file_path} not found. Creating empty file."
+        log.debug("Loading ALL shares from DB (use specific methods if possible).")
+        try:
+            shares = db.session.execute(db.select(Share)).scalars().all()
+            shares_data = {}
+            for share in shares:
+                created_at_aware = (
+                    share.created_at.astimezone(timezone.utc)
+                    if share.created_at.tzinfo
+                    else share.created_at.replace(tzinfo=timezone.utc)
                 )
-                try:
-                    self.save_shares({})  # Save an empty dict initially
-                    return {}
-                except Exception as e:
-                    log.error(f"Failed to create initial shares file: {e}")
-                    return {}  # Return empty on creation failure
-            else:
-                return {}  # Return empty if loading failed but file exists
-            # --- -------------------------------------------------- ---
-        if not isinstance(shares_data, dict):
-            log.error("shares.json format invalid.")
+                expires_at_aware = None
+                if share.expires_at:
+                    expires_at_aware = (
+                        share.expires_at.astimezone(timezone.utc)
+                        if share.expires_at.tzinfo
+                        else share.expires_at.replace(tzinfo=timezone.utc)
+                    )
+                shares_data[share.id] = {
+                    "share_id": share.id,
+                    "user_id": share.user_username,
+                    "device_id": share.device_id,
+                    "created_at": created_at_aware.isoformat(),
+                    "expires_at": (
+                        expires_at_aware.isoformat() if expires_at_aware else None
+                    ),
+                    "active": share.active,
+                    "note": share.note,
+                }
+            return shares_data
+        except Exception as e:
+            log.error(f"Database error loading all shares: {e}")
             return {}
-        return shares_data
 
     def save_shares(self, shares_data: Dict[str, Dict[str, Any]]):
-        """Saves the global shares database (shares.json)."""
-        shares_lock = self.file_locks.get("shares")
-        if not shares_lock:
-            raise RuntimeError("Share lock missing.")
-        if not isinstance(shares_data, dict):
-            raise TypeError("shares_data must be dict.")
-        # --- FIX: Use correct path joining ---
-        shares_file_path = self.data_dir / self.config["SHARES_FILE"].name
-        # --- ---------------------------- ---
-        try:
-            save_json_atomic(shares_file_path, shares_data, shares_lock, indent=2)
-            log.info(f"Saved {len(shares_data)} shares to {shares_file_path.name}")
-        except Exception as e:
-            log.error(f"Failed to save shares data: {e}")
-            raise
+        log.warning(
+            "save_shares (bulk) called. Prefer specific add/update/delete methods."
+        )
+        pass
 
-    def save_shares(self, shares_data: Dict[str, Dict[str, Any]]):
-        """Saves the global shares database (shares.json)."""
-        shares_lock = self.file_locks.get("shares")
-        if not shares_lock:
-            raise RuntimeError("Share lock missing.")
-        if not isinstance(shares_data, dict):
-            raise TypeError("shares_data must be dict.")
-        shares_file_path = self.config["DATA_DIRECTORY"] / self.config["SHARES_FILE"]
+    def get_share(self, share_id: str) -> Optional[Dict[str, Any]]:
+        log.debug(f"Loading share {share_id} from DB.")
         try:
-            save_json_atomic(shares_file_path, shares_data, shares_lock, indent=2)
-            log.info(f"Saved {len(shares_data)} shares to {shares_file_path.name}")
+            share = db.session.execute(
+                db.select(Share).filter_by(id=share_id)
+            ).scalar_one_or_none()
+            if not share:
+                log.warning(f"Share ID '{share_id}' not found in database.")
+                return None
+            created_at_aware = (
+                share.created_at.astimezone(timezone.utc)
+                if share.created_at.tzinfo
+                else share.created_at.replace(tzinfo=timezone.utc)
+            )
+            expires_at_aware = None
+            if share.expires_at:
+                expires_at_aware = (
+                    share.expires_at.astimezone(timezone.utc)
+                    if share.expires_at.tzinfo
+                    else share.expires_at.replace(tzinfo=timezone.utc)
+                )
+            return {
+                "share_id": share.id,
+                "user_id": share.user_username,
+                "device_id": share.device_id,
+                "created_at": created_at_aware.isoformat(),
+                "expires_at": (
+                    expires_at_aware.isoformat() if expires_at_aware else None
+                ),
+                "active": share.active,
+                "note": share.note,
+            }
         except Exception as e:
-            log.error(f"Failed to save shares data: {e}")
-            raise
-
-    def get_active_shared_device_ids_for_user(self, user_id: str) -> Set[str]:
-        """Gets a set of device IDs actively shared BY this user."""
-        active_ids = set()
-        all_shares = self.load_shares()
-        now_utc = datetime.now(timezone.utc)
-        for share_id, share_data in all_shares.items():
-            # Check owner and active status
-            if share_data.get("user_id") == user_id and share_data.get("active", False):
-                expires_at_str = share_data.get("expires_at")
-                # Check expiry
-                if expires_at_str:
-                    try:
-                        expires_at_dt = datetime.fromisoformat(
-                            expires_at_str.replace("Z", "+00:00")
-                        )
-                        if expires_at_dt.tzinfo is None:
-                            expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
-                        # Only add if not expired
-                        if expires_at_dt >= now_utc:
-                            device_id = share_data.get("device_id")
-                            if device_id:
-                                active_ids.add(device_id)
-                    except ValueError:
-                        log.warning(
-                            f"Invalid expiry format checking active shares for user {user_id}, share {share_id}"
-                        )
-                else:
-                    # No expiry date means it's active indefinitely
-                    device_id = share_data.get("device_id")
-                    if device_id:
-                        active_ids.add(device_id)
-        return active_ids
+            log.error(f"Database error loading share {share_id}: {e}", exc_info=True)
+            return None
 
     def add_share(
         self,
@@ -1551,534 +1762,391 @@ class UserDataService:
         duration_hours: Optional[int],
         note: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Creates a new share record."""
+        log.info(
+            f"Adding share to DB for User:{user_id}, Device:{device_id}, Duration:{duration_hours}h"
+        )
         if not user_id or not device_id:
-            log.error("Missing user/device ID for share.")
-            return None
+            raise ValueError("Missing user/device ID for share.")
+        user = self.get_user_by_username(user_id)
+        if not user:
+            raise ValueError(f"User '{user_id}' not found.")
+        device = db.session.execute(
+            db.select(Device).filter_by(id=device_id, user_username=user_id)
+        ).scalar_one_or_none()
+        if not device:
+            raise ValueError(f"Device '{device_id}' not found for user '{user_id}'.")
         share_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
         expires_at = None
         if duration_hours is not None and duration_hours > 0:
-            expires_at = now + timedelta(hours=duration_hours)
+            expires_at = now_utc + timedelta(hours=duration_hours)
         elif duration_hours == 0:
-            expires_at = None  # Indefinite
+            expires_at = None
         else:
             default_duration = self.config.get("DEFAULT_SHARE_DURATION_HOURS", 24)
-            if default_duration > 0:
-                expires_at = now + timedelta(hours=default_duration)
-        new_share = {
-            "share_id": share_id,
-            "user_id": user_id,
-            "device_id": device_id,
-            "created_at": now.isoformat(),
-            "expires_at": expires_at.isoformat() if expires_at else None,
-            "active": True,
-            "note": (note or "").strip()[:100],
-        }
+            expires_at = (
+                now_utc + timedelta(hours=default_duration)
+                if default_duration > 0
+                else None
+            )
         try:
-            all_shares = self.load_shares()
-            all_shares[share_id] = new_share
-            self.save_shares(all_shares)
+            new_share = Share(
+                id=share_id,
+                user_username=user_id,
+                device_id=device_id,
+                created_at=now_utc,
+                expires_at=expires_at,
+                active=True,
+                note=(note or "").strip()[:100],
+            )
+            db.session.add(new_share)
+            db.session.commit()
             log.info(
-                f"User '{user_id}' created share '{share_id}' for device '{device_id}'. Expires: {new_share['expires_at']}"
+                f"User '{user_id}' created share '{share_id}' in DB for device '{device_id}'. Expires: {new_share.expires_at}"
             )
-            return new_share
+            return {
+                "share_id": new_share.id,
+                "user_id": new_share.user_username,
+                "device_id": new_share.device_id,
+                "created_at": new_share.created_at.isoformat(),
+                "expires_at": (
+                    new_share.expires_at.isoformat() if new_share.expires_at else None
+                ),
+                "active": new_share.active,
+                "note": new_share.note,
+            }
         except Exception as e:
-            log.exception(
-                f"Failed to add share for user '{user_id}', device '{device_id}'"
-            )
+            db.session.rollback()
+            log.error(f"Database error adding share for user '{user_id}': {e}")
             return None
 
-    def get_share(self, share_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieves a specific share record by its ID."""
-        all_shares = self.load_shares()
-        return all_shares.get(share_id)
-
     def get_user_shares(self, user_id: str) -> List[Dict[str, Any]]:
-        """Retrieves all active shares created by a specific user."""
-        all_shares = self.load_shares()
+        log.debug(
+            f"Loading shares from DB for user '{user_id}' for potential export/display"
+        )
         user_shares = []
-        now_utc = datetime.now(timezone.utc)
-        for share_id, share_data in all_shares.items():
-            if share_data.get("user_id") == user_id:
-                is_expired = False
-                expires_at_str = share_data.get("expires_at")
-                if expires_at_str:
-                    try:
-                        expires_at_dt = datetime.fromisoformat(
-                            expires_at_str.replace("Z", "+00:00")
-                        )
-                        if expires_at_dt.tzinfo is None:
-                            expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
-                        if expires_at_dt < now_utc:
-                            is_expired = True
-                    except ValueError:
-                        log.warning(f"Invalid expiry format for share {share_id}")
-                        is_expired = True
-                # Only include if active flag is True (ignore expiry here, UI can show expired ones if needed)
-                # if share_data.get("active", False): # <<< Keep this check
-                share_data_with_id = share_data.copy()
-                share_data_with_id["share_id"] = share_id
-                share_data_with_id["is_expired"] = is_expired  # Add expiry status flag
-                user_shares.append(share_data_with_id)
-        user_shares.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        return user_shares
+        try:
+            shares_query = (
+                db.select(
+                    Share.id,
+                    Share.user_username,
+                    Share.device_id,
+                    Share.created_at,
+                    Share.expires_at,
+                    Share.active,
+                    Share.note,
+                    Device.name.label("device_name"),
+                )
+                .join(Device, Share.device_id == Device.id)
+                .where(Share.user_username == user_id)
+                .order_by(Share.created_at.desc())
+            )
+            results = db.session.execute(shares_query).mappings().all()
+            now_utc = datetime.now(timezone.utc)
 
-    # --- START: New Share Management Methods ---
+            for row in results:
+                expires_at_aware = None
+                if row["expires_at"]:
+                    expires_at_aware = (
+                        row["expires_at"].astimezone(timezone.utc)
+                        if row["expires_at"].tzinfo
+                        else row["expires_at"].replace(tzinfo=timezone.utc)
+                    )
+                is_expired = expires_at_aware and expires_at_aware < now_utc
+
+                created_at_aware = row["created_at"]
+                if created_at_aware and created_at_aware.tzinfo is None:
+                    created_at_aware = created_at_aware.replace(tzinfo=timezone.utc)
+
+                user_shares.append(
+                    {
+                        "share_id": row["id"],
+                        "user_id": row["user_username"],
+                        "device_id": row["device_id"],
+                        "created_at": (
+                            created_at_aware.isoformat() if created_at_aware else None
+                        ),
+                        "expires_at": (
+                            expires_at_aware.isoformat() if expires_at_aware else None
+                        ),
+                        "active": row["active"],
+                        "note": row["note"],
+                        "device_name": row["device_name"] or row["device_id"],
+                        "is_expired": is_expired,
+                    }
+                )
+            log.info(
+                f"Loaded {len(user_shares)} shares from DB for user '{user_id}' (export/display ready)"
+            )
+            return user_shares
+        except Exception as e:
+            log.error(
+                f"Database error loading shares for user '{user_id}': {e}",
+                exc_info=True,
+            )
+            return []
+
+    def import_user_shares(
+        self, user_id: str, shares_to_import: List[Dict[str, Any]]
+    ) -> int:
+        """Imports shares for a user, preserving IDs if possible."""
+        log.warning(
+            f"Importing {len(shares_to_import)} shares for user '{user_id}'. ALL EXISTING SHARES FOR THIS USER WILL BE DELETED."
+        )
+        try:
+            # Delete existing shares first within the transaction
+            deleted_count_result = db.session.execute(
+                db.delete(Share).where(Share.user_username == user_id)
+            )
+            db.session.flush() # Ensure deletes happen before potential adds with same ID
+            log.info(
+                f"Deleted {deleted_count_result.rowcount} existing shares for user '{user_id}' before import."
+            )
+        except Exception as e:
+            # If deletion fails, rollback and raise to prevent partial import
+            db.session.rollback()
+            log.error(
+                f"Error deleting existing shares for user '{user_id}' during import: {e}"
+            )
+            raise # Stop the import process
+
+        valid_user_device_ids = set(
+            db.session.execute(db.select(Device.id).filter_by(user_username=user_id))
+            .scalars()
+            .all()
+        )
+        if not valid_user_device_ids:
+            log.warning(
+                f"User '{user_id}' has no devices. Cannot import any shares that require device links."
+            )
+
+        imported_count = 0
+        new_share_objects = []
+
+        for share_data in shares_to_import:
+            if not isinstance(share_data, dict):
+                log.warning(f"Skipping malformed share item (not a dict): {share_data}")
+                continue
+
+            
+            share_id = share_data.get("share_id")
+            device_id = share_data.get("device_id")
+
+            
+            if not share_id or not isinstance(share_id, str) or len(share_id) > 64:
+                log.warning(f"Skipping share item with missing or invalid 'share_id': {share_data}")
+                continue
+            if not device_id:
+                log.warning(f"Skipping share item with missing device_id: {share_data}")
+                continue
+            
+
+            if device_id not in valid_user_device_ids:
+                log.warning(
+                    f"Skipping share for device '{device_id}' as it does not exist or belong to user '{user_id}'. Share data: {share_data}"
+                )
+                continue
+
+            try:
+                # new_share_id = str(uuid.uuid4()) 
+                created_at_str = share_data.get("created_at")
+                # Use helper function to parse potentially naive timestamp
+                created_at = _parse_old_timestamp(created_at_str) or datetime.now(
+                    timezone.utc
+                )
+                expires_at_str = share_data.get("expires_at")
+                expires_at = _parse_old_timestamp(expires_at_str) # Helper handles None
+                active = share_data.get("active", True)
+                note = (share_data.get("note", "") or "").strip()[:100]
+
+                
+                new_share = Share(
+                    id=share_id,
+                    user_username=user_id,
+                    device_id=device_id,
+                    created_at=created_at,
+                    expires_at=expires_at,
+                    active=bool(active),
+                    note=note,
+                )
+                
+                new_share_objects.append(new_share)
+                imported_count += 1
+            except Exception as e:
+                log.error(
+                    f"Error processing individual share item for import (User: {user_id}, Device: {device_id}, ShareID: {share_id}): {e}. Data: {share_data}"
+                )
+
+        if new_share_objects:
+            try:
+                # Use add_all which should handle inserting objects with predefined primary keys
+                db.session.add_all(new_share_objects)
+                log.info(
+                    f"Staged {len(new_share_objects)} new shares for user '{user_id}' for commit."
+                )
+                
+                # db.session.commit()
+                
+            except Exception as e:
+                log.error(f"Error staging new shares for user '{user_id}': {e}")
+                # Rollback changes within this specific function's scope if staging fails
+                db.session.rollback()
+                raise # Re-raise to indicate failure to the caller
+        return imported_count # Return count of successfully *staged* shares
+    
+
     def toggle_share_status(
         self, share_id: str, requesting_user_id: str, new_status: bool
     ) -> bool:
-        """Sets the active status of a share if the requesting user is the owner."""
+        log.info(
+            f"Toggling share {share_id} status to {new_status} in DB for user '{requesting_user_id}'."
+        )
         try:
-            all_shares = self.load_shares()
-            share_data = all_shares.get(share_id)
-
-            if not share_data:
-                log.warning(f"Toggle status failed: Share ID '{share_id}' not found.")
-                return False
-            if share_data.get("user_id") != requesting_user_id:
-                log.warning(
-                    f"Toggle status failed: User '{requesting_user_id}' does not own share '{share_id}'."
-                )
-                return False
-
-            current_status = share_data.get("active", False)
-            if current_status == new_status:
-                log.info(
-                    f"Share '{share_id}' status is already {new_status}. No change needed."
-                )
-                return True  # Treat as success if already in desired state
-
-            share_data["active"] = new_status
-            self.save_shares(all_shares)
-            log.info(
-                f"User '{requesting_user_id}' set share '{share_id}' status to {new_status}."
+            result = db.session.execute(
+                db.update(Share)
+                .filter_by(id=share_id, user_username=requesting_user_id)
+                .values(active=bool(new_status))
             )
+            if result.rowcount == 0:
+                log.warning(
+                    f"Toggle status failed: Share {share_id} not found or not owned by user '{requesting_user_id}'."
+                )
+                db.session.rollback()
+                return False
+            db.session.commit()
+            log.info(f"Successfully toggled share {share_id} status to {new_status}.")
             return True
         except Exception as e:
-            log.exception(f"Failed to toggle status for share '{share_id}'")
+            db.session.rollback()
+            log.error(f"Database error toggling share status for {share_id}: {e}")
             return False
 
     def update_share_expiry(
         self, share_id: str, requesting_user_id: str, new_duration_hours: Optional[int]
     ) -> Optional[Dict]:
-        """Updates the expiry time of a share if the requesting user is the owner."""
+        log.info(
+            f"Updating share {share_id} expiry (Duration: {new_duration_hours}h) in DB for user '{requesting_user_id}'."
+        )
         try:
-            all_shares = self.load_shares()
-            share_data = all_shares.get(share_id)
-
-            if not share_data:
-                log.warning(f"Update expiry failed: Share ID '{share_id}' not found.")
-                return None
-            if share_data.get("user_id") != requesting_user_id:
+            share = db.session.execute(
+                db.select(Share).filter_by(
+                    id=share_id, user_username=requesting_user_id
+                )
+            ).scalar_one_or_none()
+            if not share:
                 log.warning(
-                    f"Update expiry failed: User '{requesting_user_id}' does not own share '{share_id}'."
+                    f"Update expiry failed: Share {share_id} not found or not owned by user '{requesting_user_id}'."
                 )
                 return None
-
-            now = datetime.now(timezone.utc)
-            new_expires_at = None
+            now_utc = datetime.now(timezone.utc)
+            new_expires_at: Optional[datetime] = None
             if new_duration_hours is not None and new_duration_hours > 0:
-                new_expires_at = now + timedelta(hours=new_duration_hours)
-            elif new_duration_hours == 0:  # Indefinite
+                new_expires_at = now_utc + timedelta(hours=new_duration_hours)
+            elif new_duration_hours == 0:
                 new_expires_at = None
-            else:  # Use default if invalid duration provided (e.g., None or negative)
+            else:
                 default_duration = self.config.get("DEFAULT_SHARE_DURATION_HOURS", 24)
-                if default_duration > 0:
-                    new_expires_at = now + timedelta(hours=default_duration)
-
-            share_data["expires_at"] = (
-                new_expires_at.isoformat() if new_expires_at else None
-            )
-            share_data["note"] = share_data.get(
-                "note", ""
-            )  # Ensure note exists even if empty
-
-            self.save_shares(all_shares)
+                new_expires_at = (
+                    now_utc + timedelta(hours=default_duration)
+                    if default_duration > 0
+                    else None
+                )
+            share.expires_at = new_expires_at
+            db.session.commit()
             log.info(
-                f"User '{requesting_user_id}' updated expiry for share '{share_id}' to {share_data['expires_at']}."
+                f"Successfully updated expiry for share {share_id} to {share.expires_at}."
             )
-            # Return the updated share data (including share_id)
-            updated_share = share_data.copy()
-            updated_share["share_id"] = share_id
-            return updated_share
+            is_expired_check = False
+            expires_at_iso = None
+            if share.expires_at:
+                expires_at_aware = (
+                    share.expires_at.astimezone(timezone.utc)
+                    if share.expires_at.tzinfo
+                    else share.expires_at.replace(tzinfo=timezone.utc)
+                )
+                is_expired_check = expires_at_aware < now_utc
+                expires_at_iso = expires_at_aware.isoformat()
+            created_at_aware = (
+                share.created_at.astimezone(timezone.utc)
+                if share.created_at.tzinfo
+                else share.created_at.replace(tzinfo=timezone.utc)
+            )
+            return {
+                "share_id": share.id,
+                "user_id": share.user_username,
+                "device_id": share.device_id,
+                "created_at": created_at_aware.isoformat(),
+                "expires_at": expires_at_iso,
+                "active": share.active,
+                "note": share.note,
+                "is_expired": is_expired_check,
+            }
         except Exception as e:
-            log.exception(f"Failed to update expiry for share '{share_id}'")
-            return None
-
-    # --- END: New Share Management Methods ---
+            db.session.rollback()
+            log.error(f"Database error updating share expiry for {share_id}: {e}")
+            raise
 
     def delete_share_permanently(self, share_id: str, requesting_user_id: str) -> bool:
-        """
-        Permanently deletes a share record from shares.json if the user is the owner.
-        """
+        log.warning(
+            f"Permanently deleting share {share_id} from DB for user '{requesting_user_id}'."
+        )
         try:
-            all_shares = self.load_shares()  # load_shares handles locking for read
-            share_data = all_shares.get(share_id)
-
-            if not share_data:
-                log.warning(
-                    f"Permanent delete failed: Share ID '{share_id}' not found."
+            result = db.session.execute(
+                db.delete(Share).filter_by(
+                    id=share_id, user_username=requesting_user_id
                 )
-                return False  # Not found is not an error, but deletion didn't happen
-
-            if share_data.get("user_id") != requesting_user_id:
+            )
+            if result.rowcount == 0:
                 log.warning(
-                    f"Permanent delete failed: User '{requesting_user_id}' does not own share '{share_id}'."
+                    f"Permanent delete failed: Share {share_id} not found or not owned by user '{requesting_user_id}'."
                 )
-                # Consider raising PermissionError here? For now, return False
+                db.session.rollback()
                 return False
-
-            # If checks pass, remove the entry
-            del all_shares[share_id]
-
-            # Save the modified dictionary (save_shares handles locking for write)
-            self.save_shares(all_shares)
-            log.info(
-                f"User '{requesting_user_id}' permanently deleted share '{share_id}'."
-            )
+            db.session.commit()
+            log.info(f"Successfully permanently deleted share {share_id}.")
             return True
-
-        except KeyError:  # Should be caught by the get() check, but safety first
-            log.warning(
-                f"Permanent delete failed: Share ID '{share_id}' key error during removal attempt."
-            )
-            return False
         except Exception as e:
-            log.exception(f"Failed to permanently delete share '{share_id}'")
-            return False  # Indicate failure
-
-    # --- END: New Permanent Delete Method ---
-
-    def revoke_share(self, share_id: str, requesting_user_id: str) -> bool:
-        """Revokes a share by setting its status to inactive."""
-        # This method now only sets active=False
-        log.info(f"Revoking share '{share_id}' by setting active=False (not deleting).")
-        return self.toggle_share_status(share_id, requesting_user_id, new_status=False)
+            db.session.rollback()
+            log.error(f"Database error permanently deleting share {share_id}: {e}")
+            return False
 
     def prune_expired_shares(self):
-        # Keep existing logic, but now only needs to check expiry, not active flag
-        log.info("Running periodic share pruning...")
+        log.info("Pruning expired shares from DB...")
         try:
-            all_shares = self.load_shares()
-            shares_to_keep = {}
             now_utc = datetime.now(timezone.utc)
-            removed_count = 0
-            for share_id, share_data in all_shares.items():
-                is_expired = False
-                expires_at_str = share_data.get("expires_at")
-                if expires_at_str:
-                    try:
-                        expires_at_dt = datetime.fromisoformat(
-                            expires_at_str.replace("Z", "+00:00")
-                        )
-                        if expires_at_dt.tzinfo is None:
-                            expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
-                        if expires_at_dt < now_utc:
-                            is_expired = True
-                    except ValueError:
-                        log.warning(f"Invalid expiry format during pruning {share_id}")
-                        is_expired = True
-                # Keep shares that are NOT expired (regardless of active status, user manages that)
-                if not is_expired:
-                    shares_to_keep[share_id] = share_data
-                else:
-                    log.debug(f"Pruning expired share '{share_id}'")
-                    removed_count += 1
-            if removed_count > 0:
-                self.save_shares(shares_to_keep)
-                log.info(f"Successfully pruned {removed_count} expired shares.")
+            result = db.session.execute(
+                db.delete(Share).filter(
+                    Share.expires_at != None, Share.expires_at < now_utc
+                )
+            )
+            deleted_count = result.rowcount
+            db.session.commit()
+            if deleted_count > 0:
+                log.info(f"Successfully pruned {deleted_count} expired shares from DB.")
             else:
-                log.info("No shares needed pruning based on expiry.")
+                log.info("No expired shares found to prune from DB.")
         except Exception as e:
-            log.exception("Error during share pruning")
+            db.session.rollback()
+            log.error(f"Database error during share pruning: {e}")
 
     def is_device_shared(self, user_id: str, device_id: str) -> bool:
-        # Keep existing logic (checks active and expiry)
-        all_shares = self.load_shares()
-        now_utc = datetime.now(timezone.utc)
-        for share_id, share_data in all_shares.items():
-            if (
-                share_data.get("user_id") == user_id
-                and share_data.get("device_id") == device_id
-            ):
-                if share_data.get("active", False):
-                    expires_at_str = share_data.get("expires_at")
-                    if expires_at_str:
-                        try:
-                            expires_at_dt = datetime.fromisoformat(
-                                expires_at_str.replace("Z", "+00:00")
-                            )
-                            if expires_at_dt.tzinfo is None:
-                                expires_at_dt = expires_at_dt.replace(
-                                    tzinfo=timezone.utc
-                                )
-                            if expires_at_dt >= now_utc:
-                                return True
-                        except ValueError:
-                            continue
-                    else:
-                        return True  # Active and never expires
-        return False
-
-    def delete_user_data(self, user_id: str) -> bool:
-        """
-        Deletes a user's entry from users.json, their shares, and their data directory.
-        Returns True if user entry is successfully removed, False otherwise.
-        """
-        if not user_id:
-            log.error("Attempted to delete user with empty ID.")
-            return False
-
-        log.warning(f"Initiating deletion for user '{user_id}'. This is irreversible.")
-        user_removed_from_json = False
-        users_lock = self.file_locks.get("users")
-
-        if not users_lock:
-            log.error(
-                "CRITICAL: Lock for 'users.json' not found. Cannot remove user entry. Aborting delete."
-            )
-            return False
-
-        # --- Step 1: Remove user from users.json (under lock) ---
+        log.debug(f"Checking DB if device {device_id} is shared by user {user_id}.")
         try:
-            dummy_lock = threading.Lock()  # Use dummy lock as outer lock is held
-            with users_lock:
-                all_users = load_json_file(self.users_file, dummy_lock)
-                if all_users is None:
-                    log.error(
-                        f"Could not load users from {self.users_file} during delete."
-                    )
-                    return False
-
-                if user_id in all_users:
-                    log.info(f"Removing user '{user_id}' from {self.users_file.name}")
-                    del all_users[user_id]
-                    save_json_atomic(self.users_file, all_users, dummy_lock, indent=4)
-                    user_removed_from_json = True
-                    log.info(f"Successfully removed '{user_id}' from users file.")
-                else:
-                    log.warning(
-                        f"User '{user_id}' not found in users.json (already removed?)."
-                    )
-                    user_removed_from_json = True  # Treat as success if already gone
-
+            now_utc = datetime.now(timezone.utc)
+            exists_query = (
+                db.select(Share.id)
+                .filter_by(user_username=user_id, device_id=device_id, active=True)
+                .filter((Share.expires_at == None) | (Share.expires_at >= now_utc))
+                .limit(1)
+            )
+            result = db.session.execute(exists_query).first()
+            is_shared = result is not None
+            log.debug(
+                f"Device {device_id} shared status for user {user_id}: {is_shared}"
+            )
+            return is_shared
         except Exception as e:
-            log.exception(
-                f"Failed operation within lock while removing user '{user_id}' from users.json."
-            )
-            return False
-
-        # --- If user removal succeeded, proceed with shares and directory ---
-        if user_removed_from_json:
-            # --- Step 2: Remove User's Shares ---
-            try:
-                log.info(f"Removing shares associated with deleted user '{user_id}'.")
-                all_shares = self.load_shares()
-                shares_to_keep = {
-                    sid: sdata
-                    for sid, sdata in all_shares.items()
-                    if sdata.get("user_id") != user_id
-                }
-                if len(shares_to_keep) < len(all_shares):
-                    self.save_shares(shares_to_keep)
-                    log.info(f"Successfully removed shares for user '{user_id}'.")
-                else:
-                    log.info(f"No shares found to remove for user '{user_id}'.")
-            except Exception as e:
-                log.exception(f"Failed to remove shares for deleted user '{user_id}'.")
-                # Log but continue to directory removal
-
-            # --- Step 3: Delete user directory ---
-            user_dir = self.data_dir / user_id
-            log.info(f"Attempting to delete user data directory: {user_dir}")
-            if user_dir.exists() and user_dir.is_dir():
-                try:
-                    shutil.rmtree(user_dir)
-                    log.info(
-                        f"Successfully deleted data directory for user '{user_id}'."
-                    )
-                except OSError as e:
-                    log.error(
-                        f"Failed to delete directory {user_dir} for user '{user_id}': {e}"
-                    )
-                    # Log error but still return True as user account is gone
-                except Exception as e:
-                    log.exception(
-                        f"Unexpected error deleting directory {user_dir} for user '{user_id}'"
-                    )
-                    # Log error but still return True
-            else:
-                log.warning(
-                    f"User data directory {user_dir} not found or is not a directory. Skipping removal."
-                )
-
-            return True  # Return True as the user account was removed from users.json
-        else:
             log.error(
-                f"Deletion failed because user '{user_id}' not removed from users.json."
+                f"Database error checking share status for device {device_id} (User: {user_id}): {e}"
             )
             return False
-
-    def delete_device_and_data(self, user_id: str, device_id: str) -> Tuple[bool, str]:
-        """
-        Deletes a device's source file (.plist/.keys) and removes its related data
-        from configuration and state files.
-
-        Args:
-            user_id: The ID of the user.
-            device_id: The ID of the device to delete.
-
-        Returns:
-            A tuple (success: bool, message: str).
-        """
-        log.warning(f"Attempting to delete device '{device_id}' for user '{user_id}'.")
-        user_data_dir = self._get_user_data_dir(user_id)
-        if not user_data_dir:
-            msg = f"Could not access data directory for user '{user_id}'."
-            log.error(msg)
-            return False, msg
-
-        source_file_deleted = False
-        deleted_filename = "Unknown"
-
-        # --- 1. Delete Source File (.plist or .keys) ---
-        # No specific lock needed for single file deletion, OS handles atomicity generally.
-        plist_path = user_data_dir / f"{device_id}.plist"
-        keys_path = user_data_dir / f"{device_id}.keys"
-        file_to_delete = None
-
-        if plist_path.exists():
-            file_to_delete = plist_path
-        elif keys_path.exists():
-            file_to_delete = keys_path
-
-        if file_to_delete:
-            try:
-                deleted_filename = file_to_delete.name
-                os.remove(file_to_delete)
-                log.info(f"User '{user_id}': Deleted source file {deleted_filename}.")
-                source_file_deleted = True
-            except OSError as e:
-                msg = f"Failed to delete source file {file_to_delete.name}: {e}"
-                log.error(f"User '{user_id}': {msg}")
-                # Continue cleanup even if source file deletion fails (might be permissions issue)
-                # return False, msg # Option: Halt if source file can't be deleted
-        else:
-            log.warning(
-                f"User '{user_id}': Source file (.plist or .keys) for device '{device_id}' not found. Proceeding with data cleanup."
-            )
-            # Allow cleanup even if source file is missing
-
-        # --- 2. Clean up JSON files (locking individually) ---
-        cleanup_errors = []
-
-        # Helper function to load, modify, save a file atomically with locking
-        def cleanup_json_file(filename_key: str, removal_logic):
-            json_filename = self.config.get(filename_key)
-            if not json_filename:
-                log.error(f"Config key '{filename_key}' not found.")
-                cleanup_errors.append(f"Config missing for {filename_key}")
-                return
-
-            json_file = self._get_user_file_path(user_id, json_filename)
-            lock = self.file_locks.get(json_filename)
-
-            if not json_file or not lock:
-                log.error(f"Path or lock not found for {json_filename}.")
-                cleanup_errors.append(f"Path/lock error for {json_filename}")
-                return
-
-            with lock:  # Lock for the read-modify-write operation
-                try:
-                    # Load using the locked helper (pass dummy lock as outer lock is held)
-                    data = load_json_file(json_file, threading.Lock())
-                    if data is None:  # File non-existent or invalid
-                        log.debug(
-                            f"{json_filename} not found or invalid for user '{user_id}', skipping cleanup."
-                        )
-                        return
-
-                    original_size = len(data)
-                    updated_data = removal_logic(
-                        data
-                    )  # Apply the specific removal logic
-
-                    if len(updated_data) < original_size:
-                        # Save using the locked helper (pass dummy lock)
-                        save_json_atomic(
-                            json_file,
-                            updated_data,
-                            threading.Lock(),
-                            indent=2 if filename_key != "USER_CACHE_FILENAME" else None,
-                        )
-                        log.info(
-                            f"User '{user_id}': Removed '{device_id}' related entries from {json_filename}."
-                        )
-                    else:
-                        log.debug(
-                            f"User '{user_id}': No entries for '{device_id}' found in {json_filename}."
-                        )
-
-                except Exception as e:
-                    msg = f"Failed to process {json_filename} for device '{device_id}': {e}"
-                    log.exception(f"User '{user_id}': {msg}")
-                    cleanup_errors.append(msg)
-
-        # --- Apply Cleanup Logic for each file ---
-
-        # a) devices.json (Keep as is)
-        cleanup_json_file(
-            "USER_DEVICES_FILENAME",
-            lambda data: {k: v for k, v in data.items() if k != device_id},
-        )
-
-        # --- *** CORRECTED Cache Cleanup Logic *** ---
-        # b) cache.json
-        def remove_from_cache(cache_dict):
-            if (
-                isinstance(cache_dict, dict)
-                and "data" in cache_dict
-                and isinstance(cache_dict["data"], dict)
-            ):
-                # Modify the inner 'data' dictionary
-                if device_id in cache_dict["data"]:
-                    del cache_dict["data"][device_id]
-                    log.debug(
-                        f"Removed device '{device_id}' from inner 'data' dict in cache."
-                    )
-            # Return the potentially modified outer dictionary
-            return cache_dict
-
-        cleanup_json_file("USER_CACHE_FILENAME", remove_from_cache)
-        # --- *** END CORRECTION *** ---
-
-        # c) geofence_state.json (Keep as is)
-        cleanup_json_file(
-            "USER_GEOFENCE_STATE_FILENAME",
-            lambda data: {
-                k: v for k, v in data.items() if not k.startswith(f"{device_id}::")
-            },
-        )
-        # d) battery_state.json (Keep as is)
-        cleanup_json_file(
-            "USER_BATTERY_STATE_FILENAME",
-            lambda data: {k: v for k, v in data.items() if k != device_id},
-        )
-        # e) notification_times.json (Keep as is)
-        cleanup_json_file(
-            "USER_NOTIFICATION_TIMES_FILENAME",
-            lambda data: {
-                k: v for k, v in data.items() if not k.startswith(f"{device_id}::")
-            },
-        )
-        # f) (Optional) notifications_history.json (Keep commented or implement if needed)
-
-        if cleanup_errors:
-            final_message = f"Device '{device_id}' source file ({deleted_filename}) deleted (or was missing), but errors occurred during data cleanup: {'; '.join(cleanup_errors)}"
-            log.error(f"User '{user_id}': {final_message}")
-            return False, final_message
-        else:
-            final_message = f"Successfully deleted device '{device_id}' ({deleted_filename}) and associated data."
-            log.info(f"User '{user_id}': {final_message}")
-            return True, final_message

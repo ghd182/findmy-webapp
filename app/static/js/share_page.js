@@ -87,7 +87,7 @@ window.SharePage = {
 
     // Helper to format relative time (copied from utils.js for isolation)
     formatTimeRelative: function (date) {
-        // ... (keep the implementation from previous step) ...
+        
         if (!date || !(date instanceof Date) || isNaN(date)) return "Unknown time";
         const now = new Date(); const deltaSeconds = Math.round((now.getTime() - date.getTime()) / 1000);
         if (deltaSeconds < 0) return "Just now"; if (deltaSeconds < 5) return "Just now"; if (deltaSeconds < 60) return `${deltaSeconds} sec ago`;
@@ -122,7 +122,7 @@ window.SharePage = {
         try { const r = parseInt(sanitizedColor.substring(1, 3), 16); const g = parseInt(sanitizedColor.substring(3, 5), 16); const b = parseInt(sanitizedColor.substring(5, 7), 16); const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; if (lum > 0.55) { text_color = '#333333'; } }
         catch (e) { }
         const label_safe = this.escapeHtml(displayLabel);
-        return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="${sanitizedColor}" /><circle cx="${size / 2}" cy="${size / 2}" r="${inner_radius}" fill="#FFFFFF" /><text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" font-family="sans-serif" font-size="${text_size}px" font-weight="bold" fill="${text_color}">${label_safe}</text></svg>`;
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="${sanitizedColor}" /><circle cx="${size / 2}" cy="${size / 2}" r="${inner_radius}" fill="#FFFFFF" /><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="${text_size}px" font-weight="bold" fill="${text_color}">${label_safe}</text></svg>`;
     },
     // --- END: Add escapeHtml and generateDeviceIconSVG helpers ---
 
@@ -233,7 +233,7 @@ window.SharePage = {
 
     // Start polling for updates
     startPolling: function () {
-        // ... (keep existing startPolling logic) ...
+        
         if (this.fetchInterval) { console.log("[SharePage] Polling already active."); return; }
         if (!this.shareId) { console.error("[SharePage] Cannot start polling without shareId."); return; }
         console.log(`[SharePage] Starting polling every ${this.pollIntervalMs / 1000} seconds.`);
@@ -243,7 +243,7 @@ window.SharePage = {
 
     // Stop polling
     stopPolling: function () {
-        // ... (keep existing stopPolling logic) ...
+        
         if (this.fetchInterval) { console.log("[SharePage] Stopping polling."); clearInterval(this.fetchInterval); this.fetchInterval = null; }
     },
 
@@ -260,7 +260,7 @@ window.SharePage = {
         try {
             this.map = L.map('share-map', {
                 zoomControl: false, // Disable default
-                attributionControl: true
+                attributionControl: false
             }).setView([0, 0], 3);
 
             // Add App-Style Zoom Controls Listeners
@@ -271,7 +271,7 @@ window.SharePage = {
             this.map.on('zoomend', () => this.UI.updateZoomButtons()); // Update state on zoom change
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a>', maxZoom: 19,
+                attribution: '', maxZoom: 19,
             }).addTo(this.map);
 
             if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {

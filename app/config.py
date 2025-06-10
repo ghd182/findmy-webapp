@@ -1,5 +1,5 @@
-# app/config.py
-# Removed unused specific badge paths, commented out
+# File: app/config.py
+# (Full file content with USER_APPLE_CREDS_FILENAME added back)
 
 import os
 import logging
@@ -54,6 +54,8 @@ if SECRET_SEED:
 
 class Config:
     """Base configuration."""
+
+    BASE_DIR = Path(__file__).resolve().parent.parent
 
     # --- Key Loading Logic ---
     _secret_key_env = os.getenv("SECRET_KEY")
@@ -110,24 +112,30 @@ class Config:
             f"VAPID push notifications ENABLED (Claims Email: {VAPID_CLAIMS_EMAIL})."
         )
 
+    # --- Database Configuration ---
+    SQLALCHEMY_DATABASE_URI = (
+        os.getenv("DATABASE_URL") or f"sqlite:///{BASE_DIR / 'data' / 'app.db'}"
+    )
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ECHO = (
+        os.getenv("SQLALCHEMY_ECHO", "false").lower() == "true"
+    )  # Log SQL queries if set
+    # --- End Database Configuration ---
+
     # --- Other Config Variables ---
     DEBUG = False
     TESTING = False
     WTF_CSRF_ENABLED = True
-    BASE_DIR = Path(__file__).resolve().parent.parent
+    # BASE_DIR defined above
     DATA_DIRECTORY = BASE_DIR / "data"
-    USERS_FILE = DATA_DIRECTORY / "users.json"
-    SHARES_FILE = DATA_DIRECTORY / "shares.json"
-    DEFAULT_SHARE_DURATION_HOURS = int(os.getenv("DEFAULT_SHARE_DURATION_HOURS", 24))
-    USER_DEVICES_FILENAME = "devices.json"
-    USER_GEOFENCES_FILENAME = "geofences.json"
-    USER_SUBSCRIPTIONS_FILENAME = "subscriptions.json"
+    # --- Filenames ---
+    # Keep Cache Filename (Still using files for cache)
     USER_CACHE_FILENAME = "cache.json"
-    USER_GEOFENCE_STATE_FILENAME = "geofence_state.json"
-    USER_BATTERY_STATE_FILENAME = "battery_state.json"
-    USER_NOTIFICATION_TIMES_FILENAME = "notification_times.json"
+    # Define the Apple credentials filename (needed by fetch_accessory_data to exclude it)
     USER_APPLE_CREDS_FILENAME = "apple_credentials.json"
-    USER_NOTIFICATIONS_HISTORY_FILENAME = "notifications_history.json"
+    # --- End Filenames ---
+
+    DEFAULT_SHARE_DURATION_HOURS = int(os.getenv("DEFAULT_SHARE_DURATION_HOURS", 24))
     NOTIFICATION_HISTORY_DAYS = int(os.getenv("NOTIFICATION_HISTORY_DAYS", 30))
     LOW_BATTERY_THRESHOLD = int(os.getenv("LOW_BATTERY_THRESHOLD", 15))
     NOTIFICATION_COOLDOWN_SECONDS = int(os.getenv("NOTIFICATION_COOLDOWN_SECONDS", 300))
@@ -142,8 +150,11 @@ class Config:
         if s.strip()
     ]
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-    APP_VERSION = "2.2.1-notif-icon-fix"  # Update version
+    APP_VERSION = "2.4.0-native-scanner-backend"  # Update version
     SCHEDULER_API_ENABLED = True
+
+    # --- Native Scanner Configuration ---
+    NATIVE_SCAN_INTERVAL_SECONDS = int(os.getenv("NATIVE_SCAN_INTERVAL_SECONDS", 300)) # Default 5 minutes
 
     # --- Notification Icons/Badges ---
     DEFAULT_NOTIFICATION_ICON_PATH = os.getenv(
@@ -152,20 +163,25 @@ class Config:
     DEFAULT_NOTIFICATION_BADGE_PATH = os.getenv(
         "DEFAULT_NOTIFICATION_BADGE_PATH", "icons/badge-icon.png"
     )
-    # --- Keep specific ones if needed by NotificationService logic ---
     GEOFENCE_ENTRY_BADGE_PATH = os.getenv(
-        "GEOFENCE_ENTRY_BADGE_PATH", "img/input_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
-    )  # Still used by current logic
+        "GEOFENCE_ENTRY_BADGE_PATH",
+        "img/input_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
+    )
     GEOFENCE_EXIT_BADGE_PATH = os.getenv(
-        "GEOFENCE_EXIT_BADGE_PATH", "img/output_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
-    )  # Still used by current logic
+        "GEOFENCE_EXIT_BADGE_PATH",
+        "img/output_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
+    )
     BATTERY_LOW_BADGE_PATH = os.getenv(
-        "BATTERY_LOW_BADGE_PATH", "img/battery_alert_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
-    )  # Still used
-    TEST_BADGE_PATH = os.getenv("TEST_BADGE_PATH", "img/labs_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png")  # Still used
+        "BATTERY_LOW_BADGE_PATH",
+        "img/battery_alert_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
+    )
+    TEST_BADGE_PATH = os.getenv(
+        "TEST_BADGE_PATH", "img/labs_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
+    )
     WELCOME_BADGE_PATH = os.getenv(
-        "WELCOME_BADGE_PATH", "img/celebration_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
-    )  # Still used
+        "WELCOME_BADGE_PATH",
+        "img/celebration_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
+    )
     WELCOME_NOTIFICATION_ICON_PATH = os.getenv(
         "WELCOME_NOTIFICATION_ICON_PATH", DEFAULT_NOTIFICATION_ICON_PATH
     )
@@ -173,25 +189,18 @@ class Config:
         "TEST_NOTIFICATION_ICON_PATH", DEFAULT_NOTIFICATION_ICON_PATH
     )
 
+    # --- File Locks (Only for cache) ---
     FILE_LOCKS = {
-        "users": None,
-        "shares": None,
-        USER_DEVICES_FILENAME: None,
-        USER_GEOFENCES_FILENAME: None,
-        USER_SUBSCRIPTIONS_FILENAME: None,
-        USER_CACHE_FILENAME: None,
-        USER_GEOFENCE_STATE_FILENAME: None,
-        USER_BATTERY_STATE_FILENAME: None,
-        USER_NOTIFICATION_TIMES_FILENAME: None,
-        USER_APPLE_CREDS_FILENAME: None,
-        USER_NOTIFICATIONS_HISTORY_FILENAME: None,
+        USER_CACHE_FILENAME: None, # Keep only cache lock
     }
 
 
-# --- DevelopmentConfig, ProductionConfig, TestingConfig (Keep as before) ---
+# --- DevelopmentConfig, ProductionConfig, TestingConfig ---
+# (These classes remain the same)
 class DevelopmentConfig(Config):
     DEBUG = True
     LOG_LEVEL = "DEBUG"
+    SQLALCHEMY_ECHO = True  # Log SQL in dev
     if not Config.ENCRYPTION_ENABLED:
         log.warning(
             "Running Development without FERNET_KEY (seed or env). Passwords stored insecurely."
@@ -199,25 +208,22 @@ class DevelopmentConfig(Config):
 
 
 class ProductionConfig(Config):
-    # --- ADD VALIDATION ---
+    SQLALCHEMY_ECHO = False  # Disable echo in prod
+    # Keep existing production validations for SECRET_KEY / FERNET_KEY
     if not Config.SECRET_KEY or Config._using_fallback_secret:
-        # Use log.critical before raising the error
         log.critical(
             "CRITICAL STARTUP FAILURE: Production environment requires a persistent SECRET_KEY set via SECRET_SEED or SECRET_KEY environment variable. Defaulting to os.urandom() is insecure. App will not start."
         )
-        raise ValueError( # Raise ValueError for clearer indication of bad config
+        raise ValueError(
             "Missing or insecure SECRET_KEY configuration for production environment."
         )
     if not Config.ENCRYPTION_ENABLED:
-         # This check can remain a warning or be made critical depending on requirements
-         log.warning( # Changed to warning, as lack of encryption might be intentional in some setups, though risky.
-             "SECURITY WARNING: Encryption is DISABLED (FERNET_KEY missing via FERNET_SEED or environment variable) in production environment! Sensitive data like Apple passwords will be stored less securely (Base64)."
-         )
-         # If encryption MUST be enabled for production, uncomment the raise below:
-         # raise ValueError("Missing FERNET_KEY configuration for production environment.")
-    # --- END VALIDATION ---
-
-    WTF_CSRF_ENABLED = True # Ensure CSRF is explicitly enabled
+        log.warning(
+            "SECURITY WARNING: Encryption is DISABLED (FERNET_KEY missing via FERNET_SEED or environment variable) in production environment! Sensitive data like Apple passwords will be stored less securely (Base64)."
+        )
+        # If encryption MUST be enabled for production, uncomment the raise below:
+        # raise ValueError("Missing FERNET_KEY configuration for production environment.")
+    WTF_CSRF_ENABLED = True
 
 
 class TestingConfig(Config):
@@ -230,12 +236,15 @@ class TestingConfig(Config):
     ENCRYPTION_ENABLED = bool(FERNET_KEY)
     VAPID_ENABLED = False
     FETCH_INTERVAL_MINUTES = 9999
-    DATA_DIRECTORY = Config.BASE_DIR / "test_data"
-    USERS_FILE = DATA_DIRECTORY / "test_users.json"
+    DATA_DIRECTORY = Config.BASE_DIR / "test_data"  # Use BASE_DIR here
+    # --- Use in-memory SQLite for tests ---
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    # --- -------------------------------- ---
     WTF_CSRF_ENABLED = False
+    SQLALCHEMY_ECHO = False
 
 
-# --- get_config and lock initialization (Keep as before) ---
+# --- get_config and lock initialization ---
 def get_config():
     config_name = os.getenv("FLASK_ENV", "production").lower()
     log.info(f"Loading config for FLASK_ENV='{config_name}'")
@@ -251,12 +260,16 @@ def get_config():
 
 
 config = get_config()
-if config.FILE_LOCKS.get("users") is None:
-    log.info("Initializing file locks...")
-    import threading
 
-    for key in config.FILE_LOCKS:
-        if config.FILE_LOCKS[key] is None:
-            config.FILE_LOCKS[key] = threading.Lock()
-            log.debug(f"Initialized lock for '{key}'")
+# Lock initialization for cache files
+# Check an arbitrary lock that *should* still exist (e.g., cache)
+if config.FILE_LOCKS.get(config.USER_CACHE_FILENAME) is None:
+    log.info("Initializing file locks (primarily for cache)...")
+    import threading
+    for key in config.FILE_LOCKS: # Iterate through the configured locks
+        if config.FILE_LOCKS[key] is None: # Check if already initialized
+             config.FILE_LOCKS[key] = threading.Lock()
+             log.debug(f"Initialized lock for '{key}'")
     log.info("File locks initialization complete.")
+else:
+     log.debug("File locks appear to be already initialized.")

@@ -1,57 +1,61 @@
-# docker-compose.yml (Modified for Portainer Stack Editor)
+# File: portainer_docker-compose.yml
+# Purpose: Docker Compose configuration tailored for deployment via Portainer Stacks.
+#          *** Requires ABSOLUTE paths for volumes on the host machine! ***
 
 services:
   findmyapp:
-    # Use the image you built and pushed (or built locally)
-    # Make sure this image exists locally or on Docker Hub
+    # Use the image you built and pushed OR one available on Docker Hub
     image: ghd182/findmy-webapp:latest
     container_name: findmyapp
     restart: unless-stopped
     ports:
-      - "5000:5000" # Host:Container
+      # HostPort:ContainerPort
+      - "5000:5000"
     volumes:
-      # --- USE ABSOLUTE HOST PATHS for your app's data ---
-      # /absolute_path_to_findmy_app_folder/data:/app/data
-      - /home/username/findmy-app/data:/app/data # EXAMPLE: CHANGE /home/username
-      # - /home/username/findmy-app/.env:/app/.env # If using .env mount
+      # --- CRITICAL: Use ABSOLUTE HOST PATHS below ---
+      # Replace '/path/on/your/host' with the actual full path to your project's data directory.
+      # Example Linux: /home/pi/findmy-app/data:/app/data
+      # Example Windows (using WSL paths or Docker Desktop volume mapping): /mnt/c/Users/YourUser/findmy-app/data:/app/data or mapped volume name
+      - /path/on/your/host/data:/app/data 
+      # Optional: Mount .env if needed (USE ABSOLUTE PATH)
+      # - /path/on/your/host/.env:/app/.env 
     environment:
       # --- Core Flask/App Settings ---
       FLASK_ENV: production
-      # Override with DEBUG if needed
       LOG_LEVEL: INFO
       # Set your timezone
       TZ: Europe/Amsterdam
-      # Override if needed
       WAITRESS_THREADS: 8
 
-      # --- Key Generation Seeds (KEEP THESE SECRET!) ---
+      # --- SEED Variables (CRITICAL: Set strong, unique secrets!) ---
+      # These seeds generate the actual keys used by the application. Keep them secret!
+      # For Flask session signing
       SECRET_SEED: "your-very-long-random-secret-phrase-for-sessions-portainer"
+      # For encrypting sensitive data
       FERNET_SEED: "another-different-long-random-secret-phrase-for-encryption-portainer"
+      # For Web Push VAPID keys
       VAPID_SEED: "a-third-unique-long-random-phrase-for-push-keys-portainer"
-      VAPID_CLAIMS_EMAIL: "mailto:user@email.com" # CHANGE ME
+      # REQUIRED for VAPID - set your contact email
+      VAPID_CLAIMS_EMAIL: "mailto:you@example.com"
 
       # --- Anisette Server Configuration ---
-      # Point to the internal anisette service defined below
+      # Points to the anisette service defined below (internal Docker network name)
       ANISETTE_SERVERS: "http://anisette:6969"
 
-      # --- Other App Config ---
-      DEFAULT_FETCH_INTERVAL_MINUTES: 15
-      # Override fetch interval
+      # --- Application Behaviour Configuration (Overrides) ---
+      DEFAULT_FETCH_INTERVAL_MINUTES: 30
       FETCH_INTERVAL_MINUTES: 15
-      # Override battery threshold
-      LOW_BATTERY_THRESHOLD: 20
-      # Override notification cooldown (10 minutes)
+      LOW_BATTERY_THRESHOLD: 40
       NOTIFICATION_COOLDOWN_SECONDS: 600
-      # Override history retention
       NOTIFICATION_HISTORY_DAYS: 60
-      # Override location history fetch duration     
       HISTORY_DURATION_DAYS: 14
+      # Default 5 mins for Android config endpoint
+      NATIVE_SCAN_INTERVAL_SECONDS: 300
 
-    # --- Add dependency on the anisette service ---
     depends_on:
       - anisette
 
-  # --- NEW Anisette Server Service ---
+  # --- Anisette Server Service ---
   anisette:
     image: dadoum/anisette-v3-server:latest # Official image
     container_name: anisette-server

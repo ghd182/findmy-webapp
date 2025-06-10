@@ -89,7 +89,7 @@ def generate_vapid_keys_from_seed(seed: Optional[str]) -> Optional[Tuple[str, st
     private_scalar = int.from_bytes(private_key_seed_bytes, "big")
 
     # --- CRITICAL VALIDATION (Using the constant SECP256R1_ORDER) ---
-    if not (1 <= private_scalar < SECP256R1_ORDER):  # <<< CORRECTED VALIDATION
+    if not (1 <= private_scalar < SECP256R1_ORDER):  
         log.error(
             f"Derived VAPID private key scalar from seed is outside the valid range [1, n-1] for SECP256R1 curve (n={SECP256R1_ORDER}). "
             f"This specific seed cannot generate a valid VAPID key pair deterministically using this method. "

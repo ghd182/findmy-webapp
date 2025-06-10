@@ -1,5 +1,4 @@
-# app/services/notification_service.py
-# Updated the send_user_notifications method as described above.
+# File: app/services/notification_service.py
 
 import logging
 import time
@@ -25,13 +24,6 @@ class NotificationService:
     """Handles notification logic (geofence, battery) and sending web push notifications."""
 
     def __init__(self, config: Dict[str, Any], user_data_service: UserDataService):
-        """
-        Initializes the service.
-
-        Args:
-            config: The Flask app config dictionary.
-            user_data_service: An instance of UserDataService.
-        """
         self.config = config
         self.uds = user_data_service
         self.vapid_enabled = config.get("VAPID_ENABLED", False)
@@ -41,7 +33,6 @@ class NotificationService:
         self.low_battery_threshold = config.get("LOW_BATTERY_THRESHOLD", 15)
         self.notification_cooldown = config.get("NOTIFICATION_COOLDOWN_SECONDS", 300)
 
-        # Store paths for generating URLs later
         self.default_icon_path = config.get(
             "DEFAULT_NOTIFICATION_ICON_PATH", "icons/favicon.svg"
         )
@@ -51,23 +42,27 @@ class NotificationService:
         self.test_icon_path = config.get(
             "TEST_NOTIFICATION_ICON_PATH", self.default_icon_path
         )
-        # Default Badge Path
         self.default_badge_path = config.get(
             "DEFAULT_NOTIFICATION_BADGE_PATH", "icons/badge-icon.png"
         )
-        # Specific Badge Paths
         self.geofence_entry_badge_path = config.get(
-            "GEOFENCE_ENTRY_BADGE_PATH", "img/input_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
+            "GEOFENCE_ENTRY_BADGE_PATH",
+            "img/input_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
         )
         self.geofence_exit_badge_path = config.get(
-            "GEOFENCE_EXIT_BADGE_PATH", "img/output_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
+            "GEOFENCE_EXIT_BADGE_PATH",
+            "img/output_circle_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
         )
         self.battery_low_badge_path = config.get(
-            "BATTERY_LOW_BADGE_PATH", "img/battery_alert_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
+            "BATTERY_LOW_BADGE_PATH",
+            "img/battery_alert_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
         )
-        self.test_badge_path = config.get("TEST_BADGE_PATH", "img/labs_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png")
+        self.test_badge_path = config.get(
+            "TEST_BADGE_PATH", "img/labs_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
+        )
         self.welcome_badge_path = config.get(
-            "WELCOME_BADGE_PATH", "img/celebration_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png"
+            "WELCOME_BADGE_PATH",
+            "img/celebration_64dp_FFFFFF_FILL0_wght500_GRAD200_opsz48.png",
         )
 
         if not (self.vapid_private_key_str and self.vapid_claims_email_config):
@@ -81,12 +76,9 @@ class NotificationService:
         else:
             log.info("VAPID push notifications configured and enabled.")
 
-    # --- Relative Time Helper (Calculated based on UTC) ---
     def _format_time_relative(self, dt: Optional[datetime]) -> str:
-        """Formats a datetime object into a relative string (e.g., '5 min ago')."""
         if not dt or not isinstance(dt, datetime):
             return "Unknown Time"
-        # Ensure datetime is UTC before calculating difference
         dt_utc = (
             dt.astimezone(timezone.utc)
             if dt.tzinfo
@@ -94,11 +86,9 @@ class NotificationService:
         )
         now_utc = datetime.now(timezone.utc)
         delta = now_utc - dt_utc
-
         if delta < timedelta(seconds=0):
-            return "Just now"  # Handle slight future timestamps
+            return "Just now"
         seconds = delta.total_seconds()
-
         if seconds < 5:
             return "Just now"
         if seconds < 60:
@@ -112,64 +102,44 @@ class NotificationService:
         days = hours / 24
         if days < 7:
             return f"{int(days)} day{'s' if days >= 2 else ''} ago"
-        # If older, return simple date (still formatted from UTC)
         try:
-            return dt_utc.strftime("%b %d")  # e.g., "Jan 23"
+            return dt_utc.strftime("%b %d")
         except Exception:
             return "Long ago"
 
-    # --- Absolute Time Helper (Formats to Local Timezone) ---
     def _format_absolute_time(self, dt: Optional[datetime]) -> str:
-        """Formats a datetime object as dd/mm/yyyy HH:MM in the server's local timezone."""
         if not dt or not isinstance(dt, datetime):
             return "Unknown Time"
         try:
-            # Ensure we start with a UTC aware object
             dt_utc = (
                 dt.astimezone(timezone.utc)
                 if dt.tzinfo
                 else dt.replace(tzinfo=timezone.utc)
             )
-            # Convert UTC time to the server's local time (using TZ env var)
             dt_local = dt_utc.astimezone()
-            # Format as dd/mm/yyyy HH:MM (without timezone suffix)
             return dt_local.strftime("%d/%m/%Y %H:%M")
         except Exception as e:
             log.error(f"Error formatting absolute local time {dt}: {e}")
-            # Fallback to UTC format if local conversion fails
             try:
                 return dt_utc.strftime("%d/%m/%Y %H:%M UTC")
             except:
                 return "Invalid Time"
 
-    # --- Timestamp Parts Helper (Returns UTC datetime object and formatted strings) ---
     def _get_formatted_timestamp_parts(
         self, timestamp_iso: Optional[str]
     ) -> Tuple[Optional[datetime], str, str]:
-        """Parses ISO string and returns UTC datetime, local absolute string, and relative string."""
         if not timestamp_iso:
             return None, "Unknown Time", "Unknown Time"
         try:
-            # Parse ISO string
             dt_obj = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
-            # Ensure it's UTC aware
             dt_utc = (
                 dt_obj.astimezone(timezone.utc)
                 if dt_obj.tzinfo
                 else dt_obj.replace(tzinfo=timezone.utc)
             )
-
-            absolute_str = self._format_absolute_time(
-                dt_utc
-            )  # Format the UTC object to local time string
-            relative_str = self._format_time_relative(
-                dt_utc
-            )  # Calculate relative from UTC object
-            return (
-                dt_utc,
-                absolute_str,
-                relative_str,
-            )  # Return UTC datetime obj, local time string, relative string
+            absolute_str = self._format_absolute_time(dt_utc)
+            relative_str = self._format_time_relative(dt_utc)
+            return dt_utc, absolute_str, relative_str
         except (ValueError, TypeError) as e:
             log.warning(f"Could not parse/format timestamp '{timestamp_iso}': {e}")
             return None, "Invalid Time", "Invalid Time"
@@ -179,7 +149,6 @@ class NotificationService:
             )
             return None, "Error Time", "Error Time"
 
-    # --- Notification Cooldown ---
     def _can_send_notification(
         self, user_id: str, device_id: str, event_key: str
     ) -> bool:
@@ -203,7 +172,7 @@ class NotificationService:
             log.error(
                 f"User '{user_id}': Error checking cooldown for {device_id}/{event_key}: {e}"
             )
-            return False  # Fail safe
+            return False
 
     def _record_notification_sent(self, user_id: str, device_id: str, event_key: str):
         if not user_id:
@@ -221,7 +190,6 @@ class NotificationService:
                 f"User '{user_id}': Error recording notification time for {device_id}/{event_key}: {e}"
             )
 
-    # --- Notification Checks (Geofence & Battery) ---
     def check_device_notifications(
         self,
         user_id: str,
@@ -243,7 +211,6 @@ class NotificationService:
                 f"User '{user_id}', Device '{device_id}': Failed to load state/config for checks: {e}"
             )
             return
-
         geofence_state_changed = False
         try:
             updated_geofence_state, gf_changed = self._check_geofences_for_device(
@@ -261,7 +228,6 @@ class NotificationService:
             log.exception(
                 f"User '{user_id}', Device '{device_id}': Error during geofence check: {e}"
             )
-
         battery_state_changed = False
         try:
             updated_battery_state, bat_changed = self._check_low_battery_for_device(
@@ -274,8 +240,7 @@ class NotificationService:
             log.exception(
                 f"User '{user_id}', Device '{device_id}': Error during battery check: {e}"
             )
-
-        try:  # Save states if changed
+        try:
             if geofence_state_changed:
                 self.uds.save_geofence_state(user_id, current_geofence_state)
             if battery_state_changed:
@@ -285,12 +250,13 @@ class NotificationService:
                 f"User '{user_id}', Device '{device_id}': Failed to save updated state: {e}"
             )
 
+    
     def _check_geofences_for_device(
         self,
         user_id: str,
         device_id: str,
         latest_report: Dict,
-        device_config: Dict,
+        device_config: Dict,  # This comes from UserDataService.load_devices_config
         all_user_geofences: Dict,
         current_geofence_state: Dict,
     ) -> Tuple[Dict, bool]:
@@ -301,24 +267,44 @@ class NotificationService:
             return current_geofence_state, False
         dt_obj, time_absolute, time_relative = self._get_formatted_timestamp_parts(
             latest_report.get("timestamp")
-        )  # Get both formats
+        )
 
         device_name = device_config.get("name", device_id)
         device_label = device_config.get("label", "❓")
         device_color = device_config.get("color", getDefaultColorForId(device_id))
+
         linked_geofences_info = device_config.get("linked_geofences", [])
+        log.debug(
+            f"User '{user_id}', Device '{device_id}': Checking {len(linked_geofences_info)} linked geofences. Raw link_info: {linked_geofences_info}"
+        )
+
         if not linked_geofences_info:
             return current_geofence_state, False
 
         for link_info in linked_geofences_info:
             gf_id = link_info.get("id")
             if not gf_id or gf_id not in all_user_geofences:
+                log.warning(
+                    f"User '{user_id}': Geofence ID '{gf_id}' in link_info not found in all_user_geofences. Skipping."
+                )
                 continue
+
             gf_def = all_user_geofences[gf_id]
             gf_name = gf_def["name"]
-            notify_entry = link_info.get("notify_entry", False)
-            notify_exit = link_info.get("notify_exit", False)
+
+            # --- Use 'notify_on_entry' and 'notify_on_exit' from link_info ---
+            notify_entry = link_info.get("notify_on_entry", False)
+            notify_exit = link_info.get("notify_on_exit", False)
+            # --- ------------------------------------------------------------- ---
+
+            log.debug(
+                f"User '{user_id}', Device '{device_id}', Geofence '{gf_name} ({gf_id})': notify_on_entry={notify_entry}, notify_on_exit={notify_exit}"
+            )
+
             if not notify_entry and not notify_exit:
+                log.debug(
+                    f"User '{user_id}', Device '{device_id}', Geofence '{gf_name} ({gf_id})': No notification flags set. Skipping."
+                )
                 continue
 
             try:
@@ -330,7 +316,7 @@ class NotificationService:
 
                 if previous_status_str != current_status_str:
                     log.info(
-                        f"User '{user_id}': Geofence State Change: {device_id} @ '{gf_name}' ({gf_id}): {previous_status_str} -> {current_status_str}"
+                        f"User '{user_id}': Geofence State Change: Device '{device_id}' @ Geofence '{gf_name}' ({gf_id}): {previous_status_str} -> {current_status_str}"
                     )
                     current_geofence_state[state_key] = current_status_str
                     state_changed = True
@@ -365,9 +351,12 @@ class NotificationService:
                             }
                             should_notify = True
                             notification_specific_type = "geofence_entry"
+                            log.debug(
+                                f"User '{user_id}': Geofence Entry NOTIFICATION CONDITIONS MET for {device_id} in {gf_name}."
+                            )
                         else:
                             log.info(
-                                f"User '{user_id}': Geofence Entry skipped (cooldown)."
+                                f"User '{user_id}': Geofence Entry notification for {device_id} in {gf_name} skipped (cooldown)."
                             )
 
                     elif not is_inside and notify_exit:
@@ -384,9 +373,12 @@ class NotificationService:
                             }
                             should_notify = True
                             notification_specific_type = "geofence_exit"
+                            log.debug(
+                                f"User '{user_id}': Geofence Exit NOTIFICATION CONDITIONS MET for {device_id} from {gf_name}."
+                            )
                         else:
                             log.info(
-                                f"User '{user_id}': Geofence Exit skipped (cooldown)."
+                                f"User '{user_id}': Geofence Exit notification for {device_id} from {gf_name} skipped (cooldown)."
                             )
 
                     if (
@@ -396,7 +388,7 @@ class NotificationService:
                         and notification_specific_type
                     ):
                         log.info(
-                            f"User '{user_id}': Triggering geofence notification for {event_type_key} (Type: {notification_specific_type})"
+                            f"User '{user_id}': Triggering geofence notification for {event_type_key} (Type: {notification_specific_type}) for device {device_id}"
                         )
                         self.send_user_notifications(
                             user_id=user_id,
@@ -411,15 +403,29 @@ class NotificationService:
                         self._record_notification_sent(
                             user_id, device_id, event_type_key
                         )
+                    else:
+                        log.debug(
+                            f"User '{user_id}': Geofence notification for {device_id} in {gf_name} not sent. should_notify={should_notify}, event_type_key={event_type_key}, title={notification_title}, specific_type={notification_specific_type}"
+                        )
 
                 elif previous_status_str == "unknown":
                     current_geofence_state[state_key] = current_status_str
                     state_changed = True
+                    log.debug(
+                        f"User '{user_id}', Device '{device_id}', Geofence '{gf_name} ({gf_id})': Initial geofence state recorded as '{current_status_str}'."
+                    )
+                else:
+                    log.debug(
+                        f"User '{user_id}', Device '{device_id}', Geofence '{gf_name} ({gf_id})': No state change (still '{current_status_str}')."
+                    )
+
             except Exception as e:
                 log.exception(
                     f"User '{user_id}': Error checking geofence '{gf_name}' ({gf_id}) for {device_id}: {e}"
                 )
         return current_geofence_state, state_changed
+
+    
 
     def _check_low_battery_for_device(
         self,
@@ -448,14 +454,12 @@ class NotificationService:
             "low" if mapped_battery_level < self.low_battery_threshold else "normal"
         )
         previous_logical_status = current_battery_state.get(device_id, "unknown")
-
         if previous_logical_status != current_logical_status:
             log.info(
                 f"User '{user_id}': Battery State Change: {device_id} ('{device_name}'): {previous_logical_status} -> {current_logical_status} (Level: {mapped_battery_level:.0f}%)"
             )
             current_battery_state[device_id] = current_logical_status
             state_changed = True
-
             if current_logical_status == "low":
                 if self._can_send_notification(user_id, device_id, event_type_key):
                     title = f"{device_name} Battery Low"
@@ -498,23 +502,20 @@ class NotificationService:
                 log.info(
                     f"User '{user_id}': Battery level for {device_id} is now normal ({mapped_battery_level}%)."
                 )
-
         elif previous_logical_status == "unknown":
             current_battery_state[device_id] = current_logical_status
             state_changed = True
             log.debug(
                 f"User '{user_id}': Initial battery state recorded for {device_id} as '{current_logical_status}'."
             )
-
         return current_battery_state, state_changed
 
-    # --- VAPID Claims Helper ---
     def _get_vapid_claims(self, user_id: str) -> Optional[Dict[str, str]]:
         user_email = None
         try:
-            user_data = self.uds.load_single_user(user_id)
-            if user_data and user_data.get("email"):
-                user_email = user_data.get("email").strip()
+            user = self.uds.get_user_by_username(user_id)
+            if user:
+                user_email = user.email.strip()
         except Exception as e:
             log.error(f"Error fetching user data for VAPID email for '{user_id}': {e}")
         if not user_email:
@@ -537,7 +538,6 @@ class NotificationService:
         log.debug(f"Generated VAPID claims for {user_id}: {claims}")
         return claims
 
-    # --- Static URL Helper ---
     def _get_static_url(self, static_path: str) -> str:
         try:
             current_app.config
@@ -549,9 +549,8 @@ class NotificationService:
             return f"/static/{static_path}"
         except Exception as e:
             log.error(f"Error generating URL for static path '{static_path}': {e}")
-            return f"/static/{static_path}"  # Fallback
+            return f"/static/{static_path}"
 
-    # --- Save History ---
     def _save_notification_to_history(
         self, user_id: str, title: str, body: str, data_payload: Optional[Dict] = None
     ):
@@ -577,7 +576,6 @@ class NotificationService:
                 f"Failed to save notification to history for user '{user_id}': {e}"
             )
 
-    # --- Web Push Sending ---
     def send_user_notifications(
         self,
         user_id: str,
@@ -590,7 +588,6 @@ class NotificationService:
         notification_type: Optional[str] = None,
     ):
         self._save_notification_to_history(user_id, title, body, data_payload)
-
         if not self.vapid_enabled or not self.vapid_private_key_str:
             log.warning(
                 f"User '{user_id}': VAPID disabled/key missing. Skip push: {title}"
@@ -611,23 +608,15 @@ class NotificationService:
         if not user_subscriptions:
             log.info(f"User '{user_id}': No push subscriptions.")
             return
-
-        # --- Determine Icon and Badge URLs based on type ---
         icon_url = ""
         badge_url = ""
         log.debug(
             f"Determining icon/badge for notification_type: '{notification_type}'"
         )
-
-        # Determine ICON URL
         if (
             notification_type in ["geofence_entry", "geofence_exit", "battery_low"]
-            # --- MODIFICATION START ---
-            and device_label  # Only require label, color is optional
-            # --- MODIFICATION END ---
+            and device_label
         ):
-            # Use dynamic device icon IF label is available
-            # Get default color if device_color is missing
             final_color = device_color or getDefaultColorForId(
                 data_payload.get("deviceId", "unknown") if data_payload else "unknown"
             )
@@ -639,11 +628,9 @@ class NotificationService:
             icon_url = self._get_static_url(self.welcome_icon_path)
         elif notification_type == "test":
             icon_url = self._get_static_url(self.test_icon_path)
-        else:  # Fallback for other types OR if label is missing
+        else:
             icon_url = self._get_static_url(self.default_icon_path)
             log.debug(f"Using default icon path (fallback): {self.default_icon_path}")
-
-        # Determine BADGE URL using match statement
         match notification_type:
             case "geofence_entry":
                 badge_url = self._get_static_url(self.geofence_entry_badge_path)
@@ -657,12 +644,9 @@ class NotificationService:
                 badge_url = self._get_static_url(self.welcome_badge_path)
             case _:
                 badge_url = self._get_static_url(self.default_badge_path)
-
         log.debug(
             f"Selected URLs - Type: {notification_type}, Icon: {icon_url}, Badge: {badge_url}"
         )
-        # --- ----------------------------- ---
-
         actions = []
         if (
             notification_type in ["geofence_entry", "geofence_exit", "battery_low"]
@@ -670,7 +654,6 @@ class NotificationService:
             and data_payload.get("deviceId")
         ):
             actions.append({"action": "view_device", "title": "View Device"})
-
         data_payload = data_payload or {}
         unique_tag = tag or f"notification-{int(time.time())}"
         payload = {
@@ -692,7 +675,6 @@ class NotificationService:
         except Exception as json_err:
             log.error(f"User '{user_id}': Failed payload serialize: {json_err}.")
             return
-
         log.info(
             f"User '{user_id}': Sending push (Tag: {unique_tag}, Type: {notification_type or 'general'}) to {len(user_subscriptions)} subscribers."
         )
@@ -734,6 +716,7 @@ class NotificationService:
         if failed_endpoints:
             self._remove_failed_subscriptions(user_id, failed_endpoints)
 
+    
     def send_single_notification(
         self,
         user_id: str,
@@ -757,7 +740,6 @@ class NotificationService:
         if not vapid_claims:
             log.error(f"User '{user_id}': Failed VAPID claims.")
             return
-
         icon_url = ""
         badge_url = ""
         log.debug(
@@ -779,7 +761,6 @@ class NotificationService:
         log.debug(
             f"Selected Single URLs - Type: {notification_type}, Icon: {icon_url}, Badge: {badge_url}"
         )
-
         unique_tag = tag or f"single-notification-{int(time.time())}"
         data_payload = data_payload or {}
         payload = {
@@ -840,12 +821,13 @@ class NotificationService:
             notification_type="welcome",
         )
 
+
     def _remove_failed_subscriptions(self, user_id: str, endpoints: List[str]):
         if not endpoints:
             return
-            log.warning(
-                f"User '{user_id}': Removing {len(endpoints)} failed subscriptions."
-            )
+        log.warning(
+            f"User '{user_id}': Removing {len(endpoints)} failed subscriptions."
+        )
         try:
             current_subs = self.uds.load_subscriptions(user_id)
             updated_subs = {
@@ -866,14 +848,37 @@ class NotificationService:
             self._remove_failed_subscriptions(user_id, [endpoint])
 
     def is_valid_subscription(self, subscription_data: Any) -> bool:
-        return (
-            isinstance(subscription_data, dict)
-            and isinstance(subscription_data.get("endpoint"), str)
-            and subscription_data["endpoint"].startswith("https://")
-            and isinstance(subscription_data.get("keys"), dict)
-            and isinstance(subscription_data["keys"].get("p256dh"), str)
-            and isinstance(subscription_data["keys"].get("auth"), str)
-        )
+        if not isinstance(subscription_data, dict):
+            log.warning(
+                f"Subscription validation failed: Not a dictionary. Type: {type(subscription_data)}"
+            )
+            return False
+        endpoint = subscription_data.get("endpoint")
+        keys = subscription_data.get("keys")
+        if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
+            log.warning(
+                f"Subscription validation failed: Invalid or missing 'endpoint'. Value: {endpoint}"
+            )
+            return False
+        if not isinstance(keys, dict):
+            log.warning(
+                f"Subscription validation failed: Missing or invalid 'keys' dictionary. Value: {keys}"
+            )
+            return False
+        p256dh = keys.get("p256dh")
+        auth = keys.get("auth")
+        if not isinstance(p256dh, str) or not p256dh:
+            log.warning(
+                f"Subscription validation failed: Missing or invalid 'keys.p256dh'. Value: {p256dh}"
+            )
+            return False
+        if not isinstance(auth, str) or not auth:
+            log.warning(
+                f"Subscription validation failed: Missing or invalid 'keys.auth'. Value: {auth}"
+            )
+            return False
+        log.debug(f"Subscription validation passed for endpoint: {endpoint[:50]}...")
+        return True
 
     def cleanup_stale_geofence_states_for_geofence(
         self, user_id: str, geofence_id: str

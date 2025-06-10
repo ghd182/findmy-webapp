@@ -1,3 +1,4 @@
+<!-- File: app/templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 
@@ -84,9 +85,6 @@
     {# Load Your Main Stylesheet #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 
-
-
-
     {# Inline Critical CSS (Optional, if style.css is very large) #}
     <style>
         body.app-loading .app-bar,
@@ -118,6 +116,13 @@
 </head>
 
 <body class="app-loading"> <!-- Start with loading class -->
+
+    <div id="splash-screen">
+        <img src="{{ url_for('static', filename='icons/favicon.svg') }}" alt="App Icon" id="splash-icon">
+        {# The SVG icon itself handles light/dark mode if its internal CSS uses prefers-color-scheme #}
+    </div>
+
+
     <!-- Drawer Overlay & Menu -->
     <div class="drawer-overlay" id="drawer-overlay"></div>
     <aside class="drawer" id="drawer">
@@ -850,6 +855,8 @@
                         <label> <input type="checkbox" name="export_part" value="devices" checked> Device Configs
                             <span>(Server)</span> </label>
                         <label> <input type="checkbox" name="export_part" value="geofences" checked> Geofences
+                            <span>(Server)</span> </label>
+                        <label> <input type="checkbox" name="export_part" value="shares" checked> Shared Links
                             <span>(Server)</span> </label>
                         <label> <input type="checkbox" name="export_part" value="clientSettings" checked> UI & Map
                             Settings <span>(Client)</span> </label>

@@ -12,6 +12,7 @@ window.Scanner = {
     scanTimer: null,
     SCAN_DURATION_MS: 60000,
     expandedDetails: new Set(),
+    _advertisementListener: null, 
 
     // --- UI Elements ---
     elements: {},
@@ -201,27 +202,69 @@ window.Scanner = {
     // --- Scanning Logic ---
     startScan: async function () {
         this.cacheElements(); // Ensure elements ready before scan start
-        if (!this.bluetoothSupported || this.isScanning) return;
+        if (!this.bluetoothSupported || this.isScanning) {
+             console.warn(`[Scanner Start] Condition not met. Supported: ${this.bluetoothSupported}, Scanning: ${this.isScanning}`);
+             return;
+        }
         console.log("[Scanner] Starting scan process (Iterative MAC Check)...");
-        this.isScanning = true;
 
-        // --- Call the FULL reset function when starting ---
-        this.resetUIForNewScan();
-        // --- ------------------------------------------ ---
+        // 1. Update UI to indicate starting state FIRST
+        this.isScanning = true; // Mark as scanning conceptually
+        this.resetUIForNewScan(); // Clear previous results immediately
 
         if (this.elements.startButton) {
             this.elements.startButton.disabled = true;
-            if (!this.elements.startButton.dataset.originalHtml) { this.elements.startButton.dataset.originalHtml = this.elements.startButton.innerHTML; }
+            // Store original HTML if not already stored
+            if (!this.elements.startButton.dataset.originalHtml) {
+                 this.elements.startButton.dataset.originalHtml = this.elements.startButton.innerHTML;
+            }
             this.elements.startButton.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 5px;"></div> Starting...`;
         }
-        if (this.elements.stopButton) this.elements.stopButton.style.display = 'none';
-        this.updateStatus('Fetching expected keys and potential MACs...');
+        if (this.elements.stopButton) {
+            this.elements.stopButton.style.display = 'none'; // Hide stop button initially
+        }
+        this.updateStatus("Requesting Bluetooth scan permissions...");
 
+        // 2. Request Bluetooth Scan Permission IMMEDIATELY (Requires User Gesture)
+        let tempScanInstance = null;
         try {
-            const data = await AppApi._fetch('/api/user/current_advertisement_keys');
-            if (!data || !Array.isArray(data.keys_and_macs)) { throw new Error("Invalid key/MAC data received from server."); }
+            const options = {
+                // filter based on Apple's manufacturer ID
+                // filters: [{ manufacturerData: { 0x004C: {} } }], // Filter for Apple devices - Causes Issues on some platforms
+                acceptAllAdvertisements: true, // Scan for everything, filter in JS
+                // keepRepeatedDevices: true // Get updates for same device - Optional
+            };
+            console.log("[Scanner] Requesting LE Scan permission with options:", JSON.stringify(options));
+            // *** This is the call that needs the user gesture ***
+            tempScanInstance = await navigator.bluetooth.requestLEScan(options);
+            console.log("[Scanner] LE Scan permission granted/scan requested.");
+            this.permissionGranted = true;
+            // Update status *after* permission is granted
+            this.updateStatus("Permission granted. Fetching expected keys...");
+
+        } catch (error) {
+            // --- Handle Permission Errors ---
+            console.error("[Scanner] Error requesting LE Scan permission:", error);
+            this.isScanning = false; // Reset scanning flag
+            this.permissionGranted = (error.name === 'NotFoundError' || error.name === 'NotAllowedError') ? 'denied' : null;
+            let message = `Error: ${error.message}`;
+            if (error.name === 'NotFoundError') message = "Bluetooth permission denied or no devices found. Ensure Bluetooth is ON.";
+            if (error.name === 'NotAllowedError') message = "Bluetooth scanning permission denied by user.";
+            if (error instanceof DOMException && error.message.includes("Bluetooth adapter not available")) message = "Bluetooth adapter not found or is turned off.";
+            this.updateStatus(message, true);
+            this._resetButtonsAndStatusOnly(message); 
+            return; // Stop the process if permission failed
+        }
+
+        // 3. IF Permission Granted, THEN Fetch Keys (Asynchronously)
+        try {
+            const data = await AppApi._fetch('/api/user/current_advertisement_keys'); // Use _fetch for error handling
+            if (!data || !Array.isArray(data.keys_and_macs)) {
+                throw new Error("Invalid key/MAC data received from server.");
+            }
             const keysAndMacs = data.keys_and_macs;
-            this.expectedKeys.clear(); this.potentialMacs.clear();
+            this.expectedKeys.clear();
+            this.potentialMacs.clear();
             keysAndMacs.forEach(item => {
                 this.expectedKeys.set(item.adv_key_b64, { deviceId: item.device_id, name: item.name, keyType: item.key_type });
                 if (item.potential_mac) {
@@ -230,75 +273,119 @@ window.Scanner = {
                 }
             });
             console.log(`[Scanner] Fetched ${this.expectedKeys.size} potential keys and ${this.potentialMacs.size} potential MACs.`);
-            if (this.expectedKeys.size === 0 && this.potentialMacs.size === 0) { this.updateStatus("No device keys/MACs found. Ensure devices are configured.", true); this.isScanning = false; this.resetUIForNewScan(); return; }
+            if (this.expectedKeys.size === 0 && this.potentialMacs.size === 0) {
+                this.updateStatus("No device keys/MACs found. Ensure devices are configured.", true);
+                this.isScanning = false;
+                this._resetButtonsAndStatusOnly("No device keys found."); 
+                if (tempScanInstance?.stop) { try { tempScanInstance.stop(); } catch(e){} } // Stop scan if keys failed
+                return;
+            }
 
-            this.updateStatus("Requesting Bluetooth scan permissions...");
-            const options = { acceptAllAdvertisements: true };
-            console.log("[Scanner] Requesting LE Scan with options:", JSON.stringify(options));
-            this.scanInstance = await navigator.bluetooth.requestLEScan(options);
-            console.log("[Scanner] LE Scan started successfully.");
-            this.permissionGranted = true;
+            // 4. Keys Fetched - Finalize Scan Setup
+            this.scanInstance = tempScanInstance; // Assign the successfully requested scan instance
             this.updateStatus(`Scanning ALL Bluetooth devices for ${this.SCAN_DURATION_MS / 1000}s... Found OF Packets: 0 | Matched: 0`);
-            if (this.elements.startButton) this.elements.startButton.style.display = 'none';
-            if (this.elements.stopButton) this.elements.stopButton.style.display = 'inline-flex';
-            navigator.bluetooth.removeEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
-            navigator.bluetooth.addEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
+
+            // Update button states *after* everything is ready
+            if (this.elements.startButton) this.elements.startButton.style.display = 'none'; // Hide start
+            if (this.elements.stopButton) this.elements.stopButton.style.display = 'inline-flex'; // Show stop
+
+            // Attach listener using the stored reference
+            if (this._advertisementListener) { // Remove old one just in case
+                try { navigator.bluetooth.removeEventListener('advertisementreceived', this._advertisementListener); } catch(e){}
+            }
+            this._advertisementListener = this.handleAdvertisement.bind(this); // Create and store new one
+            navigator.bluetooth.addEventListener('advertisementreceived', this._advertisementListener); // Attach
+            console.log("[Scanner] Attached advertisement listener.");
+
+
+            // Start timer
             if (this.scanTimer) clearTimeout(this.scanTimer);
-            this.scanTimer = setTimeout(() => { this.stopScan("Scan finished."); }, this.SCAN_DURATION_MS);
+            this.scanTimer = setTimeout(() => {
+                 console.log("[Scanner] Scan timer expired.");
+                 this.stopScan("Scan finished.");
+             }, this.SCAN_DURATION_MS);
+            console.log("[Scanner] Scan fully started with keys loaded.");
 
         } catch (error) {
-            console.error("[Scanner] Error starting scan or fetching keys:", error);
+            // --- Handle Key Fetching Errors (after permission was granted) ---
+            console.error("[Scanner] Error fetching keys AFTER permission:", error);
             this.isScanning = false;
-            this.permissionGranted = (error.name === 'NotFoundError' || error.name === 'NotAllowedError') ? 'denied' : null;
-            let message = `Error: ${error.message}`;
-            if (error.name === 'NotFoundError') message = "Bluetooth permission denied or no devices found. Ensure Bluetooth is ON.";
-            if (error.name === 'NotAllowedError') message = "Bluetooth scanning permission denied by user.";
-            if (error instanceof DOMException && error.message.includes("Bluetooth adapter not available")) message = "Bluetooth adapter not found or is turned off.";
-            this.updateStatus(message, true);
-            // --- Call full reset on start error ---
-            this.resetUIForNewScan();
-            // --- -------------------------------- ---
+            this.updateStatus(`Error fetching keys: ${error.message}`, true);
+            this._resetButtonsAndStatusOnly(`Error fetching keys: ${error.message}`); 
+
+             // --- Clean up listener on error if it was assigned ---
+             if (this._advertisementListener) {
+                 try { navigator.bluetooth.removeEventListener('advertisementreceived', this._advertisementListener); } catch(e){}
+                 this._advertisementListener = null;
+             }
+             // --- ---------------------------------------------- ---
+
+            if (tempScanInstance?.stop) {
+                try { tempScanInstance.stop(); console.log("[Scanner] Stopped scan instance after key fetch error."); } catch (e) { console.warn("[Scanner] Error stopping scan instance after key fetch error:", e); }
+            }
         }
     },
 
-    // --- REVISED stopScan ---
-    // --- REVISED stopScan with MORE LOGGING ---
+    // --- REVISED stopScan to use _resetButtonsAndStatusOnly ---
     stopScan: function (completionMessage = "Scan stopped.") {
         console.log(`%c[Scanner] Entering stopScan. Message: "${completionMessage}"`, "color: orange; font-weight: bold;");
-        this.cacheElements(); // <<< Ensure elements are cached FIRST
+        this.cacheElements(); // Ensure elements are cached
         console.log("[Scanner Stop] Current allDetectedDevices size:", this.allDetectedDevices.size);
 
-        if (this.scanTimer) clearTimeout(this.scanTimer); this.scanTimer = null;
-        navigator.bluetooth.removeEventListener('advertisementreceived', this.handleAdvertisement.bind(this));
+        if (this.scanTimer) {
+            clearTimeout(this.scanTimer);
+            this.scanTimer = null;
+            console.log("[Scanner Stop] Scan timer cleared.");
+        }
+
+        // Remove listener FIRST, using the stored reference
+        if (this._advertisementListener) {
+            try {
+                navigator.bluetooth.removeEventListener('advertisementreceived', this._advertisementListener);
+                console.log("[Scanner Stop] Removed advertisement listener.");
+            } catch(e) {
+                 console.warn("[Scanner Stop] Error removing listener:", e);
+            }
+            this._advertisementListener = null; // Clear reference AFTER removal attempt
+        } else {
+             console.log("[Scanner Stop] No active listener reference found to remove.");
+        }
+        // --- --------------------------------------- ---
+
+        // Stop the actual Bluetooth scan instance
         if (this.scanInstance && typeof this.scanInstance.stop === 'function') {
             try {
                 this.scanInstance.stop();
                 console.log("[Scanner Stop] Scan instance stop() method called.");
+            } catch (e) {
+                console.warn("[Scanner Stop] Error stopping scan instance:", e);
             }
-            catch (e) { console.warn("[Scanner Stop] Error stopping scan instance:", e); }
+        } else {
+            console.log("[Scanner Stop] No active scanInstance or stop method found.");
         }
-        this.scanInstance = null; this.isScanning = false;
 
-        let matchedCount = 0; this.allDetectedDevices.forEach(d => { if (d.isMatched) matchedCount++; });
+        this.scanInstance = null;
+        this.isScanning = false; // Set scanning to false AFTER stopping attempts
+
+        // Calculate final counts and message
+        let matchedCount = 0;
+        this.allDetectedDevices.forEach(d => { if (d.isMatched) matchedCount++; });
         const finalStatusMessage = completionMessage + ` Displaying ${this.allDetectedDevices.size} total Apple FindMy packets (${matchedCount} matched).`;
 
         console.log("[Scanner Stop] Calling _resetButtonsAndStatusOnly...");
-        this._resetButtonsAndStatusOnly(finalStatusMessage);
+        this._resetButtonsAndStatusOnly(finalStatusMessage); // Use helper to reset UI buttons/status
 
-        // --- Add guard BEFORE calling renderScanResults ---
+        // Render the results collected
         if (!this.elements.resultsList) {
             console.error("[Scanner Stop] Cannot render results because resultsList element is missing.");
         } else {
             console.log(`%c[Scanner Stop] BEFORE renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
             console.log("[Scanner Stop] Data to render:", this.allDetectedDevices);
-            this.renderScanResults(); // Now safe to call
+            this.renderScanResults(); // Display the collected results
             console.log(`%c[Scanner Stop] AFTER renderScanResults. List content:`, "color: yellow;", this.elements.resultsList.innerHTML.substring(0, 100) + "...");
         }
-        // --- ----------------------------------------- ---
-
         console.log("[Scanner Stop] Exiting stopScan.");
     },
-
     // --- End REVISED stopScan ---
 
     updateStatus: function (message, isError = false) {

@@ -1,4 +1,6 @@
-# .gitignore for FindMy WebApp
+# File: .gitignore
+# Purpose: Specifies intentionally untracked files that Git should ignore.
+#          Covers both Python/Flask WebApp and Android project files.
 
 # --- Python Bytecode and Cache ---
 __pycache__/
@@ -7,7 +9,6 @@ __pycache__/
 *.so
 
 # --- Python Virtual Environments ---
-# Common names for virtual environments
 venv/
 .venv/
 ENV/
@@ -16,34 +17,46 @@ env.bak/
 venv.bak/
 
 # --- Configuration / Secrets ---
-# Environment variable files (use seeds in docker-compose.yml instead)
+# Environment variable files (use seeds in docker-compose.yml or env vars)
 .env
 *.env.*
 .envrc
 
-# User-specific sensitive data (Apple credentials are saved here)
+# User-specific sensitive data (Apple credentials, DB, cache)
 # IMPORTANT: Do NOT commit the contents of the data directory!
 data/
 
-# Explicitly ignore credential files if accidentally placed outside data/
+# Explicitly ignore specific sensitive files if accidentally placed outside data/
 apple_credentials.json
 *.pem
 *.key
+# IMPORTANT: Ignore Firebase config for Android app (contains project keys)
+google-services.json
+app/google-services.json
 
 # --- IDE / Editor Configuration ---
 .idea/
 .vscode/
 *.iml
-*.sublime-project
-*.sublime-workspace
+*.project
+*.classpath
+*.settings/
+*.sublime-*
 
 # --- Build / Distribution Artifacts ---
+# Python
 dist/
 build/
 *.egg-info/
 *.egg
 wheels/
 htmlcov/ # Coverage reports
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+/app/build/ # Android module build directory
 
 # --- Testing Artifacts ---
 .pytest_cache/
@@ -51,6 +64,10 @@ htmlcov/ # Coverage reports
 *.cover
 nosetests.xml
 coverage.xml
+# Android Test Reports (often in app/build/reports)
+/app/build/reports/
+/app/build/test-results/
+/app/build/outputs/androidTest-results/
 
 # --- Runtime / Temporary Files ---
 *.log
@@ -78,7 +95,6 @@ desktop.ini
 .~\$.*
 
 # --- Instance Folder (Common Flask Pattern) ---
-# Ignore instance folder if used (though not explicitly in structure now)
 /instance/
 
 # --- Node Modules (If frontend build tools are ever added) ---
@@ -93,28 +109,35 @@ desktop.ini
 .ipynb_checkpoints
 
 # --- Miscellaneous ---
-# If you use MyPy type checking
+# MyPy / Ruff / Pytype Cache
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
-# If you use pyenv
+.ruff_cache/
+.pytype/
+# Pyenv
 .python-version
 
-# If you use Ruff cache
-.ruff_cache/
-
-# If you use pytype cache
-.pytype/
-
 # --- Docker ---
-# Ignore docker contexts unless needed
 .docker/contexts/
-
-# ignore docker-compose files
+# Ignore docker-compose variations if not templates
+# docker-compose.yml # Keep committed
+# portainer_docker-compose.yml # Keep committed
 *.yaml
+
+# --- Android Specific ---
+.gradle/ # Project-level Gradle cache
+captures/ # Android Studio captures
+*.hprof # Heap dumps
+# local.properties: Contains SDK path, potentially sensitive keys
+local.properties
+/app/local.properties
+# NDK builds
+.cxx/
+/app/.cxx/
+
+# --- Codebase Generation Files (Internal Use) ---
 codebase.txt
 codebase.py
 codebase_log.log
-codebase_findmy.txt
-codebase*.txt
+codebase_*.txt

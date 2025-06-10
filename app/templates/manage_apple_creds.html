@@ -350,7 +350,7 @@
                          headers: {
                              'Content-Type': 'application/json',
                              'Accept': 'application/json',
-                             'X-CSRFToken': csrfToken // <<< ADDED HEADER
+                             'X-CSRFToken': csrfToken 
                             },
                          body: JSON.stringify({ method_index: selectedMethodIndex })
                      });
@@ -391,7 +391,7 @@
                         headers: {
                             'Content-Type': 'application/json',
                             'Accept': 'application/json',
-                            'X-CSRFToken': csrfToken // <<< ADDED HEADER
+                            'X-CSRFToken': csrfToken 
                         },
                         body: JSON.stringify({ method_index: selectedMethodIndex, code: codeInput.value })
                     });

@@ -1,28 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>404 Not Found</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        body { display: flex; justify-content: center; align-items: center; min-height: 100vh; text-align: center; }
-        .message-card { max-width: 450px; width: 90%; padding: 32px; }
-        .message-icon { font-size: 48px; color: var(--m3-sys-color-secondary); margin-bottom: 16px; }
-         html.dark-theme .message-icon { color: var(--m3-sys-color-secondary); } /* Keep consistent */
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            text-align: center;
+        }
+
+        .message-card {
+            max-width: 450px;
+            width: 90%;
+            padding: 32px;
+        }
+
+        .message-icon {
+            font-size: 48px;
+            color: var(--m3-sys-color-secondary);
+            margin-bottom: 16px;
+        }
+
+        html.dark-theme .message-icon {
+            color: var(--m3-sys-color-secondary);
+        }
+
+        /* Keep consistent */
     </style>
 </head>
+
 <body class="error-page"> {# Add class if you want specific body styles #}
     <div class="card message-card">
-         <span class="material-icons message-icon">error_outline</span>
-         <h1 class="card-title">404 - Page Not Found</h1>
-         <p>Sorry, the page you were looking for doesn't exist.</p>
-         <div class="button-row" style="justify-content: center;">
-             <a href="{{ url_for('main.index_route') }}" class="button">Go Home</a>
-         </div>
+        <svg xmlns="http://www.w3.org/2000/svg" height="48px" viewBox="0 -960 960 960" width="48px" fill="#EA3323">
+            <path
+                d="M261-322q12 0 21-9t9-21q0-12-9-21t-21-9q-12 0-21 9t-9 21q0 12 9 21t21 9Zm-30-130h60v-191h-60v191Zm179 80h319v-60H410v60Zm0-171h319v-60H410v60ZM132-160q-24 0-42-18t-18-42v-520q0-24 18-42t42-18h696q24 0 42 18t18 42v520q0 24-18 42t-42 18H132Zm0-60h696v-520H132v520Zm0 0v-520 520Z" />
+        </svg>
+
+        <h1 class="card-title">404 - Page Not Found</h1>
+        <p>Sorry, the page you were looking for doesn't exist.</p>
+        <div class="button-row" style="justify-content: center;">
+            <a href="{{ url_for('main.index_route') }}" class="button">Go Home</a>
+        </div>
     </div>
     <script>
-        (function(){const theme=localStorage.getItem('theme')||'system';if(theme==='dark'||(theme==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark-theme');}})();
+        (function () { const theme = localStorage.getItem('theme') || 'system'; if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark-theme'); } })();
     </script>
 </body>
+
 </html>

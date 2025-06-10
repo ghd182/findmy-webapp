@@ -1,4 +1,5 @@
-# app/__init__.py
+# File: app/__init__.py
+# Purpose: Application factory and initialization.
 
 import os
 import logging
@@ -21,279 +22,380 @@ from flask_login import LoginManager, current_user
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.middleware.proxy_fix import ProxyFix
-
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-from .config import config
-from .services.user_data_service import UserDataService
-
+# --- Initialize Extensions Globally ---
 login_manager = LoginManager()
+csrf = CSRFProtect()
+background_scheduler = BackgroundScheduler(daemon=True)
+db = SQLAlchemy()
+migrate = Migrate()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["1000 per day", "500 per hour"],
+    storage_uri="memory://",  # Changed from None for explicit in-memory storage
+    strategy="fixed-window",  # Or "moving-window"
+)
+log = logging.getLogger(__name__)
+
+# --- Configure Login Manager ---
 login_manager.login_view = "auth.login_route"
 login_manager.login_message_category = "info"
 login_manager.login_message = "Please log in to access this page."
-csrf = CSRFProtect()
-background_scheduler = BackgroundScheduler(daemon=True)
-log = logging.getLogger(__name__)
-
-# --- Create Limiter instance globally but initialize later ---
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://",
-    strategy="fixed-window",
-)
 
 
 def create_app():
+    """Application Factory Function"""
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
     STATIC_DIR = os.path.join(APP_DIR, "static")
     TEMPLATE_DIR = os.path.join(APP_DIR, "templates")
+
     app = Flask(
         __name__,
         template_folder=TEMPLATE_DIR,
         static_folder=STATIC_DIR,
-        static_url_path="/static",
+        static_url_path="/static",  # Ensures /static/... routes work
     )
+
+    # --- 1. Load Config FIRST ---
+    from .config import config
+
     app.config.from_object(config)
     log.info(f"Flask App Created with config: {type(config).__name__}")
     log.info(f"App Root Path: {app.root_path}")
     log.info(f"Static Folder: {app.static_folder}")
     log.info(f"Static URL Path: {app.static_url_path}")
     log.info(f"Data Directory: {app.config['DATA_DIRECTORY']}")
+    log.info(f"Database URI: {app.config['SQLALCHEMY_DATABASE_URI']}")
     log.info(
         f"CSRF Protection Enabled (Config): {app.config.get('WTF_CSRF_ENABLED', 'Not Set')}"
     )
 
-    # --- Configure ProxyFix (Important for Rate Limiting & Secure Headers) ---
-    # Ensure this is applied *before* initializing extensions that rely on remote addr
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=0)
-    log.info("ProxyFix enabled (x_for=1, x_proto=1, x_host=1)")
+    # --- Configure ProxyFix & Session Cookies ---
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=0
+    )  # x_prefix=0 for standard setups
+    log.info("ProxyFix enabled (x_for=1, x_proto=1, x_host=1, x_prefix=0)")
 
-    # --- Configure Session Cookies ---
     if not app.config.get("TESTING"):
         app.config.update(
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE="Lax",
+            SESSION_COOKIE_SAMESITE="Lax",  # Keep Lax for PWA iframes/embeds
             REMEMBER_COOKIE_SECURE=True,
             REMEMBER_COOKIE_HTTPONLY=True,
             REMEMBER_COOKIE_SAMESITE="Lax",
         )
-        log.info(
-            "Applied secure session cookie settings (Secure, HttpOnly, SameSite=Lax)."
-        )
+        log.info("Applied secure session cookie settings.")
     else:
         app.config.update(SESSION_COOKIE_SAMESITE="Lax", REMEMBER_COOKIE_SAMESITE="Lax")
-        log.info("Applied standard session cookie settings for TESTING environment.")
+        log.info("Applied standard session cookie settings for TESTING.")
 
-    # --- Initialize Extensions ---
+    # --- 2. Initialize Extensions WITH App ---
     login_manager.init_app(app)
-    csrf.init_app(app)
-
-    # --- Initialize Limiter HERE, *before* blueprints that use it ---
+    csrf.init_app(app)  # Initialize CSRF protection
+    db.init_app(app)
+    migrate.init_app(app, db)
     limiter.init_app(app)
-    app.config["RATELIMIT_ENABLED"] = True
-    log.info(f"Flask-Limiter initialized and attached to app. Default limits applied.")
-    # --- End Limiter Init ---
+    app.config["RATELIMIT_ENABLED"] = True  # Ensure limiter is active
+    log.info("Flask extensions initialized with app.")
 
-    # --- Initialize Locks ---
-    if "users" in config.FILE_LOCKS and config.FILE_LOCKS["users"] is None:
-        log.info("Initializing file locks within create_app...")
+    # --- Initialize File Locks ---
+    cache_filename = app.config.get("USER_CACHE_FILENAME")
+    if (
+        cache_filename
+        and cache_filename in config.FILE_LOCKS  # Use the loaded config object
+        and config.FILE_LOCKS.get(cache_filename) is None
+    ):
+        log.info("Initializing file locks (cache)...")
         for key in config.FILE_LOCKS:
             if config.FILE_LOCKS[key] is None:
                 config.FILE_LOCKS[key] = threading.Lock()
-                log.debug(f"Initialized lock for '{key}'")
         log.info("File locks initialization complete.")
-    elif "users" not in config.FILE_LOCKS:
-        log.error("FILE_LOCKS missing 'users' key. Locks not initialized.")
+    else:
+        log.debug("Cache file lock already initialized or not configured.")
 
-    # --- Ensure Data Directory and Users File ---
+    # --- Ensure Data Directory ---
     try:
         app.config["DATA_DIRECTORY"].mkdir(parents=True, exist_ok=True)
-        users_file = app.config["USERS_FILE"]
-        if not users_file.exists():
-            users_lock = config.FILE_LOCKS.get("users")
-            if users_lock:
-                with users_lock:
-                    if not users_file.exists():
-                        log.warning(f"Creating empty user file at {users_file}")
-                        try:
-                            users_file.write_text("{}", encoding="utf-8")
-                        except Exception as e:
-                            log.error(f"Failed to create {users_file.name}: {e}")
-            else:
-                log.error("Cannot create users file: Lock for 'users' not found.")
+        log.info(f"Data directory {app.config['DATA_DIRECTORY']} ensured.")
     except Exception as e:
         log.error(
             f"Failed to create/access data directory {app.config['DATA_DIRECTORY']}: {e}"
         )
 
-    # --- Register Blueprints ---
+    # --- 3. Import Models ---
+    from . import models
+
+    # --- 4. Run Data Migration ---
+    from .utils.migration_utils import run_data_migration
+
+    try:
+        with app.app_context():  # Ensure app context for DB operations
+            inspector = db.inspect(db.engine)
+            if not inspector.has_table(models.User.__tablename__):
+                log.warning("Database tables not found. Running db.create_all().")
+                db.create_all()
+            else:
+                log.debug("Database tables appear to exist.")
+
+            log.info("Checking if data migration from JSON to DB is needed...")
+            run_data_migration(app)  # Pass the app object
+            log.info("Data migration check complete.")
+    except Exception as mig_err:
+        log.exception(
+            f"CRITICAL ERROR during data migration check/execution: {mig_err}"
+        )
+
+    # --- 5. Register Blueprints ---
+    log.info("Registering blueprints...")
+
     from .auth.routes import bp as auth_bp
 
-    app.register_blueprint(auth_bp)
+    app.register_blueprint(auth_bp, url_prefix="/auth")
+    log.info("Registered 'auth' blueprint at prefix /auth")
+
     from .main.routes import bp as main_bp
 
     app.register_blueprint(main_bp)
     from .main.api import bp as api_bp
 
     app.register_blueprint(api_bp, url_prefix="/api")
+    log.info("Registered 'main' blueprint at / and 'api' blueprint at prefix /api")
+
     from .public.routes import bp as public_bp
 
     app.register_blueprint(public_bp, url_prefix="/public")
+    log.info("Registered 'public' blueprint at prefix /public")
 
-    # --- Initialize Scheduler ---
+    # Authentication API (Token generation)
+    from .auth_api.routes import bp as auth_api_bp
+
+    app.register_blueprint(
+        auth_api_bp, url_prefix="/api/public/auth"
+    )  # Ensure this prefix matches CF
+    log.info("Registered 'auth_api' blueprint at prefix /api/public/auth")
+
+    # Public Scanner API (Config/Report - Token required)
+    from .public_api.routes import bp as public_api_bp
+
+    app.register_blueprint(
+        public_api_bp, url_prefix="/api/public/scanner"
+    )  # Ensure this prefix matches CF
+    log.info("Registered 'public_api' blueprint at prefix /api/public/scanner")
+
+    # --- 6. Initialize Scheduler ---
     if not app.config.get("TESTING", False):
-        scheduler_init_flag = f"SCHEDULER_INITIALIZED_{os.getpid()}_{id(app)}"
-        if not background_scheduler.running and not hasattr(
-            app, "_scheduler_jobs_added"
-        ):
+        if not background_scheduler.running:
             log.info("Scheduler not running/initialized, initializing jobs...")
             try:
                 from .scheduler.tasks import schedule_jobs
 
-                schedule_jobs(app, background_scheduler)
+                schedule_jobs(app, background_scheduler)  # Pass app object
                 app._scheduler_jobs_added = True
                 log.info("Scheduler jobs added.")
             except Exception as e:
                 log.error(f"Error scheduling jobs: {e}")
-        elif background_scheduler.running:
-            log.info("Scheduler already running.")
         else:
-            log.info("Scheduler marked as initialized previously.")
+            log.info("Scheduler reported as already running. Skipping job addition.")
     else:
         log.info("Testing environment detected. Scheduler jobs not scheduled.")
 
-    # --- Request Hook ---
+    # --- 7. Request Hooks, Error Handlers, Context Processors ---
     @app.before_request
-    def check_auth_and_creds():
+    def before_request_checks():
         log.debug(
             f"------ Start before_request ({request.method} {request.path}) ------"
         )
-        log.debug(f"Endpoint: {request.endpoint}, Blueprint: {request.blueprint}")
-        # --- Allow all requests to the 'public' blueprint ---
-        if request.blueprint == "public":
-            log.debug("Allowing access to 'public' blueprint endpoint.")
-            return
+        endpoint = request.endpoint
+        req_path = request.path
+        log.debug(
+            f"Endpoint: {endpoint}, Blueprint: {request.blueprint}, Path: {req_path}"
+        )
 
-        # --- Allow specific non-blueprint endpoints (like static) ---
-        allowed_endpoints_no_login = {
-            "static",  # Core static files
+        # --- 1. Check for Authorization Header (Token Auth for /api/public/scanner/*) ---
+        # Only apply token check if path STARTS WITH /api/public/scanner/
+        if req_path.startswith("/api/public/scanner/"):
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.lower().startswith("bearer "):
+                log.debug(
+                    f"Authorization header found for '{req_path}'. Letting route decorator (@token_required) handle auth."
+                )
+                return  # Let the token_required decorator on the route handle it
+            else:
+                # If it's a scanner path but no token, it's an error (unless some sub-paths are public)
+                log.warning(
+                    f"Missing or invalid Bearer token for scanner path '{req_path}'."
+                )
+                # Let the @token_required decorator handle the 401 response if it's applied to the route.
+                # If no decorator, it might fall through, but scanner routes SHOULD have it.
+                return  # Let route handle it
+
+        # --- 2. Check Public Access (If NO Token Header or not a /api/public/scanner/ path) ---
+        # These endpoints are truly public, no token or session needed.
+        # Cloudflare handles access to /public/* and /api/public/* (partially).
+        # Flask must also allow these specific endpoints to bypass session checks.
+        publicly_accessible_endpoints = {
+            "static",
             "auth.login_route",
             "auth.register_route",
             "auth.logout_route",
-            # --- ADD BACK core asset routes if served by main ---
-            "main.manifest",
-            "main.favicon",
-            "main.service_worker",
-            # Add other truly public root endpoints here if any
+            "auth.logged_out_route",
+            "auth.reauth_route",  # Cloudflare re-auth trigger
+            "public.view_shared_device",
+            "public.get_public_share_data_new",  # Public API for share data
+            "public.service_worker",  # Service worker at /public/sw.js
+            "public.manifest",  # Manifest at /public/manifest.json
+            "public.favicon",  # Favicon at /public/favicon.ico
+            "main.service_worker",  # Service worker at /sw.js (root)
+            "main.manifest",  # Manifest at /manifest.json (root)
+            "main.favicon",  # Favicon at /favicon.ico (root)
+            # === Crucial: Make token generation endpoint explicitly public ===
+            "auth_api.generate_api_token",  # Endpoint for /api/public/auth/generate_token
         }
-        endpoint = request.endpoint
+        is_root_path = req_path == "/"
 
-        if endpoint in allowed_endpoints_no_login:
-            # If logged in, redirect away from login/register
+        if endpoint in publicly_accessible_endpoints or is_root_path:
+            log.info(
+                f"Allowing public access to '{req_path}' (Endpoint: {endpoint}, Root: {is_root_path})."
+            )
+            # Redirect logged-in users from login/register
             if current_user.is_authenticated and endpoint in [
                 "auth.login_route",
                 "auth.register_route",
             ]:
                 log.debug(
-                    f"Authenticated user accessing public login/register '{endpoint}'. Redirecting."
+                    f"Authenticated user accessing '{endpoint}'. Redirecting to index."
                 )
                 return redirect(url_for("main.index_route"))
-            log.debug(f"Allowing public access to endpoint '{endpoint}'.")
-            return
+            return  # Request proceeds
 
-        # --- Check Authentication for everything else ---
+        # --- 3. Check Session Authentication (If not handled above) ---
+        # At this point, if it's not a token-protected path (/api/public/scanner/*)
+        # and not a truly public endpoint, it requires a session.
+        log.debug(
+            f"'{req_path}' not explicitly public or token-scanner. Requires session auth. Checking..."
+        )
         if not current_user.is_authenticated:
             next_url = request.full_path
-            log.info(
-                f"Unauthenticated access to protected endpoint '{endpoint}'. Redirecting to login (next={next_url})."
+            log.warning(
+                f"Unauthenticated session access to protected endpoint '{endpoint}' at path '{req_path}'. Redirecting to login (next={next_url})."
             )
             flash("Please log in to access this page.", "info")
             return redirect(url_for("auth.login_route", next=next_url))
 
-        # --- Check Credentials for authenticated users ---
-        creds_optional_endpoints = {
+        # --- 4. User IS Authenticated via Session: Check Apple Credentials if needed ---
+        # (This logic remains the same as before)
+        log.debug(
+            f"User '{current_user.id}' authenticated via session for '{req_path}'. Checking Apple Creds if needed."
+        )
+        from app.services.user_data_service import UserDataService
+
+        uds = UserDataService(current_app.config)
+        creds_optional_session_endpoints = {
+            "main.index_route",
             "main.manage_apple_creds_route",
-            "auth.logout_route",
             "api.config_import_apply",
             "api.get_config_part",
             "api.upload_device_file",
             "api.user_preferences",
             "api.delete_account",
-            # Add other API endpoints that DON'T need creds (like getting shares?)
             "api.create_device_share",
             "api.get_my_shares",
             "api.set_share_status",
             "api.update_share_duration",
             "api.delete_my_share_permanently",
-            "api.get_vapid_public_key",  # Key itself isn't secret
-            "api.subscribe",  # Need to be logged in, but maybe not have creds yet
+            "api.get_vapid_public_key",
+            "api.subscribe",
             "api.unsubscribe",
+            "api.auth.get_2fa_methods",
+            "api.auth.request_2fa_code",
+            "api.auth.submit_2fa_code",
         }
-        if endpoint in creds_optional_endpoints:
+        if endpoint in creds_optional_session_endpoints:
             log.debug(
-                f"Allowing authenticated access to creds-optional endpoint '{endpoint}'."
+                f"Allowing session-authenticated access to creds-optional endpoint '{endpoint}'."
             )
             return
-
-        # --- Default: Require Apple Credentials ---
+        log.debug(
+            f"Endpoint '{endpoint}' requires Apple credentials check for session user '{current_user.id}'."
+        )
         try:
-            uds = UserDataService(current_app.config)
-            if not uds.user_has_apple_credentials(current_user.id):
+            apple_id, _, _ = uds.load_apple_credentials_and_state(current_user.id)
+            if not apple_id:
                 log.warning(
-                    f"User '{current_user.id}' accessing '{endpoint}' requires Apple credentials. Redirecting."
+                    f"User '{current_user.id}' accessing '{endpoint}' requires Apple credentials, which are not set. Redirecting."
                 )
                 flash(
-                    "Apple credentials are required to use this feature. Please set them below.",
+                    "Apple credentials are required to use this feature. Please set them on the Credentials page.",
                     "warning",
                 )
                 return redirect(url_for("main.manage_apple_creds_route"))
             log.debug(
-                f"Allowing authenticated access with credentials to endpoint '{endpoint}'."
+                f"Allowing session-authenticated access with credentials present to endpoint '{endpoint}'."
             )
         except Exception as e:
             log.error(
-                f"Error checking creds for user '{current_user.id}': {e}", exc_info=True
+                f"Error checking creds status for user '{current_user.id}': {e}",
+                exc_info=True,
             )
             flash(
                 "Could not verify Apple credentials status due to an internal error.",
                 "danger",
             )
-            return redirect(url_for("main.index_route"))  # Redirect on error
+            return redirect(url_for("main.index_route"))
 
+        log.debug(
+            f"All session checks passed for user '{current_user.id}' accessing '{endpoint}'. Allowing request."
+        )
+        return  # Request proceeds
+
+    # --- Error Handlers & Context Processors (Keep as before) ---
     @app.route("/<path:filename>.map")
     def suppress_map_requests(filename):
-        # Simply return a 404 Not Found response without rendering a template
-        # This prevents the TemplateNotFound error for 404.html on these requests
         log.debug(f"Intercepted and suppressed .map file request: {filename}.map")
         return Response("Not Found", status=404)
 
-    # --- End .map file route ---
-
-    # --- Global Error Handlers ---
     @app.errorhandler(404)
     def not_found_error(error):
         log.warning(f"404 Not Found: {request.url} - {error}")
+        # Check if it's an API route
+        if (
+            request.blueprint == "api"
+            or request.blueprint == "public_api"
+            or request.blueprint == "auth_api"
+        ):
+            return jsonify(error="Not Found", message=str(error)), 404
         return render_template("404.html"), 404
 
     @app.errorhandler(500)
     def internal_error(error):
         log.error(f"500 Internal Server Error: {request.url} - {error}", exc_info=True)
+        try:
+            db.session.rollback()
+            log.info("Rolled back database session due to internal error.")
+        except Exception as db_err:
+            log.error(f"Error rolling back database session: {db_err}")
+        if (
+            request.blueprint == "api"
+            or request.blueprint == "public_api"
+            or request.blueprint == "auth_api"
+        ):
+            return jsonify(error="Internal Server Error", message=str(error)), 500
         return render_template("500.html"), 500
 
-    @app.errorhandler(400)  # Catches general 400, including CSRF errors
+    @app.errorhandler(400)
     def handle_bad_request_error(e):
         from flask_wtf.csrf import CSRFError
 
-        # Check if it's specifically a CSRF error
         is_csrf_error = False
         csrf_reason = "Unknown CSRF issue"
         if isinstance(e, CSRFError):
             is_csrf_error = True
             csrf_reason = getattr(e, "description", "CSRF token validation failed")
-            # Sometimes CSRF errors are wrapped, check description
         elif (
             hasattr(e, "description")
             and isinstance(e.description, str)
@@ -306,29 +408,21 @@ def create_app():
             log.warning(
                 f"CSRF Validation Failed for {request.method} {request.url}. Reason: {csrf_reason}"
             )
-            # --- START: Check if it's an AJAX request ---
-            is_ajax = (
-                request.headers.get("X-Requested-With") == "XMLHttpRequest"
-                or "application/json" in request.accept_mimetypes
-                or request.headers.get("Accept") == "application/json"
-            )  # Common checks
-
+            is_ajax = ("XMLHttpRequest" == request.headers.get("X-Requested-With")) or (
+                "application/json" in request.accept_mimetypes
+            )
             if is_ajax:
                 log.debug(
                     "CSRF error detected on an AJAX request. Returning JSON error."
                 )
                 return (
                     jsonify(
-                        {
-                            "error": "CSRF Error",
-                            "message": "Your security token has expired or is invalid. Please reload the page and try again.",
-                        }
+                        error="CSRF Error",
+                        message="Your security token has expired or is invalid. Please reload the page and try again.",
                     ),
                     400,
-                )  # Return 400 Bad Request status
+                )
             else:
-                # --- END: Check AJAX ---
-                # Handle non-AJAX CSRF errors (e.g., standard form submissions)
                 log.debug(
                     "CSRF error detected on a non-AJAX request. Flashing message and redirecting."
                 )
@@ -337,32 +431,32 @@ def create_app():
                     "error",
                 )
                 referrer = request.referrer or url_for("main.index_route")
-                # Avoid redirect loops if referrer is the same page
                 if referrer == request.url:
                     referrer = url_for("main.index_route")
                 return redirect(referrer)
 
-        # Handle other 400 Bad Request errors (non-CSRF)
         log.warning(f"400 Bad Request (Non-CSRF): {request.url} - {e}")
         description = getattr(e, "description", "Invalid request")
-        # Check if it's an AJAX request for generic 400 errors too
         is_ajax_generic = (
-            request.headers.get("X-Requested-With") == "XMLHttpRequest"
-            or "application/json" in request.accept_mimetypes
-            or request.headers.get("Accept") == "application/json"
-        )
-        if is_ajax_generic:
-            return jsonify({"error": "Bad Request", "message": description}), 400
+            "XMLHttpRequest" == request.headers.get("X-Requested-With")
+        ) or ("application/json" in request.accept_mimetypes)
+
+        if (
+            request.blueprint == "api"
+            or request.blueprint == "public_api"
+            or request.blueprint == "auth_api"
+            or is_ajax_generic
+        ):
+            return jsonify(error="Bad Request", message=description), 400
         else:
             try:
                 return render_template("400.html", error=description), 400
-            except Exception:
+            except:
                 return f"<h1>400 Bad Request</h1><p>{description}</p>", 400
 
     log.info(f"VAPID Notifications Enabled: {app.config['VAPID_ENABLED']}")
     log.info(f"Password Encryption Enabled: {app.config['ENCRYPTION_ENABLED']}")
 
-    # --- CONTEXT PROCESSOR (Updated) ---
     @app.context_processor
     def inject_global_vars():
         def get_static_url(config_path):
@@ -379,7 +473,6 @@ def create_app():
                 log.error(f"Error generating URL for '{config_path}': {e}")
                 return None
 
-        # Icons
         default_icon_url = get_static_url(
             app.config.get("DEFAULT_NOTIFICATION_ICON_PATH")
         )
@@ -387,8 +480,6 @@ def create_app():
             app.config.get("WELCOME_NOTIFICATION_ICON_PATH")
         )
         test_icon_url = get_static_url(app.config.get("TEST_NOTIFICATION_ICON_PATH"))
-
-        # Badges (using updated config keys)
         default_badge_url = get_static_url(
             app.config.get("DEFAULT_NOTIFICATION_BADGE_PATH")
         )
@@ -401,7 +492,6 @@ def create_app():
         battery_low_badge_url = get_static_url(app.config.get("BATTERY_LOW_BADGE_PATH"))
         test_badge_url = get_static_url(app.config.get("TEST_BADGE_PATH"))
         welcome_badge_url = get_static_url(app.config.get("WELCOME_BADGE_PATH"))
-
         return dict(
             VAPID_PUBLIC_KEY=(
                 app.config["VAPID_PUBLIC_KEY"] if app.config["VAPID_ENABLED"] else None
@@ -409,11 +499,9 @@ def create_app():
             LOW_BATTERY_THRESHOLD=app.config["LOW_BATTERY_THRESHOLD"],
             APP_VERSION=app.config["APP_VERSION"],
             username=(current_user.id if current_user.is_authenticated else None),
-            # Icon URLs
             DEFAULT_NOTIFICATION_ICON_URL=default_icon_url,
             WELCOME_NOTIFICATION_ICON_URL=welcome_icon_url,
             TEST_NOTIFICATION_ICON_URL=test_icon_url,
-            # Badge URLs
             DEFAULT_NOTIFICATION_BADGE_URL=default_badge_url,
             GEOFENCE_ENTRY_BADGE_URL=geofence_entry_badge_url,
             GEOFENCE_EXIT_BADGE_URL=geofence_exit_badge_url,
@@ -421,7 +509,5 @@ def create_app():
             TEST_BADGE_URL=test_badge_url,
             WELCOME_BADGE_URL=welcome_badge_url,
         )
-
-    # --- End CONTEXT PROCESSOR ---
 
     return app
