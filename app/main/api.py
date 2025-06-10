@@ -170,38 +170,6 @@ def get_current_advertisement_keys():
                 )
         log.debug(f"[API Keys] Processing .keys files for user '{user_id}'...")
 
-        def _load_private_keys_from_keys_file(keys_file_path: Path) -> List[str]:
-            private_keys = []
-            if not keys_file_path.exists():
-                return []
-            try:
-                with keys_file_path.open("r", encoding="utf-8") as f:
-                    for line_num, line in enumerate(f, 1):
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        parts = line.split(":", 1)
-                        if (
-                            len(parts) == 2
-                            and parts[0].strip().lower() == "private key"
-                        ):
-                            key_data = parts[1].strip()
-                            try:
-                                if len(key_data) > 20 and len(key_data) % 4 == 0:
-                                    base64.b64decode(key_data, validate=True)
-                                    private_keys.append(key_data)
-                                else:
-                                    log.warning(
-                                        f"Skipping potential invalid key data in {keys_file_path.name} (L{line_num})"
-                                    )
-                            except Exception:
-                                log.warning(
-                                    f"Skipping invalid base64 data in {keys_file_path.name} (L{line_num})"
-                                )
-            except Exception as e:
-                log.error(f"Error reading keys file {keys_file_path}: {e}")
-            return private_keys
-
         for keys_file in user_data_dir.glob("*.keys"):
             device_id = keys_file.stem
             if not device_id or device_id == creds_stem:
@@ -212,7 +180,7 @@ def get_current_advertisement_keys():
                 f"[API Keys] -- Found keys file: {keys_file.name} (Device ID: {device_id})"
             )
             try:
-                private_keys_b64 = _load_private_keys_from_keys_file(keys_file)
+                private_keys_b64 = UserDataService._load_private_keys_from_keys_file(keys_file)
                 if not private_keys_b64:
                     continue
                 device_display_name = devices_config.get(device_id, {}).get(
@@ -399,6 +367,215 @@ def upload_device_file():
         response_message += f" Background fetch NOT initiated ({results.get('fetch_error', 'unknown reason')})."
 
     return jsonify({"message": response_message, "details": results}), status_code
+
+
+# --- Android API Endpoints ---
+@bp.route("/android/devices", methods=["GET"])
+@login_required
+def get_android_devices():
+    user_id = current_user.id
+    log.info(f"API GET /android/devices requested by '{user_id}'")
+    uds = UserDataService(current_app.config)
+    devices_output = []
+    processed_device_ids = set()
+
+    try:
+        user_data_dir = uds._get_user_data_dir(user_id)
+        if not user_data_dir:
+            return jsonify({"error": "User data directory not found."}), 500
+
+        # Load device configurations from DB
+        devices_config_db = uds.load_devices_config(user_id) # This gets Device objects via UDS
+
+        now = datetime.now(timezone.utc)
+        creds_filename = uds.config.get("USER_APPLE_CREDS_FILENAME", "apple_credentials.json")
+        creds_stem = Path(creds_filename).stem
+
+        # Process .plist files for keys
+        for plist_file in user_data_dir.glob("*.plist"):
+            device_id = plist_file.stem
+            if not device_id or device_id == creds_stem or device_id in processed_device_ids:
+                continue
+
+            device_db_config = devices_config_db.get(device_id)
+            if not device_db_config:
+                log.warning(f"User '{user_id}': Device '{device_id}' from plist not found in DB config. Skipping for Android API.")
+                continue
+
+            current_keys_for_device = []
+            try:
+                with plist_file.open("rb") as f:
+                    accessory = FindMyAccessory.from_plist(f)
+                time_window_past = now - timedelta(days=7)
+                time_window_future = now + timedelta(days=1)
+                accessory_keys = accessory.keys_between(time_window_past, time_window_future)
+                for key_pair in accessory_keys:
+                    adv_key_bytes = key_pair.adv_key_bytes
+                    adv_key_b64 = base64.urlsafe_b64encode(adv_key_bytes).decode("ascii").rstrip("=")
+                    current_keys_for_device.append({
+                        "adv_key_b64": adv_key_b64,
+                        "key_type": key_pair.key_type.name,
+                        "potential_mac": get_potential_mac_from_public_key(adv_key_bytes)
+                    })
+            except Exception as e:
+                log.warning(f"User '{user_id}': Error processing plist {plist_file.name} for Android keys: {e}")
+
+            devices_output.append({
+                "id": device_id,
+                "name": device_db_config.get("name", device_id),
+                "label": device_db_config.get("label", "❓"),
+                "color": device_db_config.get("color"),
+                "model": device_db_config.get("model", "Accessory/Tag"),
+                "icon": device_db_config.get("icon", "tag"),
+                "keys": current_keys_for_device
+            })
+            processed_device_ids.add(device_id)
+
+        # Process .keys files
+        for keys_file in user_data_dir.glob("*.keys"):
+            device_id = keys_file.stem
+            if not device_id or device_id == creds_stem or device_id in processed_device_ids:
+                continue
+
+            device_db_config = devices_config_db.get(device_id)
+            if not device_db_config:
+                log.warning(f"User '{user_id}': Device '{device_id}' from .keys file not found in DB config. Skipping for Android API.")
+                continue
+
+            current_keys_for_device = []
+            try:
+                private_keys_b64 = UserDataService._load_private_keys_from_keys_file(keys_file)
+                for key_b64_string in private_keys_b64:
+                    key_pair = KeyPair.from_b64(key_b64_string)
+                    adv_key_bytes = key_pair.adv_key_bytes
+                    adv_key_b64_urlsafe = base64.urlsafe_b64encode(adv_key_bytes).decode("ascii").rstrip("=")
+                    current_keys_for_device.append({
+                        "adv_key_b64": adv_key_b64_urlsafe,
+                        "key_type": "STATIC_KEYS_FILE",
+                        "potential_mac": get_potential_mac_from_public_key(adv_key_bytes)
+                    })
+            except Exception as e:
+                log.warning(f"User '{user_id}': Error processing .keys file {keys_file.name} for Android keys: {e}")
+
+            devices_output.append({
+                "id": device_id,
+                "name": device_db_config.get("name", device_id),
+                "label": device_db_config.get("label", "❓"),
+                "color": device_db_config.get("color"),
+                "model": device_db_config.get("model", "Accessory/Tag"),
+                "icon": device_db_config.get("icon", "tag"),
+                "keys": current_keys_for_device
+            })
+            processed_device_ids.add(device_id)
+
+        # Add devices from DB that might not have .plist or .keys files (e.g. shared devices, or future types)
+        for device_id, config_from_db in devices_config_db.items():
+            if device_id not in processed_device_ids:
+                devices_output.append({
+                    "id": device_id,
+                    "name": config_from_db.get("name", device_id),
+                    "label": config_from_db.get("label", "❓"),
+                    "color": config_from_db.get("color"),
+                    "model": config_from_db.get("model", "Accessory/Tag"),
+                    "icon": config_from_db.get("icon", "tag"),
+                    "keys": [] # No keys from files for these
+                })
+
+        log.info(f"User '{user_id}': Providing {len(devices_output)} devices for Android API.")
+        return jsonify({"devices": devices_output})
+
+    except Exception as e:
+        log.exception(f"Error fetching Android devices for user '{user_id}'")
+        return jsonify({"error": "Server error fetching devices."}), 500
+
+
+@bp.route("/android/scan_result", methods=["POST"])
+@login_required
+def post_android_scan_result():
+    from app import db # Required for db.session.commit()
+
+    user_id = current_user.id
+    data = request.get_json()
+    log.info(f"API POST /android/scan_result from '{user_id}'. Data: {data}")
+
+    if not data or "device_id" not in data or "timestamp" not in data:
+        return jsonify({"error": "Missing device_id or timestamp"}), 400
+
+    device_id = data.get("device_id")
+    timestamp_str = data.get("timestamp")
+    battery_level = data.get("battery_level") # Optional
+
+    try:
+        # Validate timestamp
+        try:
+            # Assuming timestamp is ISO 8601 format from Android
+            scan_timestamp = datetime.fromisoformat(timestamp_str)
+            # Ensure it's timezone-aware, defaulting to UTC if not specified
+            if scan_timestamp.tzinfo is None:
+                scan_timestamp = scan_timestamp.replace(tzinfo=timezone.utc)
+        except ValueError:
+            log.warning(f"User '{user_id}', Device '{device_id}': Invalid timestamp format '{timestamp_str}'")
+            return jsonify({"error": "Invalid timestamp format. Use ISO 8601."}), 400
+
+        device = Device.query.filter_by(id=device_id, user_username=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        device.last_seen_by_android = scan_timestamp
+        if battery_level is not None:
+            try:
+                device.android_battery_level = int(battery_level)
+            except ValueError:
+                log.warning(f"User '{user_id}', Device '{device_id}': Invalid battery_level format '{battery_level}'")
+                # Don't fail the whole request, just skip battery update
+
+        db.session.commit()
+        log.info(f"User '{user_id}', Device '{device_id}': Updated scan_result successfully.")
+        return jsonify({"message": "Scan result processed"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.exception(f"Error processing Android scan result for user '{user_id}', device '{device_id}'")
+        return jsonify({"error": "Server error processing scan result."}), 500
+
+
+@bp.route("/android/device_status", methods=["POST"])
+@login_required
+def post_android_device_status():
+    from app import db # Required for db.session.commit()
+
+    user_id = current_user.id
+    data = request.get_json()
+    log.info(f"API POST /android/device_status from '{user_id}'. Data: {data}")
+
+    if not data or "device_id" not in data or "status" not in data:
+        return jsonify({"error": "Missing device_id or status"}), 400
+
+    device_id = data.get("device_id")
+    new_status = data.get("status")
+
+    # Basic validation for status (e.g., "nearby", "lost", "unknown")
+    allowed_statuses = ["nearby", "lost", "unknown"]
+    if new_status not in allowed_statuses:
+        return jsonify({"error": f"Invalid status. Allowed values: {', '.join(allowed_statuses)}"}), 400
+
+    try:
+        device = Device.query.filter_by(id=device_id, user_username=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        device.android_device_status = new_status
+        # Potentially update last_seen_by_android as well if status implies presence
+        device.last_seen_by_android = datetime.now(timezone.utc)
+
+        db.session.commit()
+        log.info(f"User '{user_id}', Device '{device_id}': Updated android_device_status to '{new_status}'.")
+        return jsonify({"message": "Device status updated"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.exception(f"Error processing Android device status for user '{user_id}', device '{device_id}'")
+        return jsonify({"error": "Server error processing device status."}), 500
 
 
 # --- /devices Route (Keep as is) ---

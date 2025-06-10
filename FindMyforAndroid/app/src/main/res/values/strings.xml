@@ -61,4 +61,12 @@
     <string name="time_hours_ago">%1$dh ago</string>
     <!-- <<< END ADDED STRINGS FOR ADAPTER >>> -->
 
+    <!-- Notification Channel for Missing Devices -->
+    <string name="notification_channel_missing_device_name">Missing Device Alerts</string>
+    <string name="notification_channel_missing_device_description">Notifications for when a tracked device has not been seen for a while.</string>
+
+    <!-- Missing Device Notification Content -->
+    <string name="notification_missing_device_title_template">Device Potentially Missing: %1$s</string>
+    <string name="notification_missing_device_text_template">%1$s has not been detected nearby for a while. Check its last known status.</string>
+
 </resources>

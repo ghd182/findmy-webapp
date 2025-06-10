@@ -594,6 +594,39 @@ class UserDataService:
                 exc_info=True,
             )
 
+    @staticmethod
+    def _load_private_keys_from_keys_file(keys_file_path: Path) -> List[str]:
+        private_keys = []
+        if not keys_file_path.exists():
+            return []
+        try:
+            with keys_file_path.open("r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split(":", 1)
+                    if (
+                        len(parts) == 2
+                        and parts[0].strip().lower() == "private key"
+                    ):
+                        key_data = parts[1].strip()
+                        try:
+                            # Basic validation for plausible base64 key data
+                            if len(key_data) > 20 and len(key_data) % 4 == 0: # Check length and padding
+                                base64.b64decode(key_data, validate=True) # Validate encoding
+                                private_keys.append(key_data)
+                            else:
+                                log.warning(
+                                    f"Skipping potential invalid key data in {keys_file_path.name} (L{line_num}): Length or padding issue."
+                                )
+                        except Exception as decode_err:
+                            log.warning(
+                                f"Skipping invalid base64 data in {keys_file_path.name} (L{line_num}): {decode_err}"
+                            )
+        except Exception as e:
+            log.error(f"Error reading keys file {keys_file_path.name}: {e}", exc_info=True)
+        return private_keys
     
     def save_devices_config(self, user_id: str, config_data: Dict[str, Dict[str, Any]]):
         log.info(

@@ -22,4 +22,7 @@
     <color name="battery_normal_color">#FF4CAF50</color> <!-- Green (for high/full) -->
     <color name="battery_unknown_color">#FF9E9E9E</color> <!-- Grey (for unknown) -->
     <!-- <<< END ADDED BATTERY COLORS >>> -->
+
+    <!-- Launcher Icon Background Color -->
+    <color name="ic_launcher_background">#FF37474F</color> <!-- Blue Grey 700 -->
 </resources>
