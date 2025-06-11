@@ -69,4 +69,26 @@
     <string name="notification_missing_device_title_template">Device Potentially Missing: %1$s</string>
     <string name="notification_missing_device_text_template">%1$s has not been detected nearby for a while. Check its last known status.</string>
 
+    <!-- Notification Channel for Geofence Events -->
+    <string name="notification_channel_geofence_event_name">Geofence Alerts</string>
+    <string name="notification_channel_geofence_event_description">Notifications for when a device enters or exits a defined geofence.</string>
+
+    <!-- Geofence Event Notification Content -->
+    <string name="notification_geofence_event_title_template">%1$s %2$s %3$s</string> <!-- e.g., "DeviceName entered Home" -->
+    <string name="notification_geofence_event_text_template">Device \'%1$s\' has %2$s the geofence \'%3$s\'.</string>
+    <string name="geofence_event_entered">entered</string>
+    <string name="geofence_event_exited">exited</string>
+
+    <!-- Notification Channel for Battery Alerts -->
+    <string name="notification_channel_battery_alerts_name">Battery Alerts</string>
+    <string name="notification_channel_battery_alerts_description">Notifications for low battery levels on tracked devices.</string>
+
+    <!-- Low Battery Notification Content -->
+    <string name="notification_low_battery_title_template">Low Battery: %1$s</string>
+    <string name="notification_low_battery_text_template">%1$s battery is at %2$s. Consider charging soon.</string>
+
+    <!-- Prolonged Absence Notification Content -->
+    <string name="notification_prolonged_absence_title_template">Device Unseen: %1$s</string>
+    <string name="notification_prolonged_absence_text_template">%1$s has not been detected for a prolonged period. Please check its status.</string>
+
 </resources>

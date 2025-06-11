@@ -426,36 +426,50 @@ class UserDataService:
                 device_id,
                 device_obj,
             ) in devices_in_db.items():
-                linked_geofences_data = []
-                try:
-                    link_details_query = db.select(
+                # Optimized geofence link loading starts here
+                # This part is moved outside the loop:
+                # 1. Get all device IDs for the user
+                user_device_ids = [dev.id for dev in devices_in_db.values()]
+                links_by_device_id = {}
+                if user_device_ids:
+                    # 2. Fetch all links for these devices in one go
+                    all_links_query = db.select(
+                        device_geofence_link.c.device_id, # select device_id to map back
                         device_geofence_link.c.geofence_id,
                         device_geofence_link.c.notify_entry,
                         device_geofence_link.c.notify_exit,
-                    ).where(device_geofence_link.c.device_id == device_obj.id)
-                    link_details_result = db.session.execute(link_details_query).all()
+                    ).where(device_geofence_link.c.device_id.in_(user_device_ids))
+                    all_links_results = db.session.execute(all_links_query).all()
+                    # 3. Then create a dictionary to map device_id to its links for faster lookup
+                    for link_row in all_links_results:
+                        links_by_device_id.setdefault(link_row.device_id, []).append(link_row)
+                # Optimized geofence link loading ends here
 
-                    for gf_id_from_link, entry_flag, exit_flag in link_details_result:
-                        gf_definition = all_user_geofences_map.get(gf_id_from_link)
+                linked_geofences_data = []
+                try:
+                    # Use the pre-fetched links
+                    current_device_links = links_by_device_id.get(device_obj.id, [])
+                    for link_detail in current_device_links:
+                        gf_definition = all_user_geofences_map.get(link_detail.geofence_id)
                         if gf_definition:
                             linked_geofences_data.append(
                                 {
-                                    "id": gf_id_from_link,
+                                    "id": link_detail.geofence_id,
                                     "name": gf_definition.name,
                                     "lat": gf_definition.latitude,
                                     "lng": gf_definition.longitude,
                                     "radius": gf_definition.radius,
-                                    "notify_on_entry": bool(entry_flag),
-                                    "notify_on_exit": bool(exit_flag),
+                                    "notify_on_entry": bool(link_detail.notify_entry),
+                                    "notify_on_exit": bool(link_detail.notify_exit),
                                 }
                             )
                         else:
                             log.warning(
-                                f"[UDS LoadDevCfg] Geofence definition for link GF {gf_id_from_link} (Device {device_obj.id}) not found."
+                                f"[UDS LoadDevCfg] Geofence definition for link GF {link_detail.geofence_id} (Device {device_obj.id}) not found."
                             )
                 except Exception as e:
                     log.error(
-                        f"[UDS LoadDevCfg] Error loading linked geofences for device {device_obj.id}: {e}",
+                        f"[UDS LoadDevCfg] Error processing pre-loaded linked geofences for device {device_obj.id}: {e}",
                         exc_info=True,
                     )
 
@@ -504,6 +518,10 @@ class UserDataService:
                     "linked_geofences": linked_geofences_data,
                     "last_battery_status": device_obj.last_battery_status,
                     "last_seen_local": retrieved_ts_iso,
+                    # Add Android specific fields
+                    "android_battery_level": device_obj.android_battery_level,
+                    "android_device_status": device_obj.android_device_status,
+                    "last_seen_by_android": device_obj.last_seen_by_android.isoformat() if device_obj.last_seen_by_android else None,
                 }
         except Exception as e:
             log.error(

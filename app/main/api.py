@@ -90,6 +90,20 @@ log = logging.getLogger(__name__)
 
 bp = Blueprint("api", __name__)
 
+@bp.app_errorhandler(HTTPException)
+def handle_http_exception(e):
+    """Return JSON instead of HTML for HTTP errors handled by abort."""
+    response = e.get_response()
+    # Replace the body with JSON
+    response.data = json.dumps({
+        "code": e.code,
+        "name": e.name,
+        "error": e.description, # Use 'error' for consistency with other manual error responses
+    })
+    response.content_type = "application/json"
+    log.error(f"HTTP Exception: {e.code} {e.name} - {e.description}", exc_info=e if e.code == 500 else False)
+    return response
+
 # --- File Upload API ---
 ALLOWED_EXTENSIONS = {"plist", "keys"}
 ALLOWED_CONFIG_EXTENSIONS = {"json"}
@@ -427,7 +441,14 @@ def get_android_devices():
                 "color": device_db_config.get("color"),
                 "model": device_db_config.get("model", "Accessory/Tag"),
                 "icon": device_db_config.get("icon", "tag"),
-                "keys": current_keys_for_device
+                "last_battery_status": device_db_config.get("last_battery_status"),
+                "android_battery_level": device_db_config.get("android_battery_level"),
+                "android_device_status": device_db_config.get("android_device_status"),
+                "last_seen_by_android": device_db_config.get("last_seen_by_android"),
+                "last_seen_local": device_db_config.get("last_seen_local"),
+                "linked_geofences": device_db_config.get("linked_geofences", []),
+                "keys": current_keys_for_device,
+                "current_battery_info": _get_consolidated_battery_info(device_db_config)
             })
             processed_device_ids.add(device_id)
 
@@ -464,13 +485,20 @@ def get_android_devices():
                 "color": device_db_config.get("color"),
                 "model": device_db_config.get("model", "Accessory/Tag"),
                 "icon": device_db_config.get("icon", "tag"),
-                "keys": current_keys_for_device
+                "last_battery_status": device_db_config.get("last_battery_status"),
+                "android_battery_level": device_db_config.get("android_battery_level"),
+                "android_device_status": device_db_config.get("android_device_status"),
+                "last_seen_by_android": device_db_config.get("last_seen_by_android"),
+                "last_seen_local": device_db_config.get("last_seen_local"),
+                "linked_geofences": device_db_config.get("linked_geofences", []),
+                "keys": current_keys_for_device,
+                "current_battery_info": _get_consolidated_battery_info(device_db_config)
             })
             processed_device_ids.add(device_id)
 
-        # Add devices from DB that might not have .plist or .keys files (e.g. shared devices, or future types)
+        # Add devices from DB that might not have .plist or .keys files
         for device_id, config_from_db in devices_config_db.items():
-            if device_id not in processed_device_ids:
+            if device_id not in processed_device_ids: # Ensure this device hasn't been processed via plist/keys
                 devices_output.append({
                     "id": device_id,
                     "name": config_from_db.get("name", device_id),
@@ -478,7 +506,14 @@ def get_android_devices():
                     "color": config_from_db.get("color"),
                     "model": config_from_db.get("model", "Accessory/Tag"),
                     "icon": config_from_db.get("icon", "tag"),
-                    "keys": [] # No keys from files for these
+                    "last_battery_status": config_from_db.get("last_battery_status"),
+                    "android_battery_level": config_from_db.get("android_battery_level"),
+                    "android_device_status": config_from_db.get("android_device_status"),
+                    "last_seen_by_android": config_from_db.get("last_seen_by_android"),
+                    "last_seen_local": config_from_db.get("last_seen_local"),
+                    "linked_geofences": config_from_db.get("linked_geofences", []),
+                    "keys": [], # No keys from files for these
+                    "current_battery_info": _get_consolidated_battery_info(config_from_db)
                 })
 
         log.info(f"User '{user_id}': Providing {len(devices_output)} devices for Android API.")
@@ -488,6 +523,58 @@ def get_android_devices():
         log.exception(f"Error fetching Android devices for user '{user_id}'")
         return jsonify({"error": "Server error fetching devices."}), 500
 
+def _get_consolidated_battery_info(device_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Consolidates battery information from Find My network and Android app.
+    Prefers Android app's battery level if available.
+    """
+    android_battery_level = device_config.get("android_battery_level")
+    findmy_battery_status = device_config.get("last_battery_status") # e.g., "Low", "Medium", "High", "Full"
+
+    # Timestamps could be used for recency logic in the future
+    # last_seen_android_iso = device_config.get("last_seen_by_android")
+    # last_seen_local_iso = device_config.get("last_seen_local") # FindMy network last seen
+
+    battery_info = {"level_percentage": None, "status_text": None, "source": "unknown"}
+
+    if android_battery_level is not None:
+        battery_info["level_percentage"] = android_battery_level
+        battery_info["source"] = "android_app"
+        if android_battery_level <= 5: # Adjusted thresholds slightly
+            battery_info["status_text"] = "Very Low"
+        elif android_battery_level <= 20:
+            battery_info["status_text"] = "Low"
+        elif android_battery_level <= 80: # Broader medium range
+            battery_info["status_text"] = "Medium"
+        elif android_battery_level < 100:
+            battery_info["status_text"] = "High"
+        elif android_battery_level == 100:
+            battery_info["status_text"] = "Full"
+        else: # Should not happen if battery_level is capped at 100
+            battery_info["status_text"] = "Unknown"
+
+
+    elif findmy_battery_status: # If no Android level, use FindMy status
+        battery_info["status_text"] = findmy_battery_status
+        battery_info["source"] = "findmy_network"
+        # Attempt to map FindMy status to a pseudo-percentage
+        if findmy_battery_status == "Very Low":
+            battery_info["level_percentage"] = 5
+        elif findmy_battery_status == "Low":
+            battery_info["level_percentage"] = 20
+        elif findmy_battery_status == "Medium":
+            battery_info["level_percentage"] = 50
+        elif findmy_battery_status == "High":
+            battery_info["level_percentage"] = 80
+        elif findmy_battery_status == "Full":
+            battery_info["level_percentage"] = 100
+
+    # If no data from either source, status_text remains None or "unknown" if preferred.
+    if battery_info.get("level_percentage") is None and battery_info.get("status_text") is None:
+        battery_info["status_text"] = "Unknown"
+
+
+    return battery_info
 
 @bp.route("/android/scan_result", methods=["POST"])
 @login_required

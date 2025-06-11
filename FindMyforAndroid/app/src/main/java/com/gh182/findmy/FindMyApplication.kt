@@ -23,6 +23,8 @@ class FindMyApplication : Application() {
         const val TAG = "FindMyApplication"
         private const val BLUETOOTH_SCAN_WORK_TAG = "bluetooth_scan_work"
         const val MISSING_DEVICE_CHANNEL_ID = "missing_device_channel"
+        const val GEOFENCE_EVENT_CHANNEL_ID = "geofence_event_channel"
+        const val BATTERY_ALERTS_CHANNEL_ID = "battery_alerts_channel" // Added for battery alerts
     }
 
     override fun onCreate() {
@@ -48,28 +50,42 @@ class FindMyApplication : Application() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // Missing Device Channel
             val missingDeviceChannelName = getString(R.string.notification_channel_missing_device_name) // Assuming you'll add this to strings.xml
-            val missingDeviceChannelDescription = getString(R.string.notification_channel_missing_device_description) // Assuming you'll add this
+            val missingDeviceChannelDescription = getString(R.string.notification_channel_missing_device_description)
             val missingDeviceImportance = NotificationManager.IMPORTANCE_HIGH
             val missingDeviceChannel = NotificationChannel(MISSING_DEVICE_CHANNEL_ID, missingDeviceChannelName, missingDeviceImportance).apply {
                 description = missingDeviceChannelDescription
-                // Configure other channel properties if needed (e.g., lights, vibration)
                 enableLights(true)
                 lightColor = android.graphics.Color.RED
                 enableVibration(true)
             }
 
-            // General Notifications Channel (example, if you have others)
-            // val generalChannelName = getString(R.string.channel_name_general)
-            // val generalChannelDescription = getString(R.string.channel_description_general)
-            // val generalImportance = NotificationManager.IMPORTANCE_DEFAULT
-            // val generalChannel = NotificationChannel(GENERAL_CHANNEL_ID, generalChannelName, generalImportance).apply {
-            //    description = generalChannelDescription
-            // }
+            // Geofence Event Channel
+            val geofenceChannelName = getString(R.string.notification_channel_geofence_event_name)
+            val geofenceChannelDescription = getString(R.string.notification_channel_geofence_event_description)
+            val geofenceImportance = NotificationManager.IMPORTANCE_HIGH
+            val geofenceChannel = NotificationChannel(GEOFENCE_EVENT_CHANNEL_ID, geofenceChannelName, geofenceImportance).apply {
+                description = geofenceChannelDescription
+                enableLights(true)
+                lightColor = android.graphics.Color.BLUE
+                enableVibration(true)
+            }
+
+            // Battery Alerts Channel
+            val batteryChannelName = getString(R.string.notification_channel_battery_alerts_name)
+            val batteryChannelDescription = getString(R.string.notification_channel_battery_alerts_description)
+            val batteryImportance = NotificationManager.IMPORTANCE_DEFAULT // Default importance for battery
+            val batteryChannel = NotificationChannel(BATTERY_ALERTS_CHANNEL_ID, batteryChannelName, batteryImportance).apply {
+                description = batteryChannelDescription
+                // enableLights(true) // Optional: light for battery
+                // lightColor = android.graphics.Color.YELLOW // Optional: yellow for battery
+                enableVibration(false) // Optional: maybe no vibration for battery unless critical
+            }
 
             val notificationManager: NotificationManager =
                 getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(missingDeviceChannel)
-            // notificationManager.createNotificationChannel(generalChannel) // If you add more channels
+            notificationManager.createNotificationChannel(geofenceChannel)
+            notificationManager.createNotificationChannel(batteryChannel) // Create battery channel
 
             Log.i(TAG, "Notification channels created.")
         }
