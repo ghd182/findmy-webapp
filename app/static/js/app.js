@@ -675,12 +675,14 @@ window.AppActions = {
             AppUI.renderGlobalGeofences();
             AppUI.renderDeviceGeofenceLinks();
             AppUI.renderDevicePageSharesList(); // <<< RENDER SHARES on Devices page
-            AppUI.renderActiveSharesList();     // <<< Also render on Settings page
+            // <<< START MODIFICATION: Remove redundant call >>>
+            // AppUI.renderActiveSharesList();     // <<< This is called when navigating to settings, remove from initial load
+            // <<< END MODIFICATION >>>
 
             // Update map AFTER state is set
             if (window.AppMap && AppState.mapReady) {
                 AppMap.redrawGeofenceLayer();
-                AppMap.updateMapView(); // Ensure map reflects device visibility etc.
+                // AppMap.updateMapView(); // Ensure map reflects device visibility etc.
             }
 
         } catch (error) { // Catch errors from Promise.all or subsequent processing
@@ -1657,9 +1659,23 @@ async function initializeApp() {
             if (noItemsMsg) noItemsMsg.remove();
             const newLinkItem = document.createElement('div');
             newLinkItem.className = 'geofence-link-item'; newLinkItem.dataset.geofenceId = geofenceIdToAdd;
-            newLinkItem.innerHTML = `<div class="geofence-link-info"><div class="geofence-link-name">${geofenceToAdd.name}</div><div class="geofence-link-details">Radius: ${geofenceToAdd.radius}m</div></div><div class="geofence-link-toggles"><label class="geofence-link-toggle-label" title="Notify on Entry"><input type="checkbox" data-notify-type="entry"> Entry</label><label class="geofence-link-toggle-label" title="Notify on Exit"><input type="checkbox" data-notify-type="exit"> Exit</label><span class="material-icons geofence-remove" title="Unlink Geofence" data-geofence-id="${geofenceIdToAdd}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--m3-sys-color-error);" tabindex="0" role="button" aria-label="Unlink ${geofenceToAdd.name}">link_off</span></div>`; list.appendChild(newLinkItem); cardElement.querySelector('.save-links-button').style.display = 'inline-flex'; AppUI.renderAddGeofenceDropdown(cardElement, deviceId);
+            newLinkItem.innerHTML = `<div class="geofence-link-info"><div class="geofence-link-name">${geofenceToAdd.name}</div><div class="geofence-link-details">Radius: ${geofenceToAdd.radius}m</div></div><div class="geofence-link-toggles"><label class="geofence-link-toggle-label" title="Notify on Entry"><input type="checkbox" data-notify-type="entry"> Entry</label><label class="geofence-link-toggle-label" title="Notify on Exit"><input type="checkbox" data-notify-type="exit"> Exit</label><span class="material-icons geofence-remove" title="Unlink Geofence" data-geofence-id="${geofenceIdToAdd}" style="margin-left: 8px; cursor: pointer; opacity: 0.6; color: var(--error-color);" tabindex="0" role="button" aria-label="Unlink ${geofenceToAdd.name}">link_off</span></div>`; list.appendChild(newLinkItem); cardElement.querySelector('.save-links-button').style.display = 'inline-flex'; AppUI.renderAddGeofenceDropdown(cardElement, deviceId);
         } else if (saveBtn) { e.stopPropagation(); AppActions.handleSaveDeviceGeofenceLinks(deviceId, cardElement); }
     });
+    const deleteAccountButton = document.getElementById('delete-account-button');
+    if (deleteAccountButton) {
+        const newDelButton = deleteAccountButton.cloneNode(true);
+        newDelButton.addEventListener('click', () => {
+            AppUI.showConfirmationDialog(
+                "Delete Account?",
+                "<strong>This action is permanent...</strong>", // Keep confirmation message
+                () => AppActions.handleDeleteAccount(), // Call action handler
+                () => console.log("Account deletion cancelled.")
+            );
+        });
+        deleteAccountButton.parentNode.replaceChild(newDelButton, deleteAccountButton);
+    }
+
     deviceGeofenceLinksList?.addEventListener('change', (e) => {
         if (e.target.matches('.geofence-link-toggles input[type="checkbox"]')) {
             const cardElement = e.target.closest('.device-geofence-card');
@@ -1669,8 +1685,8 @@ async function initializeApp() {
     const settingsPage = document.getElementById('settings-page');
     settingsPage?.addEventListener('change', (e) => {
         if (e.target.id === 'location-history-toggle') { AppState.locationHistoryEnabled = e.target.checked; AppState.saveLocationHistoryEnabled(); console.log("Location history enabled:", AppState.locationHistoryEnabled); if (!AppState.locationHistoryEnabled) { AppState.clearLocationHistory(); } if (document.getElementById('history-page')?.style.display === 'block') { AppUI.renderLocationHistory(); } }
-        else if (e.target.id === 'show-all-default-toggle') { AppState.isShowingAllDevices = e.target.checked; AppState.saveMapToggles(); if (document.getElementById('index-page')?.style.display !== 'none' && window.AppUI) { AppUI.updateShowAllButtonState(); AppMap.updateMapView(); } }
-        else if (e.target.id === 'show-history-default-toggle') { AppState.showDeviceHistory = e.target.checked; AppState.saveMapToggles(); if (document.getElementById('index-page')?.style.display !== 'none' && window.AppUI) { AppUI.updateShowHistoryButtonState(); AppMap.updateHistoryLayersVisibility(); } }
+        else if (e.target.id === 'show-all-default-toggle') { AppState.isShowingAllDevices = e.target.checked; AppState.saveMapToggles(); if (document.getElementById('index-page').style.display !== 'none' && window.AppUI) { AppUI.updateShowAllButtonState(); AppMap.updateMapView(); } }
+        else if (e.target.id === 'show-history-default-toggle') { AppState.showDeviceHistory = e.target.checked; AppState.saveMapToggles(); if (document.getElementById('index-page').style.display !== 'none' && window.AppUI) { AppUI.updateShowHistoryButtonState(); AppMap.updateHistoryLayersVisibility(); } }
     });
     document.getElementById('enable-notifications-button')?.addEventListener('click', () => AppNotifications.handleNotificationPermission());
     document.getElementById('unsubscribe-button')?.addEventListener('click', () => AppNotifications.unsubscribeUser());
@@ -1730,7 +1746,15 @@ async function initializeApp() {
     document.getElementById('mark-all-read-button')?.addEventListener('click', () => AppUI.handleMarkAllRead());
     document.getElementById('clear-all-history-button')?.addEventListener('click', () => AppUI.handleClearAllHistory());
 
+    // <<< START MODIFIED SECTION >>>
+    // Hide the splash screen now that all initialization is complete.
+    AppUI.hideSplashScreen();
+    const errorOverlay = document.getElementById('full-screen-error-overlay');
+    if (errorOverlay) {
+        errorOverlay.style.display = 'none';
+    }
     console.log("App initialization sequence complete.");
+    // <<< END MODIFIED SECTION >>>
 }
 
 // --- Main Initialization Trigger ---

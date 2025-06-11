@@ -1,4 +1,4 @@
-// File: app/build.gradle.kts
+// File: FindMyforAndroid/app/build.gradle.kts
 // Language: Kotlin Script (build.gradle)
 
 plugins {
@@ -78,6 +78,7 @@ dependencies {
     implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
+    implementation("com.squareup.okhttp3:okhttp-urlconnection") // For JavaNetCookieJar
 
     // --- Firebase ---
     implementation(platform("com.google.firebase:firebase-bom:33.13.0"))

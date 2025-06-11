@@ -118,17 +118,24 @@
 </head>
 
 <body class="app-loading"> <!-- Start with loading class -->
+
+    <!-- <<< START MODIFIED SECTION >>> -->
+    <!-- Splash Screen for initial loading -->
+    <div id="splash-screen">
+        <img src="{{ url_for('static', filename='icons/icon.svg') }}" alt="Loading Logo" id="splash-icon">
+    </div>
+
     <!-- Full Screen Error Overlay -->
-    <div id="full-screen-error-overlay"
-        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--m3-sys-color-background, #FFFFFF); color: var(--m3-sys-color-on-background, #000000); z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; box-sizing: border-box;">
+    <div id="full-screen-error-overlay" style="display: none;">
         <div id="full-screen-error-icon" style="font-size: 48px; margin-bottom: 20px;">
             <span class="material-icons" style="font-size: inherit;">error_outline</span>
         </div>
         <div id="full-screen-error-message" style="font-size: 1.2em;">
-            <!-- Error title and message will be inserted here by ui.js -->
-            <!-- Example: <h2>Network Error</h2><p>No internet connection.</p><button>Reload</button> -->
+            <!-- Error content is inserted here by JS -->
         </div>
     </div>
+    <!-- <<< END MODIFIED SECTION >>> -->
+
     <!-- Drawer Overlay & Menu -->
     <div class="drawer-overlay" id="drawer-overlay"></div>
     <aside class="drawer" id="drawer">

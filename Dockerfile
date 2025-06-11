@@ -28,14 +28,16 @@ ENV PORT=5000
 # Set the working directory in the container
 WORKDIR /app
 
+# <<< START MODIFIED SECTION >>>
 # Install system dependencies needed by Python packages on Alpine Linux
 # build-base: For compiling C extensions (like cryptography)
 # libffi-dev: Required by cffi, often a dependency of crypto libs
-# Add other Alpine packages here if needed by your Python requirements
+# sqlite: Command-line tool to safely fix DB migration history
 RUN apk add --no-cache \
     build-base \
-    libffi-dev
-    # Example: bluez-dev (if directly interacting with host Bluetooth, unlikely here)
+    libffi-dev \
+    sqlite
+# <<< END MODIFIED SECTION >>>
 
 # Copy requirements first to leverage Docker layer cache
 COPY requirements.txt /app/requirements.txt
@@ -63,16 +65,16 @@ COPY test_import.py /app/test_import.py
 # Optional: Set permissions if running as a non-root user later.
 RUN mkdir -p /app/data
 
+# Copy the entrypoint script and make it executable
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Expose the port the app runs on (defined by PORT env var)
 EXPOSE ${PORT}
 
-# --- START REVISED CMD ---
-# Stamp the database to the latest migration version ('head') to resolve
-# potential inconsistencies where tables exist but aren't recorded by Alembic.
-# Then run the application using Waitress WSGI server.
-CMD export FLASK_APP=run.py && \
-    echo "Stamping database to head (latest revision)..." && \
-    flask db stamp head -d /app/migrations && \
-    echo "Database stamped. Starting Waitress..." && \
-    waitress-serve --host=0.0.0.0 --port=${PORT} --threads=${WAITRESS_THREADS} run:app
-# --- END REVISED CMD ---
+# Use entrypoint.sh to handle database migrations robustly on startup.
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# The default command to execute after the entrypoint runs.
+# This will be passed as arguments to entrypoint.sh.
+CMD ["waitress-serve", "--host=0.0.0.0", "--port=5000", "--threads=4", "run:app"]

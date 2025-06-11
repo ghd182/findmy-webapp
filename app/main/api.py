@@ -15,6 +15,8 @@ import json
 import base64
 import secrets
 
+from werkzeug.exceptions import HTTPException
+
 from typing import List, Optional, Dict, Any, Tuple, Set
 from datetime import datetime, timezone, timedelta
 from app.scheduler.tasks import run_fetch_for_user_task
@@ -211,9 +213,9 @@ def get_current_advertisement_keys():
                             .rstrip("=")
                         )
                         potential_mac = get_potential_mac_from_public_key(adv_key_bytes)
-                        log.debug(
-                            f"[API Keys] ---- Device: {device_id} | Type: STATIC_KEYS_FILE | KeyB64: {adv_key_b64_urlsafe} | MAC: {potential_mac}"
-                        )
+                        # log.debug(
+                        #     f"[API Keys] ---- Device: {device_id} | Type: STATIC_KEYS_FILE | KeyB64: {adv_key_b64_urlsafe} | MAC: {potential_mac}"
+                        # )
                         expected_keys_and_macs.append(
                             {
                                 "device_id": device_id,

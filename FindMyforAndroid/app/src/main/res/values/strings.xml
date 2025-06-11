@@ -1,5 +1,4 @@
 <!-- File: app/src/main/res/values/strings.xml -->
-<!-- Language: XML -->
 <resources>
     <string name="app_name">FindMy Android</string>
     <string name="title_webapp">Web App</string>
@@ -45,7 +44,7 @@
     <string name="scanner_info_link_account">Please link your account to view and scan for devices.</string>
     <string name="scanner_info_no_devices_configured">No devices are configured for your account yet. Link your account to load them.</string>
     <string name="scanner_info_scan_to_find">Press \'Scan Now\' to find your devices or enable background scanning.</string>
-    <string name="scanner_status_loading_devices">Loading device configuration...</string>
+    <string name="scanner_status_loading_devices">Loading device configuration…</string>
     <string name="scanner_info_link_account_status">Status: Not Linked.</string>
     <string name="scanner_info_no_devices_configured_status">Status: Linked. No devices configured.</string>
     <string name="scanner_status_linked_ready">Status: Linked. Ready.</string>
@@ -90,5 +89,4 @@
     <!-- Prolonged Absence Notification Content -->
     <string name="notification_prolonged_absence_title_template">Device Unseen: %1$s</string>
     <string name="notification_prolonged_absence_text_template">%1$s has not been detected for a prolonged period. Please check its status.</string>
-
 </resources>

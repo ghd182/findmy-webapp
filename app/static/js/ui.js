@@ -884,6 +884,20 @@ window.AppUI = {
         }
     }, // End handleEditShareSubmit
 
+    // <<< START ADDED FUNCTION >>>
+    hideSplashScreen: function () {
+        const splashScreen = document.getElementById('splash-screen');
+        if (splashScreen) {
+            splashScreen.classList.add('hidden');
+            console.log("[UI] Splash screen hidden.");
+            // Optional: remove from DOM after transition for performance
+            // setTimeout(() => {
+            //     splashScreen.remove();
+            // }, 500); // Should match transition duration
+        }
+    },
+    // <<< END ADDED FUNCTION >>>
+
 
     // --- NEW: Trigger Test Notification ---
     triggerTestNotification: async function (deviceId, type) {
@@ -1328,16 +1342,14 @@ window.AppUI = {
     },
 
 
+    // <<< START MODIFIED FUNCTION >>>
     updateRelativeTimes: function () {
         const timeElements = document.querySelectorAll('.relative-time[data-timestamp]');
         if (!timeElements || timeElements.length === 0) return;
 
-        // console.log(`[UI] Updating ${timeElements.length} relative time elements.`); // Can be noisy
-
         timeElements.forEach(el => {
             const timestampISO = el.dataset.timestamp;
             if (!timestampISO) {
-                // Maybe set to 'Never' or 'Unknown' if timestamp is missing/invalid initially
                 if (el.textContent !== 'Never') el.textContent = 'Never';
                 return;
             }
@@ -1345,9 +1357,18 @@ window.AppUI = {
             try {
                 const date = new Date(timestampISO);
                 if (!isNaN(date)) {
+                    // Re-calculate both absolute and relative time every update to ensure correctness.
                     const relativeStr = AppUtils.formatTimeRelative(date);
-                    if (el.textContent !== relativeStr) {
-                        el.textContent = relativeStr;
+                    const absoluteStr = AppUtils.formatTime(date);
+
+                    const newTextContent = `${absoluteStr} (${relativeStr})`;
+
+                    // Always update the title attribute with the full ISO string for debugging/hover
+                    el.title = timestampISO;
+
+                    // Only update the DOM if the text has actually changed.
+                    if (el.textContent !== newTextContent) {
+                        el.textContent = newTextContent;
                     }
                 } else {
                     if (el.textContent !== 'Invalid Time') el.textContent = 'Invalid Time';
@@ -1358,9 +1379,7 @@ window.AppUI = {
             }
         });
     },
-
-
-
+    // <<< END MODIFIED FUNCTION >>>
 
 
     scrollToSection: function (sectionId) {
@@ -1442,18 +1461,34 @@ window.AppUI = {
                 const visibilityToggleHtml = `<label class="toggle-switch device-visibility-toggle" style="margin-left: 16px;" title="Show/Hide on Map"><input type="checkbox" data-device-id="${device.id}" ${isCurrentlyVisible ? 'checked' : ''}><span class="toggle-slider"></span></label>`;
                 let displayStatus = displayInfo.status || 'Unknown Status'; if (displayInfo.lat == null && displayInfo.lng == null && displayInfo.status === 'Location Unknown') { displayStatus = 'Awaiting first location...'; } else { displayStatus = displayStatus.replace(/ - Batt:.*$/, ''); }
                 const shareIndicatorHtml = device.is_shared ? `<span class="material-icons share-indicator" title="Shared" style="font-size: 16px; vertical-align: middle; margin-left: 4px; opacity: 0.7; color: var(--m3-sys-color-secondary);">share</span>` : '';
-                const timestampISO = device.rawLocation?.timestamp || ''; const relativeTimeStr = timestampISO ? AppUtils.formatTimeRelative(new Date(timestampISO)) : 'Never'; const addressTitle = displayInfo.address || '';
+
+                // <<< START MODIFIED TIMESTAMP LOGIC >>>
+                const timestampISO = device.rawLocation?.timestamp || '';
+                let timeDisplayHtml = 'Never';
+                if (timestampISO) {
+                    try {
+                        const date = new Date(timestampISO);
+                        const relativeTimeStr = AppUtils.formatTimeRelative(date);
+                        const absoluteTimeStr = AppUtils.formatTime(date); // Get absolute time string
+                        // Combine them and add the full ISO string as a tooltip
+                        timeDisplayHtml = `<span class="relative-time" data-timestamp="${timestampISO}" title="${timestampISO}">${absoluteTimeStr} (${relativeTimeStr})</span>`;
+                    } catch (e) {
+                        timeDisplayHtml = 'Invalid Time';
+                    }
+                }
+                const addressTitle = displayInfo.address || '';
                 deviceElement.innerHTML = `
                    <div class="device-icon">${iconHtml}</div>
                    <div class="device-info">
                        <div class="device-name">${displayInfo.name}</div>
                        <div class="device-status" title="${addressTitle}">
-                           <span class="relative-time" data-timestamp="${timestampISO}">${relativeTimeStr}</span> ${batteryIndicator} ${shareIndicatorHtml}
+                           ${timeDisplayHtml} ${batteryIndicator} ${shareIndicatorHtml}
                        </div>
                        <div class="device-status" style="font-size: var(--body-small-size); opacity: 0.7;">${displayInfo.model || 'Accessory/Tag'}</div>
                    </div>
                    ${visibilityToggleHtml}
                    <span class="material-icons device-menu" data-device-index="${index}" tabindex="0" role="button" aria-label="Device options for ${displayInfo.name}">more_vert</span>`;
+                // <<< END MODIFIED TIMESTAMP LOGIC >>>
 
                 listElement.appendChild(deviceElement);
                 itemsRendered++;
